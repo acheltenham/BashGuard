@@ -1,589 +1,333 @@
 # BashGuard Product Requirements Document
 
-**Status:** Draft v0.2  
+**Status:** Draft v0.3  
 **Project:** BashGuard  
 **Last updated:** July 22, 2026
 
 ## Executive Summary
 
-BashGuard is an open-source, local-first security, governance, and observability companion for Pi.
+BashGuard is an open-source, local-first TypeScript extension for Pi that makes coding-agent execution understandable.
 
-Pi gives developers a flexible agent harness with significant execution freedom. That flexibility is useful, but it creates a gap: developers need a clear way to understand what Pi is doing, connect actions back to prompts and sessions, apply project-aware guardrails, and review the resulting impact.
+It connects prompts, tool requests, resolved shell commands, decisions, results, file changes, and Git checkpoints into one explainable timeline. It also adds narrow, human-friendly command safeguards where visibility alone is insufficient.
 
-BashGuard fills that gap by combining deep Pi integration with execution provenance, repository intelligence, explainable guardrails, session replay, and a local audit experience.
-
-The initial product will focus only on Pi. Support for other harnesses is explicitly outside the MVP.
+The MVP is deliberately small. It does not include a Rust daemon, cloud service, hosted dashboard, team controls, policy simulation, automatic recommendations, or support for other coding harnesses.
 
 ## Vision
 
-Build the trusted local companion for governing and understanding Pi agent execution.
+Build the developer flight recorder for Pi coding sessions.
 
-## Mission
+## Problem
 
-Help developers safely use Pi by making agent execution observable, explainable, and controllable within the context of a repository.
+Pi gives developers strong extension hooks and local session data, but developers still need a coherent way to answer:
 
-## Problem Statement
+- What exact command was executed?
+- Did a prefix, wrapper, alias, or project setting change it?
+- Which prompt and tool call caused the action?
+- Why was the action allowed, warned, blocked, or sent for approval?
+- Which files changed after the action?
+- What Git state existed before and after it?
+- Can the developer safely recover from a mistaken edit?
+- Where did a session begin to diverge from the intended task?
 
-Pi can read files, modify code, execute shell commands, call tools, and perform multi-step work with limited built-in governance.
+Pi's native session tree is valuable, but it is not a complete prompt-to-filesystem execution narrative. Shell history, approval dialogs, and Git logs each show only part of the story.
 
-Developers often lack a complete answer to questions such as:
+## Positioning
 
-- Which prompt caused this action?
-- Which Pi session executed it?
-- Which tool and command were involved?
-- Which repository and files were affected?
-- Which credentials or environment were available?
-- Why was the action allowed or denied?
-- What changed as a result?
+> BashGuard is the local flight recorder and explainable command guard for Pi.
 
-Traditional shell history, command blocklists, and approval prompts provide only fragments of this picture.
+BashGuard is not primarily an enterprise security platform. It is a developer experience for understanding, debugging, and safely reviewing AI coding sessions.
 
-BashGuard should provide the complete execution chain and use that context to guide decisions.
+## Primary User
 
-## Product Positioning
-
-BashGuard is not only a shell-command blocker.
-
-It is a local companion for Pi that provides:
-
-- execution visibility
-- session replay
-- repository-aware risk context
-- explainable guardrails
-- policy recommendations
-- auditable execution provenance
-
-Working positioning:
-
-> Govern Pi with context, not just commands.
-
-## Target Users
-
-### Pi Power Users
-
-Developers who use Pi for meaningful coding and automation work and want greater visibility without losing flexibility.
+A developer who uses Pi for meaningful coding work and wants to retain its flexibility without losing visibility or control.
 
 Success statement:
 
-> I can see exactly what Pi did and understand why.
-
-### Security-Minded Developers
-
-Developers who want boundaries around destructive commands, sensitive files, credentials, deployments, and external systems.
-
-Success statement:
-
-> I can use Pi with practical safeguards that match my project.
-
-### Open-Source Maintainers
-
-Maintainers who want contributors to use Pi consistently and safely inside a repository.
-
-Success statement:
-
-> The repository can carry understandable guardrails and agent instructions with it.
-
-### Security and Platform Engineers
-
-Future users who may need stronger audit and policy controls across multiple projects.
-
-These users inform the design but are not the primary MVP audience.
+> I can see exactly what Pi did, understand why, and recover when necessary.
 
 ## Product Goals
 
-### Primary Goals
+- Show the exact resolved command before risky execution.
+- Correlate prompts, tools, commands, results, and file changes.
+- Explain every warning, approval request, and block in plain language.
+- Produce a useful local session summary and timeline.
+- Correlate session events with Git state and checkpoints.
+- Work entirely as a Pi TypeScript extension for the MVP.
+- Preserve developer control over captured data.
 
-- Integrate deeply with Pi.
-- Capture complete Pi session activity.
-- Connect prompts, tool calls, commands, file changes, policies, decisions, and results.
-- Provide a local session replay and audit timeline.
-- Apply repository-aware guardrails to Bash execution.
-- Explain every allow, constrain, approval, and deny decision.
-- Observe user behaviour before recommending stricter enforcement.
-- Keep the core experience local and under the developer's control.
-
-### Secondary Goals
-
-- Make guardrails easy to read and update.
-- Use repository documentation and project boundaries as security context.
-- Provide a foundation for future Pi tool integrations beyond Bash.
-- Create an architecture that can evolve without forcing premature support for other harnesses.
-
-## Non-Goals for the MVP
+## MVP Non-Goals
 
 The MVP will not include:
 
-- support for Claude Code, Cursor, Codex, or other harnesses
-- a hosted cloud service
+- a Rust daemon or external local service
+- a separate React or browser dashboard
+- operating-system sandboxing
+- commands executed outside Pi
+- kernel or process-level enforcement
+- network isolation
+- cloud synchronization
 - user accounts or billing
-- organization-wide policy management
-- remote synchronization
 - team approval workflows
-- SIEM integrations
-- endpoint detection and response
-- kernel-level process monitoring
-- general-purpose shell protection outside Pi
-- autonomous policy changes without user review
+- organization-wide policy administration
+- SIEM or enterprise identity integrations
+- support for Claude Code, Cursor, Codex, Gemini CLI, or other harnesses
+- autonomous policy recommendations
+- policy simulation against historical sessions
+- a general-purpose policy language
+- a custom source-control or rollback system
+- full replay of hidden model reasoning
 
-## Foundational Concepts
+## Core Experience
 
-### Identity
+### 1. Resolved Command Preview
 
-Who initiated and executed the action?
+Before a risky shell action, BashGuard should show the command that will actually execute.
 
-The model should distinguish between:
+The preview should include, where available:
 
-- the human developer
-- the Pi session
-- the model or agent identity when available
-- the tool or extension
-- the operating-system user
-- the credential or service identity used
-
-### Context
-
-Where and under what conditions did the action occur?
-
-Relevant context includes:
-
-- repository
-- branch
+- resolved command text
+- command segments in pipelines or chains
 - working directory
-- module or folder
-- project documentation
-- protected paths
-- environment
-- available credentials
-- current session intent
+- project root
+- shell prefix or wrapper
+- paths targeted by the command
+- relevant redacted environment context
+- detected risk factors
 
-### Decision
+The developer should never approve a simplified command while a materially different command executes.
 
-Why was the action allowed, constrained, sent for approval, or denied?
+### 2. Explainable Decision
 
-Each decision should identify:
-
-- the evaluated action
-- relevant context
-- matched guardrail
-- risk factors
-- outcome
-- suggested safer alternative when applicable
-
-### Provenance
-
-What happened and what was the impact?
-
-The complete chain is:
-
-Human
-
-↓
-
-Prompt
-
-↓
-
-Pi Session
-
-↓
-
-Tool
-
-↓
-
-Credential
-
-↓
-
-Command
-
-↓
-
-Repository
-
-↓
-
-Files
-
-↓
-
-Guardrail
-
-↓
-
-Decision
-
-↓
-
-Result
-
-## Core Capabilities
-
-### Pi Extension
-
-A first-party Pi extension should capture session and tool activity and communicate with the local BashGuard service.
-
-The extension should support:
-
-- session start and completion
-- prompt metadata capture
-- tool request capture
-- command interception
-- approval interactions
-- result reporting
-- correlation identifiers across events
-
-### Bash Execution Guard
-
-The first execution control should focus on Bash commands initiated through Pi.
-
-Possible outcomes:
+Each evaluated command receives one outcome:
 
 - allow
-- allow with constraints
+- allow with notice
 - require approval
-- deny
+- block
 
-The guard should support:
+The explanation should include:
 
-- command parsing
-- working-directory scope
-- path-aware evaluation
-- destructive-operation detection
-- network and package-management context
-- repository and branch context
-- explanations and safer suggestions
+- outcome
+- plain-language reason
+- matched rule or heuristic
+- affected path or resource
+- safer alternative when useful
+- whether an explicit override is available
 
-### Session Replay
+The MVP should use a small built-in rule set rather than a general policy engine.
 
-Users should be able to replay a Pi session as a connected timeline.
+Initial risk categories may include:
 
-A replay may include:
+- recursive or broad deletion
+- writes outside the repository
+- access to sensitive user directories
+- destructive database commands
+- privileged execution
+- changes to Git history or remotes
+- commands with hidden prefixes or wrappers
 
-- user prompt
-- files read
-- tools requested
-- commands proposed
-- guardrail decisions
-- approvals
-- commands executed
-- command results
-- files modified
-- git diff or repository changes
-- session outcome
+### 3. Execution Timeline
 
-### Execution Provenance
+BashGuard should create a connected local timeline from Pi lifecycle and tool events.
 
-Every relevant event should be connected using stable correlation identifiers.
+Candidate events:
 
-Users should be able to trace from a file change back to the prompt and Pi session that caused it.
+- session started
+- prompt received
+- tool requested
+- command resolved
+- decision made
+- approval requested
+- approval accepted or declined
+- command started
+- command completed
+- tool result returned
+- file changes detected
+- Git checkpoint recorded
+- session ended
 
-### Repository Intelligence
+Each event should carry stable correlation identifiers where Pi exposes enough context.
 
-BashGuard should build practical context from the repository, including:
+### 4. File and Git Correlation
 
-- repository root
-- language and framework indicators
-- module and folder boundaries
-- AGENT.md or equivalent instruction files
-- project documentation
-- protected or sensitive paths
-- git branch and status
-- policy files
+BashGuard should capture Git state around meaningful write actions.
 
-The MVP should favour explicit repository signals over speculative semantic analysis.
+The MVP should support:
 
-### Guardrails
+- repository root and branch
+- dirty or clean status
+- changed-file list
+- diff summary
+- optional checkpoint before a risky write sequence
+- checkpoint reference in the timeline
+- restoration guidance or command
 
-Guardrails are the user-facing policy model.
+BashGuard should use Git rather than creating a custom filesystem snapshot system.
 
-They should be:
+### 5. Session Summary
 
-- human-readable
-- repository-aware
-- explainable
-- testable
-- version controlled when stored in a repository
+At session end, BashGuard should present a concise terminal summary such as:
 
-The internal representation may use YAML or another structured format, but the user experience should not be regex-first.
+```text
+Session Summary
 
-### Observation Mode
+18 tool calls
+11 shell commands
+ 6 files modified
+ 3 decisions explained
+ 2 Git checkpoints
+ 1 warning
+```
 
-BashGuard should default to observing before enforcing wherever practical.
+The summary should allow the developer to open the detailed timeline inside Pi.
 
-Observation mode records what would have happened and which guardrails would have applied without blocking the developer.
+### 6. Timeline Inspector
 
-### Recommendations
+The initial UI should live in Pi's terminal interface.
 
-BashGuard may suggest guardrail changes based on repeated behaviour.
+A developer should be able to:
 
-Examples:
-
-- A command has been approved many times and may be safely scoped.
-- Access to a sensitive path has repeatedly been denied and should be protected explicitly.
-- A recurring command can be constrained to one folder.
-
-Recommendations must never alter policy automatically.
-
-### Policy Simulation
-
-Users should be able to test a proposed guardrail against recorded sessions before enabling it.
-
-### Local Dashboard
-
-The local dashboard should provide:
-
-- projects
-- sessions
-- session replay
-- audit search
-- guardrail decisions
-- recommendations
-- policy simulation
-- repository context
+- browse events chronologically
+- filter by command, file, risk, or decision
+- expand an event for details
+- inspect command output
+- inspect changed-file and diff summaries
+- see the prompt or turn associated with an action
+- identify incomplete correlations honestly
 
 ## User Journey
 
-1. Install the BashGuard service and Pi extension.
-2. Open a repository with Pi.
-3. BashGuard discovers the project and begins in observation mode.
-4. Pi activity appears in the local session timeline.
-5. BashGuard surfaces risky or repeated patterns.
-6. The user reviews recommended guardrails.
-7. The user enables selected guardrails.
-8. Future decisions are explained and recorded.
-9. The user can replay and audit any captured session.
+1. Install the BashGuard Pi extension.
+2. Open Pi inside a Git repository.
+3. BashGuard begins capturing supported lifecycle and tool events locally.
+4. Safe actions proceed without interruption.
+5. Risky commands show a resolved preview and explanation.
+6. The developer approves, declines, or follows a safer alternative.
+7. BashGuard correlates results and file changes with the triggering event.
+8. At session end, the developer receives a concise summary.
+9. The developer opens the timeline to investigate, debug, or recover.
 
-## MVP Scope
+## Data Model
 
-### Included
+The MVP should use append-oriented extension entries or local JSONL data compatible with Pi's session model where practical.
 
-- Pi extension
-- local BashGuard service
-- local dashboard
-- SQLite storage
-- project discovery
-- Pi session tracking
-- Bash command interception
-- observation mode
-- basic guardrail engine
-- approval and deny outcomes
-- execution provenance
-- session replay timeline
-- file and git change capture where available
-- human-readable explanations
-- recommendations
-- policy simulation
+A normalized event should contain:
 
-### Deferred
+- event ID
+- timestamp
+- project ID or repository root
+- Pi session ID
+- turn or prompt correlation when available
+- tool call correlation when available
+- event type
+- command details when applicable
+- decision and explanation when applicable
+- result metadata
+- changed-file metadata
+- Git checkpoint reference
+- capture completeness flags
 
-- additional harnesses
-- MCP tool governance
-- GitHub API governance
-- Docker and Terraform-specific adapters
-- Kubernetes and cloud-provider adapters
-- team collaboration
-- central policy management
-- cloud sync
-- enterprise identity integrations
+## Privacy
 
-## Product Principles
+BashGuard may encounter prompts, source code, command output, environment values, and secrets.
 
-### Pi First
+The MVP must:
 
-Every MVP feature should improve the Pi experience directly.
-
-Future extensibility must not create unnecessary abstractions or weaken the Pi integration.
-
-### Observe Before Enforcing
-
-Visibility and understanding come before blocking.
-
-### Explain Every Decision
-
-A decision without a useful explanation is incomplete.
-
-### Context Over Command Strings
-
-The same command can carry different risk depending on repository, path, branch, identity, and intent.
-
-### Local First
-
-Core functionality must work without accounts, hosted services, or external synchronization.
-
-### Human-Readable Guardrails
-
-Users should be able to understand and review the controls that govern their agent.
-
-### Security Should Teach
-
-The product should help users build confidence and better habits rather than simply interrupting them.
-
-### No Silent Policy Mutation
-
-BashGuard may recommend changes but must not silently change enforcement.
+- store data locally
+- avoid required telemetry
+- redact likely secrets before persistence where practical
+- avoid storing full environment values by default
+- make capture limitations visible
+- provide a way to disable or reduce content capture
 
 ## Technical Direction
 
-These choices guide early design but may be revisited through architecture decisions.
-
-### Core Service
-
-- Rust
-
-### Pi Integration and Dashboard
+### Runtime
 
 - TypeScript
-- React for the local dashboard
+- Pi extension APIs
+- no external daemon in the MVP
 
 ### Storage
 
-- SQLite
+Prefer Pi extension entries and session-local data first.
 
-### Communication
+Use a separate local file only when Pi's extension state is insufficient for timeline indexing or retention. Do not introduce SQLite until measurements demonstrate a real need.
 
-- local API
-- real-time event stream where useful
+### UI
 
-### Policy Format
+- Pi terminal UI using `ctx.ui`
+- confirmation dialogs
+- status indicators
+- custom timeline browser or inspector
+- no separate web dashboard for the MVP
 
-- human-readable structured configuration, likely YAML
+### Git Integration
 
-### Deployment Model
-
-- local daemon or service
-- local web interface
-- no required cloud dependency
-
-## Privacy and Data Handling
-
-Prompt and session content may contain source code, secrets, or personal information.
-
-The product should support clear capture modes:
-
-- metadata only
-- redacted content
-- full local content
-
-Full prompt storage should not be assumed without an explicit product decision.
-
-Sensitive values should be redacted before persistence wherever practical.
-
-## Audit Event Model
-
-The MVP should use an append-oriented event model for session reconstruction.
-
-Candidate events include:
-
-- session.started
-- prompt.received
-- tool.requested
-- policy.evaluated
-- approval.requested
-- approval.granted
-- approval.denied
-- command.started
-- command.completed
-- filesystem.changed
-- git.changed
-- session.completed
-
-Each event should include available correlation identifiers for:
-
-- project
-- session
-- prompt
-- tool call
-- command
-- decision
+Use local Git commands with explicit timeouts and error handling. BashGuard must work in observation-only mode when the directory is not a Git repository.
 
 ## Success Criteria
 
-A successful MVP lets a user reliably answer:
+A successful MVP allows a developer to answer:
 
-- Which Pi session caused this change?
-- Which prompt initiated the work?
-- Which commands did Pi request and execute?
-- Which files changed?
-- Which guardrails applied?
-- Why was an action allowed or denied?
-- Which approvals occurred?
-- What safer alternative was suggested?
-- What guardrails should I consider adding?
+- What exact shell command did Pi execute?
+- What context changed the resolved command?
+- Which prompt or turn led to the action?
+- Why did BashGuard allow, warn, request approval, or block it?
+- What output did the command produce?
+- Which files changed afterward?
+- What Git checkpoint can help me recover?
+- Which parts of the chain could not be captured?
 
-## Initial Success Metrics
+## Initial Metrics
 
-Metrics should focus on product usefulness rather than vanity adoption numbers.
+- percentage of Pi shell calls with resolved-command capture
+- percentage of risky actions with useful explanations
+- percentage of recorded commands linked to a session and tool call
+- percentage of write actions with changed-file correlation
+- rate of successful Git checkpoint creation
+- timeline load and interaction latency
+- number of false or unnecessary interruptions reported by users
+- number of sessions where BashGuard helped explain or recover from an unexpected action
 
-Candidate measures:
+## Risks
 
-- percentage of Pi Bash actions captured successfully
-- percentage of recorded actions linked to a session and project
-- percentage of decisions with an explanation
-- session replay completeness
-- false-positive rate for high-risk recommendations
-- time required to create or update a guardrail
-- percentage of users who progress from observation to at least one enabled guardrail
+### Pi Hook Limitations
 
-## Release Milestones
+Pi may not expose every causal link needed for perfect provenance. BashGuard must show missing links instead of inventing them.
 
-### Milestone 1: Pi Observability
+### In-Process Trust Boundary
 
-- Pi extension
-- local service
-- SQLite event storage
-- project discovery
-- session timeline
-- command and result capture
+A Pi extension runs inside the Pi process and with the launching user's permissions. It is not a security boundary against a compromised process.
 
-### Milestone 2: Bash Guardrails
+### Noisy Guardrails
 
-- policy evaluation
-- allow, constrain, approve, and deny outcomes
-- explanations
-- observation mode
-- local guardrail management
+Overly broad warnings will make the extension annoying. The MVP must keep interruption narrow and favor observation for ambiguous cases.
 
-### Milestone 3: Repository Intelligence
+### Git Assumptions
 
-- instruction-file discovery
-- folder and module context
-- protected paths
-- richer file and git impact tracking
+Not every repository is clean or suitable for automated checkpoints. Checkpoints must be visible, optional, and conservative.
 
-### Milestone 4: Recommendations and Simulation
+## Evidence That Would Invalidate the MVP
 
-- repeated-behaviour analysis
-- guardrail recommendations
-- policy simulation against past sessions
+The direction should be reconsidered if:
 
-### Milestone 5: Pi Ecosystem Expansion
+- Pi adds a first-party resolved-command preview and complete prompt-to-file timeline
+- an existing Pi extension already delivers the same integrated UX with strong adoption
+- Pi's hooks cannot reliably connect tool calls, commands, and results
+- users do not find session explanation or Git correlation useful
+- required capture adds unacceptable latency or instability
 
-- governance for additional Pi tools
-- extension SDK or integration interfaces
-- community guardrail templates
+## Deferred Product Opportunities
 
-Support for other harnesses requires a separate future product decision.
+Only after the MVP proves useful should BashGuard consider:
 
-## Open Questions
-
-- Which Pi extension hooks provide reliable prompt, tool, and session events?
-- Should prompt content be stored by default, and in which capture mode?
-- How should BashGuard redact secrets before persistence?
-- Which guardrails belong in the repository versus user-level configuration?
-- How should folder-level inheritance work?
-- What defines the boundary of a Pi session?
-- How should shell pipelines and compound commands be evaluated?
-- How should BashGuard detect file changes caused indirectly by a command?
-- Which repository context can be trusted versus treated as untrusted input?
-- How should approvals behave when Pi is running unattended?
-
-## Definition of Success
-
-BashGuard becomes the trusted local companion for Pi.
-
-Developers install it because it makes Pi observable.
-
-They keep it because it makes agent execution easier to understand and safer to control.
-
-Security practitioners trust it because every meaningful action can be connected to its identity, context, decision, and result.
+- richer repository visualizations
+- session comparison
+- learned recommendations
+- user-authored policy files
+- optional local indexing or SQLite
+- an optional browser UI
+- a separate OS-level daemon or sandbox
+- team sharing and centralized governance
+- support for other coding harnesses

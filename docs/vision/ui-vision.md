@@ -1,164 +1,170 @@
 # BashGuard UI Vision
 
 **Status:** Draft  
-**Last updated:** July 22, 2026
+**Last updated:** July 23, 2026
 
 ## Design Goal
 
-BashGuard should feel like a developer tool inside Pi, not a security console attached to it.
+BashGuard should feel like a transparent companion to Pi, not a security console attached to it.
 
-The experience should help a developer answer:
+The primary interface is a separate terminal that follows a Pi session live. Focused approval interactions remain inside Pi so developers do not switch terminals to continue their work.
 
-- What is about to happen?
-- Why is BashGuard interrupting me?
-- What happened during this session?
-- Which files changed?
+The experience should answer:
+
+- What is Pi doing now?
+- What just happened?
+- Why does this action need my attention?
+- Why did this file change?
+- What evidence supports that explanation?
 - How can I recover?
 
-The MVP UI should remain inside Pi's terminal interface.
+## Experience Model
+
+```text
+Pi terminal                         BashGuard terminal
+
+Conversation and approvals          Narration and understanding
+Tool execution                      Live event stream
+Developer decisions                 Investigation and replay
+                                    Debrief and recovery
+```
 
 ## Experience Principles
 
-- Show the resolved command, not a simplified approximation.
+- Narrate meaningful activity instead of dumping raw logs.
 - Keep safe workflows quiet.
 - Interrupt only when the user needs to decide.
+- Show the resolved command, not a simplified approximation.
 - Explain risk in plain language.
-- Put the prompt, action, result, and file impact in one timeline.
-- Show uncertainty and missing capture honestly.
-- Make recovery obvious.
+- Put prompt, action, result, file impact, and Git state in one event story.
+- Use progressive disclosure: glance, expand, investigate.
+- Show uncertainty, inference, redaction, and missing capture honestly.
+- Make recovery obvious and intentional.
 - Avoid dashboard language designed for security analysts.
+- Preserve Pi's session ID as the canonical identity.
 
-## 1. Resolved Command Preview
-
-When approval is required:
+## 1. Live Companion
 
 ```text
-BashGuard · Approval Required
+BASHGUARD · LIVE · bg-102
+store-api · main · 03m 42s
 
-Risk: High
+09:41  Reading src/auth.ts
+09:41  Searching for authenticate()
+09:42  Running tests
+       npm test -- --runInBand
+09:42  Tests failed · 2 failures
+09:43  Editing src/auth.ts · +42 -19
+09:44  Running focused tests
+09:44  Tests passed
+09:45  Git checkpoint created
 
-Command
-  rm -rf ./data/*
+Current
+  Reviewing the resulting diff
+
+Commands 6 · Files 3 · Warnings 0 · Capture 94%
+```
+
+The live view is designed for glancing. It should not continuously stream full stdout, raw JSON, or every lifecycle callback.
+
+## 2. Session Discovery
+
+```bash
+bashguard sessions
+```
+
+```text
+TODAY
+
+bg-102  running    store-api   09:40   18m   1 approval
+bg-101  completed  bashguard   08:12   31m   no warnings
+
+YESTERDAY
+
+bg-100  completed  store-api   16:44   22m   2 warnings
+```
+
+```bash
+bashguard attach
+bashguard attach <pi-session-id>
+```
+
+Automatic discovery should use the current repository and active Pi sessions. It should ask only when the match is ambiguous.
+
+## 3. Resolved Command Preview
+
+When approval is required, the active decision remains in Pi. The BashGuard companion shows enriched context:
+
+```text
+APPROVAL REQUIRED
+
+Requested
+  npm run reset-fixtures
+
+Resolved
+  source .env.local && rm -rf ./tmp/auth-fixtures && npm run seed
 
 Working directory
   ~/projects/store-api
 
-Why this needs approval
-  Recursively deletes multiple files inside the repository.
+Potential impact
+  Deletes 34 files before rebuilding fixtures.
+
+Why this needs attention
+  The script contains a recursive delete and loads project-controlled
+  environment configuration before execution.
 
 Triggered by
-  Refactor the local database setup and recreate the fixtures.
+  "Recreate the authentication fixtures and rerun the tests."
 
 Safer option
-  Move ./data to ./.bashguard/archive/ before recreating it.
-
-[Approve once]  [Use safer option]  [Cancel]
+  Create a checkpoint and archive the fixture directory first.
 ```
 
-The view should also reveal prefixes or wrappers:
+The developer should never approve a simplified command while a materially different command executes.
+
+## 4. Inspect Mode
+
+```bash
+bashguard inspect bg-102
+```
 
 ```text
-Requested
-  npm test
-
-Resolved
-  source .env && npm test
-
-Notice
-  A project shell prefix adds environment loading before this command.
+┌ Timeline ─────────────────────┬ Event details ──────────────────────────┐
+│ 09:41 Prompt                  │ File changed                            │
+│ 09:41 Read src/auth.ts        │ package.json                            │
+│ 09:42 npm test                │                                         │
+│ 09:43 Edit src/auth.ts        │ First observed after                    │
+│ 09:44 npm install zod   ◀     │ npm install zod                         │
+│ 09:44 File package.json       │                                         │
+│ 09:45 Tests passed            │ Triggered by                            │
+│                               │ Tool call tc-018 · Turn 7                │
+│                               │                                         │
+│                               │ Reason reported by Pi                   │
+│                               │ Add validation used by the refactor.    │
+│                               │                                         │
+│                               │ Verified                                │
+│                               │ Command/result/file window linked       │
+└───────────────────────────────┴─────────────────────────────────────────┘
 ```
 
-## 2. Explainable Decision
+Inspect Mode should support:
 
-A decision should never be only a severity label.
+- chronological browsing;
+- deterministic search;
+- filters for prompts, commands, files, warnings, decisions, and checkpoints;
+- event expansion;
+- command output;
+- changed-file and diff summaries;
+- correlation method and confidence;
+- capture gaps and redactions;
+- narrow-terminal single-pane fallback.
 
-```text
-Blocked
-
-Reason
-  This command writes outside the repository into ~/.ssh.
-
-Matched check
-  Sensitive home-directory write
-
-Affected path
-  /Users/antonio/.ssh/config
-
-Suggested alternative
-  Write the generated config to ./tmp/ssh-config for review.
-```
-
-## 3. Session Summary
-
-At session end:
-
-```text
-BashGuard Session Summary
-
-Duration             18m 42s
-Tool calls                 18
-Shell commands             11
-Files modified              6
-Warnings                    1
-Approvals                   2
-Blocked actions             0
-Git checkpoints             2
-Capture completeness       92%
-
-[Open timeline]  [View files]  [Restore options]
-```
-
-Capture completeness should communicate that provenance can be partial.
-
-## 4. Timeline Browser
-
-```text
-09:31:02  Prompt
-           Refactor the authentication module and run the tests.
-
-09:31:08  Read
-           src/auth.ts
-
-09:31:14  Shell · Allowed
-           rg "authenticate" src
-
-09:31:27  Edit
-           src/auth.ts
-           +42 -19
-
-09:31:28  Git checkpoint
-           bashguard/01J2...
-
-09:31:36  Shell · Allowed
-           npm test
-           Exit 1 · 14.2s
-
-09:31:54  Shell · Approval
-           rm -rf ./tmp/auth-fixtures
-           Approved once
-
-09:32:06  Files changed
-           3 files · +57 -26
-```
-
-Filters:
-
-- all
-- prompts
-- tools
-- commands
-- decisions
-- files
-- checkpoints
-- warnings
-
-## 5. Event Inspector
-
-Selecting a command reveals:
+## 5. Event Detail
 
 ```text
 Command
-  npm test
+  npm test -- --runInBand
 
 Working directory
   ~/projects/store-api
@@ -173,88 +179,186 @@ Exit code
   1
 
 Triggered by
-  Tool call tc_018 · Turn 7
+  Tool call tc-018 · Turn 7
 
-Why Pi ran it
+Reason reported by Pi
   Validate the authentication refactor.
 
-Output
-  ...
-
-Files changed
-  None detected
-
-Capture status
-  Prompt and tool linked
+Evidence
+  Prompt and tool directly linked
+  No file changes observed
   Environment values redacted
 ```
 
-BashGuard should distinguish model-provided rationale from verified causal data.
+BashGuard must distinguish model-reported rationale from verified causal data.
 
-## 6. File Impact View
+## 6. Replay Mode
 
-```text
-Files changed
-
-src/auth.ts              12 edits   +42 -19
-src/auth.test.ts          5 edits    +15  -7
-package-lock.json         1 edit     +88 -31
-
-Checkpoint before changes
-  bashguard/01J2...
-
-[View diff]  [Restore guidance]
+```bash
+bashguard replay bg-102
 ```
 
-A future heatmap may show where the agent concentrated work, but the MVP should begin with a clear list and diff summary.
+```text
+00:00  Prompt received
+00:08  Read authentication module
+00:21  Initial tests failed
+00:46  Modified src/auth.ts
+01:12  Added validation dependency
+01:31  Focused tests passed
+01:48  Reviewed Git diff
+01:55  Session completed
+```
 
-## 7. Recovery Experience
+Replay walks through meaningful recorded events. It does not rerun commands, expose hidden reasoning, or simulate a video recording.
+
+## 7. File Impact
 
 ```text
-Restore Options
+FILES CHANGED
 
-Checkpoint
-  bashguard/01J2...
+src/auth.ts              direct tool link    +42 -19
+src/auth.test.ts         Git time window      +15  -7
+package.json             command window        +1  -0
+package-lock.json        command window       +88 -31
+
+Checkpoint before dependency change
+  bashguard/bg-102/pre-dependency-change
+```
+
+The UI should show how each relationship was established, not only the file list.
+
+## 8. Recovery
+
+```text
+RECOVERY OPTIONS
+
+Unexpected change
+  package.json and package-lock.json
+
+Relevant checkpoint
+  bashguard/bg-102/pre-dependency-change
 
 Created before
-  Pi modified src/auth.ts and src/auth.test.ts
+  npm install zod
 
-Current uncommitted work
-  3 files changed after this checkpoint
+Current work after checkpoint
+  3 files changed
 
 Recommended
-  Review the diff before restoring.
+  Review the checkpoint diff before restoring.
 
-[View diff]  [Copy restore command]  [Cancel]
+Actions
+  View diff · Copy restore command · Return to timeline
 ```
 
-BashGuard should not silently reset the repository.
+BashGuard should never silently reset the repository.
 
-## 8. Status Indicator
-
-A small persistent status can communicate state without noise:
+## 9. Session Debrief
 
 ```text
-BashGuard: recording · 8 commands · 1 warning · checkpoint ready
+SESSION COMPLETE · bg-102
+
+Duration             18m 42s
+Commands                   9
+Files read                 42
+Files modified              6
+Tests                3 passed
+Approvals                   1
+Warnings                    0
+Git checkpoints             2
+Capture completeness      94%
+
+Outcome
+  Pi refactored the authentication flow and the final test suite passed.
+
+Worth reviewing
+  package.json changed when a validation dependency was added.
+
+Next
+  bashguard inspect bg-102
 ```
+
+The debrief should present evidence rather than an unexplained trust score.
+
+## 10. Progressive Disclosure
+
+### Glance
+
+- live narration;
+- current activity;
+- warning state;
+- capture completeness.
+
+### Expand
+
+- command;
+- result;
+- duration;
+- files;
+- decision explanation;
+- evidence type.
+
+### Investigate
+
+- full timeline;
+- prompt and tool relationships;
+- output and diffs;
+- Git state;
+- inferred and missing links;
+- recovery options.
+
+## Keyboard Direction
+
+Candidate interactions:
+
+```text
+↑ / ↓     move between events
+Enter     expand
+Esc       return
+/         search
+f         filter
+p         prompts
+c         commands
+e         errors and warnings
+g         Git and checkpoints
+r         replay from selection
+?         help
+q         quit
+```
+
+These are design candidates, not a frozen public API.
+
+## Terminal Compatibility
+
+- support narrow and wide layouts;
+- do not rely on colour alone;
+- support non-interactive text output;
+- preserve readable output without Unicode box drawing;
+- avoid mouse-only interactions;
+- respect terminal themes and contrast;
+- do not use distracting animation.
 
 ## Future UI Opportunities
 
-These are post-MVP:
+Post-MVP possibilities:
 
-- compare two sessions
-- scrub through a session by turn
-- repository activity heatmap
-- local browser-based investigation view
-- shareable redacted session reports
-- team policy and approval interfaces
+- natural-language questions over recorded evidence;
+- compare two sessions;
+- repository activity heatmaps;
+- richer cross-session search;
+- optional local browser investigation view;
+- shareable redacted session reports;
+- team policy and approval interfaces.
 
 ## What the UI Must Avoid
 
-- dense enterprise dashboards
-- unexplained red/yellow/green scoring
-- raw JSON as the primary experience
-- policy YAML as the first interaction
-- confirmation prompts for routine safe commands
-- claims of complete provenance when links are missing
-- exposing secrets in previews or stored output
+- a required browser dashboard;
+- dense enterprise dashboards;
+- unexplained red, yellow, and green scoring;
+- raw JSON as the primary experience;
+- policy YAML as the first interaction;
+- confirmation prompts for routine safe commands;
+- streaming every Pi callback as a log line;
+- claims of complete provenance when links are missing;
+- exposing secrets in previews or stored output;
+- a second session identity that obscures the Pi session ID.

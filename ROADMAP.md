@@ -1,55 +1,60 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.3  
+**Status:** Draft v0.4  
 **Last updated:** July 23, 2026
 
-## Phase 0: Experience and Technical Proof
+## Milestone 0: Observe a Real Pi Session
 
-Goal: validate the terminal companion experience and the minimum architecture required to support it.
+Goal: build the smallest end-to-end BashGuard experience that can observe a real Pi session from a second terminal.
 
-- align README, manifesto, PRD, architecture, MVP, principles, and competitive analysis;
-- document the end-to-end BashGuard experience;
-- define Live, Open, Inspect, Replay, and Debrief modes;
-- define the normalized event model;
-- identify the minimum Pi hooks required for event correlation;
-- prototype append-only local event transport;
-- prove a second terminal can discover, attach to, and tail a Pi session;
-- prototype command resolution and Git-state capture;
-- measure event latency and extension overhead.
+- complete the Pi capability matrix;
+- build lifecycle and correlation spikes;
+- create the Pi TypeScript extension skeleton;
+- create the shared event-model package;
+- create the BashGuard CLI skeleton;
+- implement append-only local event transport;
+- implement active and recent session discovery;
+- implement `bashguard sessions`;
+- implement `bashguard attach [session-id]`;
+- narrate prompts, tool calls, commands, results, and file-tool activity;
+- support reconnect without duplicate events;
+- expose event details and capture-completeness labels;
+- produce an evidence-based session debrief;
+- measure event latency, storage overhead, and failure behaviour.
 
 Exit criteria:
 
-- the product story is consistent across the repository;
-- the Pi session ID is the canonical session identity;
-- a second terminal can reliably follow a test Pi session without a daemon or network service;
-- capture limitations and performance are understood;
-- the MVP contains no cloud or multi-harness requirements.
+- a real Pi session emits normalized BashGuard events;
+- Pi session ID is the canonical BashGuard session identity;
+- a second terminal reliably follows a running session without terminal scraping, a daemon, or a network service;
+- reconnect does not duplicate events;
+- observed, reported, inferred, redacted, and missing evidence are distinguishable;
+- BashGuard failure does not prevent Pi from running;
+- technical limitations are recorded in the capability matrix.
+
+Implementation reference: `docs/plans/milestone-0-observe-a-real-pi-session.md`.
 
 ## Phase 1: Live Terminal Companion
 
 Goal: make a running Pi session understandable at a glance.
 
-- Pi TypeScript extension skeleton;
-- BashGuard CLI and TUI skeleton;
-- session lifecycle and metadata capture;
-- active and recent session discovery;
-- `bashguard sessions`;
-- `bashguard attach [session-id]`;
-- append-only event stream with sequence numbers;
-- live tailing and reconnect;
-- tool-call, result, and shell event capture;
-- grounded narrative projection;
-- current activity and session status footer;
-- capture-completeness indicators;
-- graceful narrow-terminal layout;
-- plain-text output mode.
+- refine the CLI and TUI architecture from Milestone 0 usage;
+- improve active-session selection;
+- add split-pane timeline and event detail views;
+- add grounded narrative projection;
+- add current activity and session status footer;
+- improve capture-completeness indicators;
+- support graceful narrow-terminal layouts;
+- retain plain-text output mode;
+- test simultaneous active sessions;
+- make installation and local development straightforward.
 
 Exit criteria:
 
 - a developer can attach from a second terminal and follow meaningful activity with low local latency;
 - narration is more useful than raw logs during real coding work;
 - the companion can reconnect without losing the execution story;
-- companion failure does not interrupt Pi.
+- the experience works well enough for daily use by the project author.
 
 ## Phase 2: Investigation and Debrief
 
@@ -63,7 +68,7 @@ Goal: make a Pi session understandable after it happens.
 - prompt, turn, and tool correlations;
 - observed, reported, and inferred evidence labels;
 - command output references;
-- session debrief;
+- richer session debrief;
 - items-worth-reviewing summary;
 - completed-session browsing.
 
@@ -144,7 +149,7 @@ Goal: improve explanations and risk context using explicit local repository sign
 - branch and environment awareness;
 - framework-specific hints where evidence supports them;
 - improved file-impact presentation;
-- optional suggestions to create rules only after repeated user-approved behavior.
+- optional suggestions to create rules only after repeated user-approved behaviour.
 
 Exit criteria:
 

@@ -1,10 +1,48 @@
 # BashGuard
 
-> The developer flight recorder for Pi coding sessions.
+> The terminal flight recorder for Pi coding sessions.
 
-BashGuard is an open-source, local-first Pi extension that helps developers understand what their coding agent did, why it did it, and what changed as a result.
+BashGuard is an open-source, local-first companion for Pi that helps developers understand what their coding agent is doing while it happens, investigate what happened afterward, and recover when something goes wrong.
 
-It connects prompts, tool calls, resolved shell commands, policy decisions, command results, file changes, and Git checkpoints into one explainable session timeline.
+Pi remains the place where the developer talks to the agent. BashGuard becomes the place where the developer understands the execution.
+
+## The Experience
+
+A developer runs Pi in one terminal and BashGuard in another:
+
+```text
+┌──────────────────────────────┬──────────────────────────────┐
+│ Pi                           │ BashGuard                    │
+│                              │                              │
+│ Refactor the authentication  │ LIVE · Session bg-102       │
+│ flow and run the tests.      │                              │
+│                              │ 09:41 Reading src/auth.ts    │
+│                              │ 09:42 Running npm test       │
+│                              │ 09:43 Tests failed           │
+│                              │ 09:44 Editing src/auth.ts    │
+│                              │ 09:45 Checkpoint created     │
+└──────────────────────────────┴──────────────────────────────┘
+```
+
+BashGuard should narrate the session rather than dump raw logs. Safe work stays quiet. Risky actions surface the resolved command, relevant context, reason for interruption, and safer alternatives.
+
+## Core Commands
+
+```bash
+bashguard attach
+bashguard sessions
+bashguard open <session-id>
+bashguard inspect <session-id>
+bashguard replay <session-id>
+```
+
+- `attach` follows the active Pi session in a separate terminal.
+- `sessions` lists recent and active sessions.
+- `open` opens a concise session view.
+- `inspect` opens the full terminal investigation interface.
+- `replay` walks through the recorded execution story.
+
+The exact command names may evolve, but the interaction model is foundational.
 
 ## Why BashGuard
 
@@ -12,7 +50,8 @@ Pi already provides an extensible coding harness, local sessions, lifecycle hook
 
 The missing experience is a clear answer to questions such as:
 
-- What exact command did Pi execute?
+- What is Pi doing right now?
+- What exact command will execute?
 - Did project configuration or a wrapper change the command?
 - Which prompt caused a tool call or file change?
 - Why was an action allowed, warned, blocked, or sent for approval?
@@ -21,75 +60,53 @@ The missing experience is a clear answer to questions such as:
 
 ## Product Direction
 
-BashGuard begins as a TypeScript extension for Pi.
+BashGuard begins as two cooperating TypeScript surfaces:
+
+1. a Pi extension that captures and evaluates supported execution events;
+2. a local terminal companion that attaches to a Pi session and presents the event stream.
 
 The MVP focuses on:
 
-- resolved command preview
-- explainable command decisions
-- prompt-to-action execution timelines
+- live session narration in a separate terminal
+- session discovery and attachment by Pi session ID
+- resolved command previews for risky execution
+- explainable decisions
+- prompt-to-effect timelines
 - file and Git change correlation
 - Git-backed checkpoints and restore guidance
-- local session summaries
+- investigation, replay, and session debriefs
+- honest capture-completeness indicators
 
-The MVP does not require a daemon, cloud service, account, hosted dashboard, or support for other coding harnesses.
+The MVP does not require a cloud service, account, hosted dashboard, support for other coding harnesses, or an operating-system sandbox.
 
-## Experience
+## Design Principles
 
-At the end of a session, BashGuard should make the work understandable at a glance:
-
-```text
-Session Summary
-
-18 tool calls
-11 shell commands
- 6 files modified
- 3 decisions explained
- 2 Git checkpoints
- 1 warning
-```
-
-A developer can then inspect a connected timeline:
-
-```text
-Prompt
-  ↓
-Tool request
-  ↓
-Resolved command
-  ↓
-Decision and explanation
-  ↓
-Command result
-  ↓
-File changes
-  ↓
-Git checkpoint
-```
-
-## Principles
-
-- Pi is the platform.
-- Observe before enforcing.
+- Pi is where developers act; BashGuard is where they understand.
+- Developers should never wonder what their AI is doing.
+- Narrate meaningful activity instead of streaming implementation noise.
+- Keep routine safe work quiet.
+- Interrupt only when the developer needs to decide.
 - Never hide the command that will execute.
 - Explain every decision.
+- Use progressive disclosure: glance, expand, investigate.
 - Keep the core experience local.
 - Use Git as the initial recovery mechanism.
-- Prefer a useful developer experience over policy complexity.
-- Do not rebuild capabilities Pi already provides.
+- Show missing capture rather than pretending provenance is complete.
 
 ## Current Status
 
-BashGuard is in product definition and early design. The immediate goal is a narrow Pi extension that proves the event capture, command preview, explanation, and Git-correlation experience.
+BashGuard is in product definition and early design. The immediate goal is to prove that a Pi session can be captured as a coherent local event stream and followed from a second terminal without disrupting the Pi experience.
 
 ## Documents
 
+- [The BashGuard Experience](docs/vision/the-bashguard-experience.md)
+- [Terminal UX](docs/vision/terminal-ux.md)
+- [Event Model](docs/architecture/event-model.md)
 - [Manifesto](MANIFESTO.md)
 - [Product Requirements](PRODUCT_REQUIREMENTS.md)
 - [Architecture](ARCHITECTURE.md)
 - [Roadmap](ROADMAP.md)
 - [Competitive Analysis](COMPETITIVE_ANALYSIS.md)
-- [UI Vision](docs/vision/ui-vision.md)
 - [MVP Scope](docs/vision/mvp.md)
 - [Product Principles](docs/vision/principles.md)
 - [Decision Log](DECISIONS.md)
@@ -97,4 +114,4 @@ BashGuard is in product definition and early design. The immediate goal is a nar
 
 ## Working Positioning
 
-> BashGuard is the local flight recorder and explainable command guard for Pi.
+> BashGuard is the local terminal companion, flight recorder, and explainable command guard for Pi.

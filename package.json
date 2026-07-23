@@ -1,0 +1,31 @@
+{
+  "name": "bashguard",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Local-first observability and safeguards for Pi coding sessions.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "observability",
+    "security"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./extensions/bashguard/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "latest",
+    "@types/node": "latest",
+    "typescript": "latest"
+  }
+}

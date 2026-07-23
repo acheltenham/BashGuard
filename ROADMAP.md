@@ -1,124 +1,191 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.2  
-**Last updated:** July 22, 2026
+**Status:** Draft v0.3  
+**Last updated:** July 23, 2026
 
-## Phase 0: Product Foundation
+## Phase 0: Experience and Technical Proof
 
-- align README, manifesto, PRD, architecture, and competitive analysis
-- define the Pi-first MVP
-- document UI principles and terminal workflows
-- identify the minimum Pi hooks required for event correlation
-- prototype command resolution and Git-state capture
+Goal: validate the terminal companion experience and the minimum architecture required to support it.
+
+- align README, manifesto, PRD, architecture, MVP, principles, and competitive analysis;
+- document the end-to-end BashGuard experience;
+- define Live, Open, Inspect, Replay, and Debrief modes;
+- define the normalized event model;
+- identify the minimum Pi hooks required for event correlation;
+- prototype append-only local event transport;
+- prove a second terminal can discover, attach to, and tail a Pi session;
+- prototype command resolution and Git-state capture;
+- measure event latency and extension overhead.
 
 Exit criteria:
 
-- the product story is consistent
-- the MVP contains no daemon, cloud, or multi-harness requirements
-- the core technical assumptions are proven with small Pi extension experiments
+- the product story is consistent across the repository;
+- the Pi session ID is the canonical session identity;
+- a second terminal can reliably follow a test Pi session without a daemon or network service;
+- capture limitations and performance are understood;
+- the MVP contains no cloud or multi-harness requirements.
 
-## Phase 1: Developer Flight Recorder
+## Phase 1: Live Terminal Companion
+
+Goal: make a running Pi session understandable at a glance.
+
+- Pi TypeScript extension skeleton;
+- BashGuard CLI and TUI skeleton;
+- session lifecycle and metadata capture;
+- active and recent session discovery;
+- `bashguard sessions`;
+- `bashguard attach [session-id]`;
+- append-only event stream with sequence numbers;
+- live tailing and reconnect;
+- tool-call, result, and shell event capture;
+- grounded narrative projection;
+- current activity and session status footer;
+- capture-completeness indicators;
+- graceful narrow-terminal layout;
+- plain-text output mode.
+
+Exit criteria:
+
+- a developer can attach from a second terminal and follow meaningful activity with low local latency;
+- narration is more useful than raw logs during real coding work;
+- the companion can reconnect without losing the execution story;
+- companion failure does not interrupt Pi.
+
+## Phase 2: Investigation and Debrief
 
 Goal: make a Pi session understandable after it happens.
 
-- Pi TypeScript extension skeleton
-- session lifecycle capture
-- tool-call and tool-result capture
-- shell command capture
-- local normalized event model
-- session summary
-- terminal timeline browser
-- event detail inspector
-- capture completeness indicators
+- `bashguard open <session-id>`;
+- `bashguard inspect <session-id>`;
+- chronological timeline browser;
+- deterministic search and filters;
+- expandable event details;
+- prompt, turn, and tool correlations;
+- observed, reported, and inferred evidence labels;
+- command output references;
+- session debrief;
+- items-worth-reviewing summary;
+- completed-session browsing.
 
 Exit criteria:
 
-- a developer can inspect a session and trace most shell actions to a Pi turn or tool call
-- timeline gaps are visible rather than hidden
+- a developer can find a surprising command or file and identify the strongest available causal evidence;
+- timeline gaps and redactions are visible rather than hidden;
+- the debrief provides useful evidence without an unexplained trust score.
 
-## Phase 2: Resolved Command Guard
+## Phase 3: Resolved Command Guard
 
 Goal: make risky execution understandable before it happens.
 
-- resolved command preview
-- working-directory and project-root context
-- prefix and wrapper visibility
-- small built-in risk rule set
-- allow, notice, approval, and block outcomes
-- plain-language explanations
-- safer alternatives where useful
-- secret-aware display and persistence
+- requested and resolved command preview;
+- working-directory and project-root context;
+- prefix and wrapper visibility;
+- target-path extraction;
+- small built-in risk rule set;
+- allow, notice, approval, and block outcomes;
+- approval interaction inside Pi;
+- mirrored context in the terminal companion;
+- plain-language explanations;
+- potential-impact descriptions;
+- safer alternatives where useful;
+- secret-aware display and persistence.
 
 Exit criteria:
 
-- risky commands show the materially relevant command and context before approval
-- every interrupted action includes a useful explanation
-- common safe workflows are not burdened by excessive prompts
+- risky commands show the materially relevant command and context before approval;
+- every interrupted action includes a useful explanation;
+- common safe workflows are not burdened by excessive prompts;
+- the user never has to switch to the companion terminal to approve or decline.
 
-## Phase 3: Git Checkpoints and File Impact
+## Phase 4: Git Checkpoints and File Impact
 
 Goal: connect agent execution to the repository changes it caused.
 
-- repository and branch detection
-- before-and-after Git status capture
-- changed-file summaries
-- diff summaries
-- optional pre-risk checkpoints
-- checkpoint references in the timeline
-- restore guidance
+- repository and branch detection;
+- before-and-after Git status capture;
+- changed-file and diff summaries;
+- direct and inferred correlation methods;
+- correlation confidence labels;
+- optional checkpoints before selected risky write sequences;
+- checkpoint references in the timeline;
+- recovery view and copyable restore guidance;
+- explicit protection against silent reset or work loss.
 
 Exit criteria:
 
-- a developer can identify the files affected by a session
-- a developer can locate a relevant Git recovery point after a mistaken action
+- a developer can identify the files affected by a session;
+- a developer can understand how BashGuard linked a file to an action;
+- a developer can locate a relevant Git recovery point after a mistaken change.
 
-## Phase 4: Repository Intelligence
+## Phase 5: Event Replay
 
-Goal: improve explanations and risk context without introducing speculative complexity.
+Goal: reconstruct the execution story without rerunning actions.
 
-- protected-path configuration
-- instruction-file discovery
-- repository-local BashGuard settings
-- branch and environment awareness
-- framework-specific risk hints where evidence supports them
-- improved file-impact visualization
+- `bashguard replay <session-id>`;
+- meaningful event stepping;
+- pause, forward, backward, and expand controls;
+- replay from a selected timeline event;
+- source-evidence links for every narrative step;
+- explicit language that replay does not include hidden reasoning or command re-execution.
 
 Exit criteria:
 
-- BashGuard can distinguish common repository-specific risks using explicit local signals
+- a developer can reconstruct the major path through a completed session;
+- replay remains understandable without becoming a video or raw-log player;
+- every replay step can be traced to recorded evidence.
 
-## Phase 5: Advanced Observability
+## Phase 6: Repository-Aware Context
 
-Only after the core workflow proves useful:
+Goal: improve explanations and risk context using explicit local repository signals.
 
-- session comparison
-- repository activity heatmaps
-- richer filtering and search
-- optional local index or SQLite storage
-- exportable incident or debugging reports
-- rule testing against recorded events
-- user-reviewed recommendations
+- protected-path configuration;
+- instruction-file discovery;
+- repository-local BashGuard settings;
+- branch and environment awareness;
+- framework-specific hints where evidence supports them;
+- improved file-impact presentation;
+- optional suggestions to create rules only after repeated user-approved behavior.
 
-## Phase 6: Optional Stronger Boundaries
+Exit criteria:
+
+- BashGuard can distinguish common repository-specific risks using explicit, inspectable local signals;
+- recommendations never silently change policy.
+
+## Phase 7: Advanced Local Observability
+
+Only after the core terminal workflow proves useful:
+
+- session comparison;
+- repository activity heatmaps;
+- richer cross-session filtering and search;
+- natural-language questions grounded in recorded events;
+- optional local index or SQLite storage;
+- exportable debugging or incident reports;
+- rule testing against recorded events;
+- user-reviewed recommendations;
+- optional browser investigation view.
+
+## Phase 8: Optional Stronger Boundaries
 
 Evaluate only when the in-process extension is demonstrably insufficient:
 
-- optional local execution broker or daemon
-- filesystem and network restrictions
-- stronger tamper resistance
-- process observation beyond Pi hooks
-- additional coding-harness adapters
-- team sharing and centralized governance
+- optional local execution broker or daemon;
+- filesystem and network restrictions;
+- stronger tamper resistance;
+- process observation beyond Pi hooks;
+- additional coding-harness adapters;
+- team sharing and centralized governance.
 
 ## Explicitly Not Planned for the MVP
 
-- Rust daemon
-- browser dashboard
-- cloud service
-- accounts and billing
-- enterprise control plane
-- SIEM integrations
-- multi-harness support
-- general-purpose policy language
-- autonomous policy changes
-- custom filesystem rollback engine
+- hosted browser dashboard;
+- cloud service;
+- accounts and billing;
+- enterprise control plane;
+- SIEM integrations;
+- multi-harness support;
+- general-purpose policy language;
+- autonomous policy changes;
+- custom filesystem rollback engine;
+- hidden-reasoning capture;
+- unexplained trust scoring.

@@ -1,121 +1,107 @@
 # BashGuard Manifesto
 
-**Status:** Draft v0.2  
+**Status:** Draft v0.3  
 **Last updated:** July 22, 2026
 
-BashGuard exists because powerful agent harnesses need more than a list of blocked commands.
+BashGuard exists because developers deserve to understand what their coding agent actually did.
 
-Pi gives developers a flexible, extensible environment for building with agents. That flexibility is valuable, but it also means developers need a clear way to understand what the agent is doing, why it is doing it, and what boundaries should apply inside a project.
+Pi is powerful because it is flexible, extensible, and local. BashGuard should preserve that freedom while making every meaningful action visible, explainable, and recoverable.
 
-BashGuard is being built as the missing security, governance, and observability companion for Pi.
+BashGuard is not an enterprise governance platform compressed into a terminal extension. It is a developer tool first: a local flight recorder and explainable command guard for Pi coding sessions.
 
-## Context First
+## Pi Is the Platform
 
-A command is not dangerous or safe in isolation.
+We build on Pi rather than around it.
 
-Its meaning depends on:
+Pi already provides sessions, lifecycle events, tool interception, extension state, and terminal UI. BashGuard should use those capabilities directly and avoid rebuilding them behind a separate service unless a future requirement proves that an external boundary is necessary.
 
-- who initiated it
-- which agent executed it
-- which repository it ran inside
-- which files and systems it could affect
-- which credentials were available
-- what the developer asked the agent to accomplish
+## Every Action Should Be Understandable
 
-BashGuard evaluates actions in context, not as disconnected strings.
+A developer should be able to trace:
 
-## Identity Matters
+```text
+Prompt
+  ↓
+Tool request
+  ↓
+Resolved command
+  ↓
+Decision
+  ↓
+Result
+  ↓
+File change
+  ↓
+Git checkpoint
+```
 
-Every action should be attributable.
+A raw shell history is not enough. A security alert is not enough. The useful unit is the complete execution story.
 
-BashGuard should preserve the chain between the human, the prompt, the Pi session, the tool, the command, and the resulting change.
+## Never Hide What Will Execute
 
-The goal is not surveillance. The goal is accountability and clarity.
+The command shown to a developer must be the command that will actually run.
+
+BashGuard should surface relevant prefixes, wrappers, working directory, path resolution, and other execution context before approval. Invisible command mutation breaks trust.
 
 ## Observe Before Enforcing
 
-Security tools often begin by blocking. BashGuard begins by observing.
+BashGuard should first help developers see what is happening.
 
-Developers should first be able to see:
+Observation provides the evidence needed to design useful guardrails. Blocking without context creates interruption, not confidence.
 
-- what Pi attempted
-- what it executed
-- what changed
-- which actions were repeated
-- where risk accumulated
-
-Only after that should BashGuard recommend or enforce guardrails.
+Enforcement should remain narrow, explainable, and driven by demonstrated risk.
 
 ## Explain Every Decision
 
-A security decision that cannot be explained is difficult to trust.
+“Blocked” is not a sufficient user experience.
 
-When BashGuard allows, constrains, requests approval for, or denies an action, it should explain:
+When BashGuard allows, warns, requests approval, or denies an action, it should explain:
 
-- what was evaluated
-- which context mattered
-- which guardrail applied
-- why the decision was made
+- what action was evaluated
+- what context mattered
+- which rule or heuristic matched
+- why the outcome was chosen
 - what safer alternative may exist
+- whether the developer can proceed intentionally
 
-## Security Should Teach
+## Git Is the First Safety Net
 
-BashGuard should help developers understand agent risk instead of treating them as passive users of a policy engine.
+Pi session branching does not automatically restore the working tree. BashGuard should not invent a custom rollback system before using the recovery mechanism developers already trust.
 
-Recommendations should be practical, specific, and grounded in observed behaviour.
-
-The product should help users build better guardrails over time.
-
-## Human-Readable Guardrails
-
-Developers should not need to become policy-language specialists.
-
-Guardrails should be readable, reviewable, and close to the repository they protect.
-
-The product may use structured policy internally, but the developer experience should remain understandable.
-
-## Repository Awareness
-
-Repositories already contain valuable context:
-
-- module boundaries
-- documentation
-- ownership
-- agent instructions
-- architecture decisions
-- protected paths
-- test and deployment workflows
-
-BashGuard should use that context when evaluating execution.
+The initial approach should correlate agent actions with Git state, diffs, checkpoints, and restoration guidance.
 
 ## Local First
 
-BashGuard should work locally and offline.
+Prompts, source code, command output, and file changes can be sensitive.
 
-Project data, prompts, execution records, and policies should remain under the developer's control by default.
+The core product should work locally without accounts, cloud storage, or external telemetry. Developers should control what is captured and retained.
 
-Cloud services may be considered later, but they must not be required for the core experience.
+## Developer Experience Over Policy Complexity
 
-## Open by Design
+Developers should not need to become policy-language experts to understand why a command is risky.
 
-BashGuard should be open source, inspectable, and extensible.
+BashGuard may use structured rules internally, but the primary experience should be plain-language explanations, clear risk context, and actionable alternatives.
 
-The community should be able to understand how decisions are made, contribute integrations, and challenge unsafe assumptions.
+## Security Through Transparency
+
+Security remains essential, but it is not the only value.
+
+The same timeline that helps investigate a dangerous command also helps debug a failed refactor, compare two agent runs, understand unexpected file changes, and improve instructions.
+
+Trust begins with visibility.
 
 ## Pi First
 
-BashGuard will focus deeply on Pi.
+BashGuard will focus deeply on Pi before considering other harnesses.
 
-The initial product will not attempt to support every agent harness. Other commercial and hosted harnesses often provide their own security controls, while Pi's openness creates a clearer opportunity for a focused companion layer.
-
-The architecture may leave room for future adapters, but the product roadmap, user experience, and MVP will be designed around Pi.
+Multi-harness abstractions, enterprise control planes, cloud synchronization, and organization-wide policy management are not MVP requirements.
 
 ## Our Vision
 
-Build the trusted local companion for governing and understanding Pi agent execution.
+Build the most useful way to understand, review, and safely recover from a Pi coding session.
 
 ## Our Standard
 
 BashGuard succeeds when a developer can answer:
 
-> What did Pi do, why did it do it, what changed, and were the right boundaries applied?
+> What did Pi do, why did it do it, what changed, and what should I do next?

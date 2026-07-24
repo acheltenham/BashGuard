@@ -27,7 +27,7 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 | Prompt correlation | Associate a prompt or turn with later actions | Explain what initiated a command or edit | Partial | `turnIndex` and timestamps observed; no explicit turn ID in tested payload |
 | Tool interception | Observe tool calls before execution | Preview and evaluate shell actions | Confirmed | `tool.requested` captured name, input, and `toolCallId` |
 | Tool results | Observe completion, result, and error metadata | Complete the action story | Confirmed | `tool.completed` correlated deterministically by `toolCallId` |
-| User bash | Observe or wrap direct user shell execution | Avoid blind spots between agent and user commands | Documented | `user_bash` handler is registered; interactive `!` test still required |
+| User bash | Observe or wrap direct user shell execution | Avoid blind spots between agent and user commands | Confirmed | Interactive `!` commands produced `bash.user_requested` with `payload.command` and `payload.excludeFromContext`; distinct from agent `bash` tool events |
 | Command mutation | Block or modify a command before execution | Implement narrow safeguards and safer alternatives | Documented | Verify mutation semantics and approval UI later |
 | Resolved command | Observe the materially executed command | Avoid approving one command while another runs | Partial | Raw agent `bash` input is visible; wrappers, expansion, aliases, and runtime mutation still need dedicated testing |
 | Working directory | Capture effective command directory | Explain command scope and targeted repository | Confirmed | `ctx.cwd` recorded consistently in tested session |
@@ -61,6 +61,7 @@ Observed event sequence included:
 - `turn.started` / `turn.ended`
 - `message.started` / `message.ended`
 - `tool.requested` / `tool.completed` for `read`, `bash`, and `write`
+- `bash.user_requested` for direct interactive `!` shell commands
 - `agent.ended`
 - `session.shutdown`
 
@@ -71,8 +72,9 @@ Observed event sequence included:
 - Turn payloads exposed `turnIndex` and timestamp but no explicit turn ID in this test.
 - Message payloads contained assistant tool-call IDs but no explicit top-level message ID in this test.
 - Agent shell execution is distinguishable as the `bash` tool.
-- Direct user shell execution via `!` still needs an interactive test.
-- File reads and writes are directly visible as Pi tool events; `edit` needs a dedicated test.
+- Direct interactive user shell execution is distinguishable as `bash.user_requested`.
+- Confirmed interactive examples included `pwd` and `curl google.com` with `payload.command` and `payload.excludeFromContext: false`.
+- File reads and writes are directly visible as Pi tool events; `edit` still needs a dedicated test.
 
 ### Failure and privacy findings
 
@@ -84,13 +86,12 @@ Observed event sequence included:
 
 ### Spike 1: Lifecycle and Correlation
 
-**Status: Mostly confirmed.**
+**Status: Nearly complete.**
 
 Remaining checks:
 
-1. run an interactive Pi session using direct user `!` bash;
-2. trigger the `edit` tool specifically;
-3. capture a sanitized example event sequence for documentation.
+1. trigger the `edit` tool specifically;
+2. capture a sanitized example event sequence for documentation.
 
 ### Spike 2: Command Resolution
 

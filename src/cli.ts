@@ -4,7 +4,6 @@ import { createReadStream, existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { createInterface } from "node:readline";
 
 type SessionMetadata = {
   schemaVersion?: number;
@@ -69,6 +68,30 @@ function processIsAlive(pid?: number): boolean {
   }
 }
 
+async function readExistingEvents(eventsFile: string): Promise<BashGuardEvent[]> {
+  let text = "";
+  try {
+    text = await readFile(eventsFile, "utf8");
+  } catch {
+    return [];
+  }
+
+  const events: BashGuardEvent[] = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      events.push(JSON.parse(line) as BashGuardEvent);
+    } catch {
+      // Ignore an incomplete final JSONL line. A later poll will retry once complete.
+    }
+  }
+  return events.sort((a, b) => a.sequence - b.sequence);
+}
+
+function sessionHasShutdown(events: BashGuardEvent[]): boolean {
+  return events.some((event) => event.type === "session.shutdown");
+}
+
 async function discoverSessions(): Promise<SessionSummary[]> {
   const root = getDataRoot();
   let entries: string[] = [];
@@ -87,12 +110,14 @@ async function discoverSessions(): Promise<SessionSummary[]> {
 
     try {
       const info = await stat(eventsFile);
+      const events = await readExistingEvents(eventsFile);
+      const shutdownRecorded = sessionHasShutdown(events);
       return {
         metadata,
         directory,
         eventsFile,
         modifiedAt: info.mtimeMs,
-        active: processIsAlive(metadata.processId),
+        active: !shutdownRecorded && processIsAlive(metadata.processId),
       };
     } catch {
       return undefined;
@@ -200,26 +225,6 @@ function renderTimestamp(timestamp: string): string {
   return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-async function readExistingEvents(eventsFile: string): Promise<BashGuardEvent[]> {
-  let text = "";
-  try {
-    text = await readFile(eventsFile, "utf8");
-  } catch {
-    return [];
-  }
-
-  const events: BashGuardEvent[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      events.push(JSON.parse(line) as BashGuardEvent);
-    } catch {
-      // Ignore an incomplete final JSONL line. A later poll will retry once complete.
-    }
-  }
-  return events.sort((a, b) => a.sequence - b.sequence);
-}
-
 async function chooseSession(requestedId?: string): Promise<SessionSummary> {
   const sessions = await discoverSessions();
   if (sessions.length === 0) throw new Error(`No BashGuard sessions found in ${getDataRoot()}`);
@@ -301,18 +306,22 @@ async function attach(requestedId?: string): Promise<void> {
     const lines = combined.split("\n");
     remainder = lines.pop() ?? "";
 
+    let shutdownSeen = false;
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as BashGuardEvent;
         if (event.sequence <= lastSequence) continue;
         lastSequence = event.sequence;
+        if (event.type === "session.shutdown") shutdownSeen = true;
         const rendered = renderEvent(event);
         if (rendered) process.stdout.write(`${renderTimestamp(event.timestamp)}  ${rendered}\n`);
       } catch {
         // Malformed complete lines are ignored in this first slice rather than crashing attachment.
       }
     }
+
+    if (shutdownSeen) return;
   }
 }
 

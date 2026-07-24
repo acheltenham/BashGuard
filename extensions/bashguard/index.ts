@@ -30,7 +30,35 @@ type SessionState = {
 
 const REDACTED = "[REDACTED]";
 const MAX_TEXT_LENGTH = 16_000;
-const SECRET_KEY_PATTERN = /(token|secret|password|passwd|api[_-]?key|authorization|cookie|credential|private[_-]?key)/i;
+const SECRET_KEYS = new Set([
+  "token",
+  "accessToken",
+  "refreshToken",
+  "idToken",
+  "authToken",
+  "secret",
+  "clientSecret",
+  "password",
+  "passwd",
+  "apiKey",
+  "api_key",
+  "authorization",
+  "cookie",
+  "credential",
+  "credentials",
+  "privateKey",
+  "private_key",
+]);
+
+function normalizeKey(key: string): string {
+  return key.replace(/[-_]/g, "").toLowerCase();
+}
+
+const NORMALIZED_SECRET_KEYS = new Set(Array.from(SECRET_KEYS, normalizeKey));
+
+function shouldRedactKey(key: string): boolean {
+  return NORMALIZED_SECRET_KEYS.has(normalizeKey(key));
+}
 
 function makeId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -43,7 +71,7 @@ function truncate(value: string): string {
 
 function sanitize(value: unknown, key = "", depth = 0): unknown {
   if (depth > 8) return "[MAX_DEPTH]";
-  if (SECRET_KEY_PATTERN.test(key)) return REDACTED;
+  if (shouldRedactKey(key)) return REDACTED;
   if (value === null || value === undefined) return value;
   if (typeof value === "string") return truncate(value);
   if (typeof value === "number" || typeof value === "boolean") return value;

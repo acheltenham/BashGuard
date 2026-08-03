@@ -42,7 +42,7 @@ bashguard debrief 1
 - `sessions` lists recent and active recorded sessions with a `#` selector and copyable session prefix.
 - `attach` follows an active session or renders a completed session timeline. It accepts a session number, full session ID, unique session prefix, or `--session`.
 - `inspect` without `--event` lists inspectable events for a session. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or sequence.
-- `debrief` summarizes a completed session with evidence-based review notes, including a risk-notice count plus non-blocking risky-command notes with event, cwd, command-result evidence, and plain-language risk explanations.
+- `debrief` summarizes a completed session with evidence-based review notes, including a risk-notice count, non-blocking risky-command notes, and a `File tool activity` section for observed read/edit/write-tool events.
 
 Planned later commands include richer `open`/TUI and `replay` experiences.
 
@@ -99,7 +99,7 @@ The MVP does not require a cloud service, account, hosted dashboard, support for
 
 BashGuard has a working Milestone 0 foundation: a Pi extension records real sessions into local append-only JSONL, and a separate `bashguard` CLI can discover, attach to, inspect, and debrief those sessions without terminal scraping or a daemon.
 
-The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, file read/write/edit, shell command, capture-completeness, truncation/redaction, capture-gap evidence, and non-blocking risk notices for a small explicit set of risky shell command patterns. Risk review notes include event, cwd, command-result evidence, and plain-language risk explanations when available. Remaining work is focused on final manual validation, richer terminal UX, pre-execution command-resolution/risk previews, and file/Git impact correlation.
+The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, file read/write/edit, shell command, capture-completeness, truncation/redaction, capture-gap evidence, non-blocking risk notices for a small explicit set of risky shell command patterns, and file tool activity. Risk review notes include event, cwd, command-result evidence, and plain-language risk explanations when available. File activity is reported as observed Pi tool activity rather than inferred create/overwrite/delete impact. Remaining work is focused on final manual validation, richer terminal UX, pre-execution command-resolution/risk previews, and file/Git impact correlation.
 
 ## Installation and Usage
 

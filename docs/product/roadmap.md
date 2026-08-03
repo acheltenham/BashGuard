@@ -69,6 +69,7 @@ Goal: make a Pi session understandable after it happens.
 - observed, reported, and inferred evidence labels;
 - command output references;
 - non-blocking risk-notice counts and notes for explicit risky shell command patterns with event, cwd, command-result evidence context, and plain-language risk explanations;
+- file tool activity summaries for observed read, edit, and write-tool events without inferring create, overwrite, or delete impact;
 - richer session debrief;
 - items-worth-reviewing summary;
 - completed-session browsing.

@@ -95,7 +95,30 @@ The MVP does not require a cloud service, account, hosted dashboard, support for
 
 ## Current Status
 
-BashGuard is in product definition and early design. The immediate goal is to prove that a Pi session can be captured as a coherent local event stream and followed from a second terminal without disrupting the Pi experience.
+BashGuard has proven the first Milestone 0 foundation: a Pi extension can record a real session into local append-only JSONL, and a separate `bashguard` CLI process can discover and attach to that session without terminal scraping or a daemon.
+
+Current implementation focus: harden the CLI/session stream with automated tests, then add event inspection and session debriefs.
+
+## Local Development
+
+```bash
+npm install
+npm test
+npm run check
+```
+
+Manual attach test:
+
+```bash
+# Terminal 1
+BASHGUARD_DATA_DIR=/tmp/bashguard-test pi -e .
+
+# Terminal 2
+BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts sessions
+BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts attach
+```
+
+See [Separate-Terminal Attach Test](docs/testing/separate-terminal-attach.md).
 
 ## Documents
 

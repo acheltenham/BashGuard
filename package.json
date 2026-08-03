@@ -25,6 +25,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/**/*.test.ts",
     "sessions": "node --experimental-strip-types src/cli.ts sessions"
   },
   "devDependencies": {

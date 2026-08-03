@@ -1,7 +1,7 @@
 # Milestone 0: Observe a Real Pi Session
 
-**Status:** Ready for implementation  
-**Last updated:** July 23, 2026
+**Status:** In implementation  
+**Last updated:** August 3, 2026
 
 ## Objective
 
@@ -187,18 +187,23 @@ Worth reviewing
 
 Do not calculate an unexplained trust or confidence score.
 
-## Suggested Implementation Order
+## Implementation Progress
 
-1. Create workspace and shared event-model package.
-2. Implement event schema validation and JSONL writer/reader.
-3. Build Pi lifecycle capture spike.
-4. Persist one complete real session.
-5. Implement `bashguard sessions`.
-6. Implement non-interactive `bashguard attach` stream.
-7. Add reconnect and duplicate protection.
-8. Add event inspection.
-9. Add debrief generation.
-10. Replace or enhance the stream with the first interactive TUI.
+Completed foundation work:
+
+1. Pi lifecycle capture spike records session, prompt, agent, turn, message, tool, user-bash, and shutdown events.
+2. Append-only JSONL is written under the user-level BashGuard data directory, defaulting to `~/.bashguard/sessions/<session-id>/`.
+3. `bashguard sessions` discovers active and completed recorded sessions from a separate process.
+4. `bashguard attach [session-id]` renders historical events and follows live JSONL updates without a daemon.
+5. Session completion is detected from recorded `session.shutdown`, avoiding PID-only liveness claims.
+
+Next implementation order:
+
+1. Add automated tests for JSONL parsing, session discovery, liveness detection, and narration rendering.
+2. Add event inspection through `bashguard inspect <session-id> --event <event-id>`.
+3. Add debrief aggregation for completed sessions.
+4. Tighten event schema/capture-completeness rendering.
+5. Replace or enhance the stream with the first interactive TUI.
 
 ## Testing Strategy
 

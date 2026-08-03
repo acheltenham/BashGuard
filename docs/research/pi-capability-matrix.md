@@ -1,7 +1,7 @@
 # Pi Capability Matrix
 
 **Status:** Working document  
-**Last updated:** July 24, 2026
+**Last updated:** August 3, 2026
 
 ## Purpose
 
@@ -23,7 +23,7 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 |---|---|---|---|---|
 | Session lifecycle | Detect session start and end | Create bounded BashGuard session records | Confirmed | Pi 0.80.6 produced `session.started` and `session.shutdown` in the local spike |
 | Session identity | Read stable Pi session ID | Use Pi session ID as canonical BashGuard identity | Confirmed | Stable ID observed across the tested session and matched BashGuard output directory |
-| Session discovery | Find active and recent sessions | Support `bashguard sessions` and `attach` | Unknown | Prove discovery from a second process without terminal scraping |
+| Session discovery | Find active and recent sessions | Support `bashguard sessions` and `attach` | Confirmed | PR #5 discovered active and completed JSONL sessions from a separate process without terminal scraping |
 | Prompt correlation | Associate a prompt or turn with later actions | Explain what initiated a command or edit | Partial | `turnIndex` and timestamps observed; no explicit turn ID in tested payload |
 | Tool interception | Observe tool calls before execution | Preview and evaluate shell actions | Confirmed | `tool.requested` captured name, input, and `toolCallId` |
 | Tool results | Observe completion, result, and error metadata | Complete the action story | Confirmed | `tool.completed` correlated deterministically by `toolCallId` |
@@ -37,7 +37,7 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 | Out-of-band changes | Detect file changes caused by shell commands | Correlate command execution with repository impact | Unknown | Compare Git state before and after controlled command windows |
 | Git context | Read repository root, branch, and dirty state | Provide file-impact and recovery context | External capability | Prove reliable Git queries with timeouts and non-repo fallback |
 | Extension state | Persist BashGuard metadata in Pi sessions | Keep event correlation close to Pi data | Documented | Current spike uses independent JSONL; extension-entry semantics still need evaluation |
-| Local event transport | Tail new events from a second process | Power the live companion without a daemon | Unknown | Prove JSONL tailing, reconnect, partial-write handling, and multi-session discovery |
+| Local event transport | Tail new events from a second process | Power the live companion without a daemon | Confirmed | PR #5 tailed append-only JSONL live from a second process and replayed completed sessions; no daemon required |
 | Session storage path | Locate Pi session files locally | Support active and completed session browsing | Documented | Validate platform paths and project-specific directories during attach spike |
 | Custom UI | Render approval and explanation views inside Pi | Keep decisions in the active Pi terminal | Documented | Build minimal interaction after capture/attach foundation |
 | TUI components | Build a rich companion terminal | Provide timeline and event inspection | External capability | Select/prove Node terminal UI approach |
@@ -86,12 +86,9 @@ Observed event sequence included:
 
 ### Spike 1: Lifecycle and Correlation
 
-**Status: Nearly complete.**
+**Status: Complete for the Milestone 0 foundation.**
 
-Remaining checks:
-
-1. trigger the `edit` tool specifically;
-2. capture a sanitized example event sequence for documentation.
+Confirmed lifecycle, prompt, turn, message, tool, user-bash, and shutdown capture against real Pi 0.80.6 sessions. `edit` still deserves a targeted test before file-impact work, but it is not blocking the capture/attach foundation.
 
 ### Spike 2: Command Resolution
 
@@ -110,15 +107,23 @@ Document what BashGuard can show before execution and what remains unknowable un
 
 ### Spike 3: Separate-Process Attachment
 
-Prove that a second process can:
+**Status: Complete for the Milestone 0 foundation.**
+
+PR #5 proved that a second process can:
 
 - discover an active session;
 - identify its repository and state;
 - tail new BashGuard events;
-- reconnect after closing;
-- avoid duplicate events;
-- handle an incomplete final JSONL line;
-- open a completed session later.
+- render grounded live narration;
+- avoid duplicate events within an attach invocation using event sequence numbers;
+- mark a session complete after `session.shutdown`;
+- open and render a completed session later by full ID or unique prefix.
+
+Remaining hardening work:
+
+- add automated tests around discovery, JSONL parsing, and narration;
+- verify two simultaneous interactive Pi sessions;
+- persist attach cursors only if later UX requires independent-invocation resume.
 
 ### Spike 4: Pi-Native Interaction
 

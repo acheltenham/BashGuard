@@ -1,6 +1,6 @@
 # BashGuard Decision Log
 
-This log records product-level decisions. Detailed technical decisions should use Architecture Decision Records under `docs/adr/`.
+This log records product-level decisions. Detailed technical decisions should use Architecture Decision Records in this directory.
 
 ## Decision 001: Focus on Pi for the MVP
 

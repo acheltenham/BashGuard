@@ -310,7 +310,7 @@ A normalized event includes:
 - correlation identifiers;
 - capture completeness, missing fields, and redactions.
 
-See [Event Model](docs/architecture/event-model.md).
+See [Event Model](../architecture/event-model.md).
 
 ## Local Transport and Storage
 

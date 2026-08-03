@@ -125,12 +125,103 @@ function getDataRoot(): string {
   return process.env.BASHGUARD_DATA_DIR ?? join(homedir(), ".bashguard", "sessions");
 }
 
+type GitChangedFileDetail = {
+  path: string;
+  status: string;
+  additions?: number;
+  deletions?: number;
+  lineRanges?: string[];
+};
+
 function parseGitStatusPorcelain(stdout: string): string[] {
   return stdout
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
     .filter(Boolean)
     .map((line) => line.slice(3));
+}
+
+function parseGitNumstat(stdout: string): Map<string, { additions: number; deletions: number }> {
+  const stats = new Map<string, { additions: number; deletions: number }>();
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const [additionsRaw, deletionsRaw, path] = line.split("\t");
+    if (!path) continue;
+    const additions = additionsRaw === "-" ? 0 : Number(additionsRaw);
+    const deletions = deletionsRaw === "-" ? 0 : Number(deletionsRaw);
+    if (Number.isFinite(additions) && Number.isFinite(deletions)) stats.set(path, { additions, deletions });
+  }
+  return stats;
+}
+
+function mergeNumstat(...maps: Array<Map<string, { additions: number; deletions: number }>>): Map<string, { additions: number; deletions: number }> {
+  const merged = new Map<string, { additions: number; deletions: number }>();
+  for (const map of maps) {
+    for (const [path, stats] of map) {
+      const existing = merged.get(path) ?? { additions: 0, deletions: 0 };
+      merged.set(path, {
+        additions: existing.additions + stats.additions,
+        deletions: existing.deletions + stats.deletions,
+      });
+    }
+  }
+  return merged;
+}
+
+function formatLineRange(start: number, count: number): string {
+  if (count <= 1) return String(start);
+  return `${start}-${start + count - 1}`;
+}
+
+function parseGitDiffLineRanges(stdout: string): Map<string, string[]> {
+  const ranges = new Map<string, string[]>();
+  let currentPath: string | undefined;
+  for (const line of stdout.split(/\r?\n/)) {
+    const diffMatch = line.match(/^diff --git a\/(.*) b\/(.*)$/);
+    if (diffMatch?.[2]) {
+      currentPath = diffMatch[2];
+      continue;
+    }
+    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
+    if (!currentPath || !hunkMatch?.[1]) continue;
+    const start = Number(hunkMatch[1]);
+    const count = hunkMatch[2] === undefined ? 1 : Number(hunkMatch[2]);
+    if (!Number.isFinite(start) || !Number.isFinite(count)) continue;
+    const fileRanges = ranges.get(currentPath) ?? [];
+    fileRanges.push(formatLineRange(start, count));
+    ranges.set(currentPath, fileRanges);
+  }
+  return ranges;
+}
+
+function mergeLineRanges(...maps: Array<Map<string, string[]>>): Map<string, string[]> {
+  const merged = new Map<string, string[]>();
+  for (const map of maps) {
+    for (const [path, ranges] of map) {
+      merged.set(path, [...(merged.get(path) ?? []), ...ranges]);
+    }
+  }
+  return merged;
+}
+
+function parseGitStatusDetails(stdout: string, stats: Map<string, { additions: number; deletions: number }>, lineRanges: Map<string, string[]>): GitChangedFileDetail[] {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .map((line) => {
+      const status = line.slice(0, 2).trim() || line.slice(0, 2);
+      const path = line.slice(3);
+      const detail: GitChangedFileDetail = { path, status };
+      const stat = stats.get(path);
+      if (stat) {
+        detail.additions = stat.additions;
+        detail.deletions = stat.deletions;
+      }
+      const ranges = lineRanges.get(path);
+      if (ranges && ranges.length > 0) detail.lineRanges = Array.from(new Set(ranges));
+      return detail;
+    });
 }
 
 async function readGitValue(cwd: string, args: string[]): Promise<string | undefined> {
@@ -147,6 +238,19 @@ async function readGitValue(cwd: string, args: string[]): Promise<string | undef
   }
 }
 
+async function readGitStdout(cwd: string, args: string[], maxBuffer = 128 * 1024): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd,
+      timeout: 2_000,
+      maxBuffer,
+    });
+    return stdout;
+  } catch {
+    return "";
+  }
+}
+
 async function readGitStatus(cwd: string, phase: "start" | "shutdown"): Promise<Record<string, unknown>> {
   try {
     const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], {
@@ -155,6 +259,11 @@ async function readGitStatus(cwd: string, phase: "start" | "shutdown"): Promise<
       maxBuffer: 128 * 1024,
     });
     const changedFiles = parseGitStatusPorcelain(stdout);
+    const unstagedStats = parseGitNumstat(await readGitStdout(cwd, ["diff", "--numstat"]));
+    const stagedStats = parseGitNumstat(await readGitStdout(cwd, ["diff", "--cached", "--numstat"]));
+    const unstagedLineRanges = parseGitDiffLineRanges(await readGitStdout(cwd, ["diff", "--unified=0"]));
+    const stagedLineRanges = parseGitDiffLineRanges(await readGitStdout(cwd, ["diff", "--cached", "--unified=0"]));
+    const changedFileDetails = parseGitStatusDetails(stdout, mergeNumstat(unstagedStats, stagedStats), mergeLineRanges(unstagedLineRanges, stagedLineRanges));
     return {
       phase,
       isRepository: true,
@@ -162,6 +271,7 @@ async function readGitStatus(cwd: string, phase: "start" | "shutdown"): Promise<
       worktree: await readGitValue(cwd, ["rev-parse", "--show-toplevel"]),
       gitCommonDir: await readGitValue(cwd, ["rev-parse", "--git-common-dir"]),
       changedFiles,
+      changedFileDetails,
       changedFileCount: changedFiles.length,
     };
   } catch (error) {

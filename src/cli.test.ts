@@ -150,6 +150,7 @@ test("buildDebrief summarizes risky commands with event, cwd, and result evidenc
   ]);
 
   assert.equal(summary.captureState, "Complete");
+  assert.equal(summary.riskyCommands, 1);
   assert.deepEqual(summary.worthReviewing, ["risky shell command observed at event 2: `git reset --hard HEAD` (history or working-tree rewrite; cwd: /tmp/repo; result: exit 0; inspect: --event 2)"]);
 });
 
@@ -161,6 +162,7 @@ test("buildDebrief calls out missing completion evidence for risky commands", ()
   ]);
 
   assert.equal(summary.captureState, "Complete");
+  assert.equal(summary.riskyCommands, 1);
   assert.deepEqual(summary.worthReviewing, ["risky shell command observed at event 2: `rm -rf build` (destructive filesystem removal; result: missing command completion evidence; inspect: --event 2)"]);
 });
 
@@ -248,6 +250,7 @@ test("buildDebrief summarizes prompts, tools, shell commands, files, failures, a
   assert.equal(summary.shellCommands, 2);
   assert.equal(summary.filesObserved, 2);
   assert.equal(summary.failedCommands, 1);
+  assert.equal(summary.riskyCommands, 0);
   assert.equal(summary.captureState, "Partial");
   assert.deepEqual(summary.worthReviewing, [
     "one shell command completed without exit-code details",
@@ -299,6 +302,7 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
     shellCommands: 2,
     filesObserved: 2,
     failedCommands: 1,
+    riskyCommands: 1,
     captureState: "Partial",
     worthReviewing: ["one shell command failed"],
   });
@@ -310,6 +314,7 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /Shell commands\s{2,}2/);
   assert.match(output, /Files observed\s{2,}2/);
   assert.match(output, /Failed commands\s{2,}1/);
+  assert.match(output, /Risk notices\s{2,}1/);
   assert.match(output, /Capture state\s{2,}Partial/);
   assert.match(output, /Worth reviewing/);
   assert.match(output, /- one shell command failed/);

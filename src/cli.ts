@@ -54,6 +54,7 @@ export type DebriefSummary = {
   shellCommands: number;
   filesObserved: number;
   failedCommands: number;
+  riskyCommands: number;
   captureState: "Complete" | "Partial";
   worthReviewing: string[];
 };
@@ -556,6 +557,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
       })
       .filter((entry): entry is readonly [string, string] => entry !== undefined),
   ).values());
+  const riskyCommands = riskyCommandReviews.length;
   const captureGapEventList = normalizedEvents.filter((event) => event.type === "capture.gap");
   const captureGapEvents = captureGapEventList.length;
   const captureGapContexts = captureGapEventList
@@ -612,6 +614,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     shellCommands: shellRequests.length,
     filesObserved: files.size,
     failedCommands,
+    riskyCommands,
     captureState: captureReviewItems.length > 0 ? "Partial" : "Complete",
     worthReviewing,
   };
@@ -627,6 +630,7 @@ export function formatDebrief(summary: DebriefSummary): string {
     formatField("Shell commands", summary.shellCommands),
     formatField("Files observed", summary.filesObserved),
     formatField("Failed commands", summary.failedCommands),
+    formatField("Risk notices", summary.riskyCommands),
     formatField("Capture state", summary.captureState),
   ].filter((line): line is string => line !== undefined);
 

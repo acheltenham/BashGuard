@@ -68,7 +68,7 @@ Goal: make a Pi session understandable after it happens.
 - prompt, turn, and tool correlations;
 - observed, reported, and inferred evidence labels;
 - command output references;
-- non-blocking risk notices for explicit risky shell command patterns with event, cwd, and command-result evidence context;
+- non-blocking risk-notice counts and notes for explicit risky shell command patterns with event, cwd, and command-result evidence context;
 - richer session debrief;
 - items-worth-reviewing summary;
 - completed-session browsing.

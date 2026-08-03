@@ -469,8 +469,14 @@ function formatDuration(ms: number): string {
   return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
 }
 
-function formatRiskyCommandReview(command: string, risks: string[]): string {
-  return `risky shell command observed: \`${command}\` (${risks.join(", ")})`;
+function formatRiskyCommandReview(event: BashGuardEvent, command: string, risks: string[], resultEvidence: string): string {
+  const context = [
+    risks.join(", "),
+    event.cwd ? `cwd: ${event.cwd}` : undefined,
+    `result: ${resultEvidence}`,
+    `inspect: --event ${event.sequence}`,
+  ].filter((item): item is string => item !== undefined);
+  return `risky shell command observed at event ${event.sequence}: \`${command}\` (${context.join("; ")})`;
 }
 
 function formatCommandReview(count: number, message: string, commands: string[]): string {
@@ -523,6 +529,22 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
       .map(pathFor)
       .filter((path): path is string => Boolean(path)),
   );
+  const completionByToolCallId = new Map(
+    bashCompletions
+      .map((event) => {
+        const toolCallId = toolCallIdFor(event);
+        return toolCallId ? ([toolCallId, event] as const) : undefined;
+      })
+      .filter((entry): entry is readonly [string, BashGuardEvent] => entry !== undefined),
+  );
+  const resultEvidenceFor = (event: BashGuardEvent): string => {
+    const toolCallId = toolCallIdFor(event);
+    const completion = toolCallId ? completionByToolCallId.get(toolCallId) : undefined;
+    if (!completion) return "missing command completion evidence";
+    const exitCode = bashExitCodeFor(completion);
+    if (exitCode !== undefined) return `exit ${exitCode}`;
+    return completion.payload?.isError === true ? "failed without exit-code details" : "completed without exit-code details";
+  };
   const riskyCommandReviews = Array.from(new Map(
     normalizedEvents
       .filter((event) => (event.type === "tool.requested" && toolNameFor(event) === "bash") || event.type === "bash.user_requested")
@@ -530,7 +552,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
         const command = commandFor(event);
         if (!command) return undefined;
         const risks = classifyCommandRisk(command);
-        return risks.length > 0 ? ([command, formatRiskyCommandReview(command, risks)] as const) : undefined;
+        return risks.length > 0 ? ([`${event.sequence}:${command}`, formatRiskyCommandReview(event, command, risks, resultEvidenceFor(event))] as const) : undefined;
       })
       .filter((entry): entry is readonly [string, string] => entry !== undefined),
   ).values());

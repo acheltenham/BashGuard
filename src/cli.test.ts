@@ -141,15 +141,27 @@ test("formatEventInspection includes command risk factors", () => {
   assert.match(output, /Risk factors\s+network download piped to shell/);
 });
 
-test("buildDebrief summarizes risky commands without marking capture incomplete", () => {
+test("buildDebrief summarizes risky commands with event, cwd, and result evidence context", () => {
   const summary = buildDebrief([
     event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
-    event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "git reset --hard HEAD" } } }),
+    event(2, "tool.requested", { cwd: "/tmp/repo", toolName: "bash", toolCallId: "call-1", payload: { toolCallId: "call-1", input: { command: "git reset --hard HEAD" } } }),
+    event(3, "tool.completed", { toolName: "bash", toolCallId: "call-1", payload: { toolCallId: "call-1", isError: false, details: { exitCode: 0 } } }),
+    event(4, "session.shutdown", { timestamp: "2026-08-03T12:00:01.000Z" }),
+  ]);
+
+  assert.equal(summary.captureState, "Complete");
+  assert.deepEqual(summary.worthReviewing, ["risky shell command observed at event 2: `git reset --hard HEAD` (history or working-tree rewrite; cwd: /tmp/repo; result: exit 0; inspect: --event 2)"]);
+});
+
+test("buildDebrief calls out missing completion evidence for risky commands", () => {
+  const summary = buildDebrief([
+    event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
+    event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "rm -rf build" } } }),
     event(3, "session.shutdown", { timestamp: "2026-08-03T12:00:01.000Z" }),
   ]);
 
   assert.equal(summary.captureState, "Complete");
-  assert.deepEqual(summary.worthReviewing, ["risky shell command observed: `git reset --hard HEAD` (history or working-tree rewrite)"]);
+  assert.deepEqual(summary.worthReviewing, ["risky shell command observed at event 2: `rm -rf build` (destructive filesystem removal; result: missing command completion evidence; inspect: --event 2)"]);
 });
 
 test("findEvent resolves events by id, unique id prefix, or sequence string", () => {

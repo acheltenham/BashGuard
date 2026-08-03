@@ -32,7 +32,7 @@ Exit criteria:
 - BashGuard failure does not prevent Pi from running;
 - technical limitations are recorded in the capability matrix.
 
-Implementation reference: `docs/plans/milestone-0-observe-a-real-pi-session.md`.
+Implementation reference: [`Milestone 0 plan`](../plans/milestone-0-observe-a-real-pi-session.md).
 
 ## Phase 1: Live Terminal Companion
 

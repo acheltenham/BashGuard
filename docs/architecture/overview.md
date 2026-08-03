@@ -104,7 +104,7 @@ The event model supports:
 - type-specific payloads;
 - derived narrative events linked to source evidence.
 
-See [Event Model](docs/architecture/event-model.md).
+See [Event Model](event-model.md).
 
 ### Local Session Event Stream
 

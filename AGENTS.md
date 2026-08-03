@@ -10,8 +10,8 @@ Read these before changing behavior:
 - `docs/plans/milestone-0-observe-a-real-pi-session.md`
 - `docs/architecture/event-model.md`
 - `docs/research/pi-capability-matrix.md`
-- `ARCHITECTURE.md`
-- `PRODUCT_REQUIREMENTS.md`
+- `docs/architecture/overview.md`
+- `docs/product/requirements.md`
 
 ## Local development
 

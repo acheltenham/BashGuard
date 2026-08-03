@@ -146,7 +146,7 @@ cd bashguard
 pi install .
 ```
 
-These commands install the BashGuard Pi extension/package into Pi settings. Future Pi sessions started from any project should load the BashGuard extension automatically.
+These commands install the BashGuard Pi package into Pi settings. The package includes both the BashGuard session-recording extension and a complementary `bashguard` skill that helps Pi use the recorded evidence. Future Pi sessions started from any project should load both automatically.
 
 Start Pi normally from the project you want to record:
 
@@ -217,7 +217,7 @@ BashGuard can only attach to sessions recorded while the BashGuard extension was
 
 ### CLI availability
 
-`pi -e ...` and `pi install ...` load the BashGuard Pi extension. They do not necessarily install the `bashguard` shell command globally. During early development, run the CLI from a local checkout with `npm exec -- node --experimental-strip-types src/cli.ts ...` unless you have separately installed a packaged CLI.
+`pi -e ...` and `pi install ...` load the BashGuard Pi extension and bundled `bashguard` skill. They do not necessarily install the `bashguard` shell command globally. During early development, run the CLI from a local checkout with `npm exec -- node --experimental-strip-types src/cli.ts ...` unless you have separately installed a packaged CLI.
 
 ## Local Development
 

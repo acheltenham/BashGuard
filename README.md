@@ -32,14 +32,16 @@ Implemented in the Milestone 0 vertical slice:
 
 ```bash
 bashguard sessions
-bashguard attach [session-id]
-bashguard inspect <session-id> --event <event-id-or-sequence>
-bashguard debrief <session-id>
+bashguard attach 1
+bashguard attach --session 1
+bashguard inspect 1
+bashguard inspect 1 --event <event-id-prefix-or-sequence>
+bashguard debrief 1
 ```
 
-- `sessions` lists recent and active recorded sessions.
-- `attach` follows an active session or renders a completed session timeline.
-- `inspect` prints evidence for one recorded event by ID or sequence.
+- `sessions` lists recent and active recorded sessions with a `#` selector and copyable session prefix.
+- `attach` follows an active session or renders a completed session timeline. It accepts a session number, full session ID, unique session prefix, or `--session`.
+- `inspect` without `--event` lists inspectable events for a session. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or sequence.
 - `debrief` summarizes a completed session with evidence-based review notes.
 
 Planned later commands include richer `open`/TUI and `replay` experiences.
@@ -99,6 +101,94 @@ BashGuard has a working Milestone 0 foundation: a Pi extension records real sess
 
 The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, file read/write/edit, shell command, capture-completeness, truncation/redaction, and capture-gap evidence. Remaining work is focused on final manual validation, richer terminal UX, command-resolution/risk previews, and file/Git impact correlation.
 
+## Installation and Usage
+
+### Install BashGuard as a default Pi extension
+
+From your local BashGuard checkout:
+
+```bash
+cd bashguard
+pi install .
+```
+
+That installs this local package into Pi user settings. Future Pi sessions started from any project should load the BashGuard extension automatically.
+
+Start Pi normally from the project you want to record:
+
+```bash
+cd your-project
+pi
+```
+
+In another terminal, list and inspect recorded BashGuard sessions. If the `bashguard` CLI is on your `PATH`, use:
+
+```bash
+bashguard sessions
+bashguard attach 1
+bashguard inspect 1
+bashguard inspect 1 --event <event-id-prefix-or-sequence>
+bashguard debrief 1
+```
+
+During local development, run the CLI from your BashGuard checkout instead:
+
+```bash
+cd bashguard
+npm exec -- node --experimental-strip-types src/cli.ts sessions
+npm exec -- node --experimental-strip-types src/cli.ts attach 1
+npm exec -- node --experimental-strip-types src/cli.ts inspect 1
+npm exec -- node --experimental-strip-types src/cli.ts inspect 1 --event <event-id-prefix-or-sequence>
+npm exec -- node --experimental-strip-types src/cli.ts debrief 1
+```
+
+The `--session` form is also supported:
+
+```bash
+bashguard attach --session 1
+bashguard inspect --session 1 --event <event-id-prefix-or-sequence>
+bashguard debrief --session 1
+```
+
+Check installed Pi packages with:
+
+```bash
+pi list
+```
+
+Remove the local BashGuard package with the same path you installed:
+
+```bash
+pi remove /absolute/path/to/your/bashguard-checkout
+```
+
+### Where sessions are stored
+
+By default BashGuard records sessions in:
+
+```text
+~/.bashguard/sessions
+```
+
+That storage is shared across projects, so `bashguard sessions` can show recorded sessions from different repositories no matter which directory you run the CLI from.
+
+Use `BASHGUARD_DATA_DIR` to isolate test data:
+
+```bash
+BASHGUARD_DATA_DIR=/tmp/bashguard-test bashguard sessions
+```
+
+BashGuard can only attach to sessions recorded while the BashGuard extension was loaded and writing to the same data directory. Older Pi sessions without BashGuard JSONL records cannot be attached retroactively.
+
+### Development mode without installing
+
+For quick tests, load the local extension for one Pi run:
+
+```bash
+cd bashguard
+pi -e .
+```
+
 ## Local Development
 
 ```bash
@@ -123,8 +213,6 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.t
 ```
 
 See [Separate-Terminal Attach Test](docs/testing/separate-terminal-attach.md).
-
-BashGuard can only attach to sessions recorded while the BashGuard extension was loaded. Older Pi sessions without BashGuard JSONL records cannot be attached retroactively.
 
 ## Documents
 

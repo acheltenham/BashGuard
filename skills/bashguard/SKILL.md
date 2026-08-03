@@ -43,7 +43,7 @@ bashguard debrief <session-selector>
 bashguard debrief --session <session-selector>
 ```
 
-BashGuard may surface non-blocking risk notices for a small explicit set of risky shell command patterns. Debrief risk notes can include event sequence, cwd, command-result evidence, and an `--event` inspect hint. Treat these as observation-only review notes, not as evidence that BashGuard warned, approved, blocked, or interrupted execution.
+BashGuard may surface non-blocking risk notices for a small explicit set of risky shell command patterns. Debriefs include a `Risk notices` count, and risk notes can include event sequence, cwd, command-result evidence, a plain-language risk explanation, and an `--event` inspect hint. Treat these as observation-only review notes, not as evidence that BashGuard warned, approved, blocked, or interrupted execution.
 
 Prefer session `#` selectors from `bashguard sessions` when available. Unique session prefixes are also acceptable. Do not ask users to copy middle-truncated display IDs.
 

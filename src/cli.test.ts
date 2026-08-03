@@ -139,6 +139,7 @@ test("formatEventInspection includes command risk factors", () => {
   }));
 
   assert.match(output, /Risk factors\s+network download piped to shell/);
+  assert.match(output, /Risk why\s+downloads code from the network and executes it in a shell/);
 });
 
 test("buildDebrief summarizes risky commands with event, cwd, and result evidence context", () => {
@@ -151,7 +152,9 @@ test("buildDebrief summarizes risky commands with event, cwd, and result evidenc
 
   assert.equal(summary.captureState, "Complete");
   assert.equal(summary.riskyCommands, 1);
-  assert.deepEqual(summary.worthReviewing, ["risky shell command observed at event 2: `git reset --hard HEAD` (history or working-tree rewrite; cwd: /tmp/repo; result: exit 0; inspect: --event 2)"]);
+  assert.deepEqual(summary.worthReviewing, [
+    "risky shell command observed at event 2: `git reset --hard HEAD`\n  Risk: history or working-tree rewrite — can discard local changes or rewrite repository state\n  Cwd: /tmp/repo\n  Result: exit 0\n  Inspect: --event 2",
+  ]);
 });
 
 test("buildDebrief calls out missing completion evidence for risky commands", () => {
@@ -163,7 +166,9 @@ test("buildDebrief calls out missing completion evidence for risky commands", ()
 
   assert.equal(summary.captureState, "Complete");
   assert.equal(summary.riskyCommands, 1);
-  assert.deepEqual(summary.worthReviewing, ["risky shell command observed at event 2: `rm -rf build` (destructive filesystem removal; result: missing command completion evidence; inspect: --event 2)"]);
+  assert.deepEqual(summary.worthReviewing, [
+    "risky shell command observed at event 2: `rm -rf build`\n  Risk: destructive filesystem removal — recursively deletes files without a trash/undo step\n  Result: missing command completion evidence\n  Inspect: --event 2",
+  ]);
 });
 
 test("findEvent resolves events by id, unique id prefix, or sequence string", () => {

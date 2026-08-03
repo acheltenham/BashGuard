@@ -56,6 +56,10 @@ export type DebriefSummary = {
   fileToolActions: number;
   failedCommands: number;
   riskyCommands: number;
+  gitStatus?: string;
+  gitBranch?: string;
+  gitWorktree?: string;
+  gitChangedPaths?: string;
   captureState: "Complete" | "Partial";
   worthReviewing: string[];
   fileActivity: string[];
@@ -347,6 +351,13 @@ export function renderEvent(event: BashGuardEvent): string | undefined {
       const base = reason ? `Capture gap · ${reason}` : "Capture gap";
       return context ? `${base} · ${context}` : base;
     }
+    case "git.status.snapshot": {
+      const phase = getString(payload.phase) ?? "unknown";
+      if (payload.isRepository === false) return `Git status snapshot · ${phase} · not a repository`;
+      const changedFileCount = getStringArray(payload.changedFiles).length;
+      const state = changedFileCount > 0 ? "dirty" : "clean";
+      return `Git status snapshot · ${phase} · ${state} · ${changedFileCount} changed ${changedFileCount === 1 ? "path" : "paths"}`;
+    }
     case "agent.ended":
       return "Agent turn complete";
     default:
@@ -527,6 +538,35 @@ function formatFileActivity(event: BashGuardEvent): string | undefined {
   return [`${action} ${path}`, `  Meaning: ${meaning}`, `  Evidence: ${tool} tool event`, `  Inspect: --event ${event.sequence}`].join("\n");
 }
 
+function getStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function gitSnapshotStatus(event: BashGuardEvent | undefined): "clean" | "dirty" | "not a repository" | "missing" {
+  if (!event) return "missing";
+  if (event.payload?.isRepository === false) return "not a repository";
+  return getStringArray(event.payload?.changedFiles).length > 0 ? "dirty" : "clean";
+}
+
+function gitSnapshotCount(event: BashGuardEvent | undefined): number | undefined {
+  if (!event || event.payload?.isRepository === false) return undefined;
+  return getStringArray(event.payload?.changedFiles).length;
+}
+
+function formatGitChangedPaths(start: BashGuardEvent | undefined, end: BashGuardEvent | undefined): string | undefined {
+  const startCount = gitSnapshotCount(start);
+  const endCount = gitSnapshotCount(end);
+  if (startCount === undefined || endCount === undefined) return undefined;
+  return `${startCount} -> ${endCount}`;
+}
+
+function formatGitSnapshotValue(key: string, start: BashGuardEvent | undefined, end: BashGuardEvent | undefined): string | undefined {
+  const startValue = getString(start?.payload?.[key]);
+  const endValue = getString(end?.payload?.[key]);
+  if (startValue && endValue && startValue !== endValue) return `${startValue} -> ${endValue}`;
+  return endValue ?? startValue;
+}
+
 function formatCommandReview(count: number, message: string, commands: string[]): string {
   const uniqueCommands = Array.from(new Set(commands.filter(Boolean)));
   if (count === 1 && uniqueCommands.length === 1) return `shell command ${message}: \`${uniqueCommands[0]}\``;
@@ -606,6 +646,18 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
       .filter((entry): entry is readonly [string, string] => entry !== undefined),
   ).values());
   const riskyCommands = riskyCommandReviews.length;
+  const gitSnapshots = normalizedEvents.filter((event) => event.type === "git.status.snapshot");
+  const gitStartSnapshot = gitSnapshots.find((event) => getString(event.payload?.phase) === "start");
+  const gitEndSnapshot = [...gitSnapshots].reverse().find((event) => getString(event.payload?.phase) === "shutdown");
+  const gitStatus = gitSnapshots.length > 0 ? `${gitSnapshotStatus(gitStartSnapshot)} -> ${gitSnapshotStatus(gitEndSnapshot)}` : undefined;
+  const gitBranch = formatGitSnapshotValue("branch", gitStartSnapshot, gitEndSnapshot);
+  const gitWorktree = formatGitSnapshotValue("worktree", gitStartSnapshot, gitEndSnapshot);
+  const gitChangedPaths = formatGitChangedPaths(gitStartSnapshot, gitEndSnapshot);
+  const startGitCount = gitSnapshotCount(gitStartSnapshot);
+  const endGitCount = gitSnapshotCount(gitEndSnapshot);
+  const gitReviewItem = startGitCount !== undefined && endGitCount !== undefined && startGitCount !== endGitCount
+    ? `Git working tree changed during session: ${startGitCount} -> ${endGitCount} changed paths`
+    : undefined;
   const captureGapEventList = normalizedEvents.filter((event) => event.type === "capture.gap");
   const captureGapEvents = captureGapEventList.length;
   const captureGapContexts = captureGapEventList
@@ -652,6 +704,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     failedWithExitCode.filter((event) => !commandForCompletion(event)).length > 0
       ? `${formatCount(failedWithExitCode.filter((event) => !commandForCompletion(event)).length, "shell command")} failed`
       : undefined,
+    gitReviewItem,
     ...captureReviewItems,
   ].filter((item): item is string => item !== undefined);
 
@@ -664,6 +717,10 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     fileToolActions: fileActivity.length,
     failedCommands,
     riskyCommands,
+    gitStatus,
+    gitBranch,
+    gitWorktree,
+    gitChangedPaths,
     captureState: captureReviewItems.length > 0 ? "Partial" : "Complete",
     worthReviewing,
     fileActivity,
@@ -682,6 +739,10 @@ export function formatDebrief(summary: DebriefSummary): string {
     formatField("File tool actions", summary.fileToolActions),
     formatField("Failed commands", summary.failedCommands),
     formatField("Risk notices", summary.riskyCommands),
+    formatField("Git status", summary.gitStatus),
+    formatField("Git branch", summary.gitBranch),
+    formatField("Git worktree", summary.gitWorktree),
+    formatField("Git changed paths", summary.gitChangedPaths),
     formatField("Capture state", summary.captureState),
   ].filter((line): line is string => line !== undefined);
 

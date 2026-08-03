@@ -68,6 +68,7 @@ Goal: make a Pi session understandable after it happens.
 - prompt, turn, and tool correlations;
 - observed, reported, and inferred evidence labels;
 - command output references;
+- non-blocking risk notices for explicit risky shell command patterns;
 - richer session debrief;
 - items-worth-reviewing summary;
 - completed-session browsing.
@@ -76,7 +77,8 @@ Exit criteria:
 
 - a developer can find a surprising command or file and identify the strongest available causal evidence;
 - timeline gaps and redactions are visible rather than hidden;
-- the debrief provides useful evidence without an unexplained trust score.
+- the debrief provides useful evidence without an unexplained trust score;
+- risky-command summaries are clearly observation-only until the pre-execution guard exists.
 
 ## Phase 3: Resolved Command Guard
 

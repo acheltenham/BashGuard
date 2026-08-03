@@ -244,6 +244,31 @@ function getNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+export function classifyCommandRisk(command: string): string[] {
+  const normalized = command.toLowerCase();
+  const risks: string[] = [];
+
+  if (/\brm\s+[^\n;|&]*-(?:[^\s]*r[^\s]*f|[^\s]*f[^\s]*r)\b/.test(normalized)) {
+    risks.push("destructive filesystem removal");
+  }
+  if (/\bgit\s+(reset\s+--hard|clean\s+-[^\n;|&]*f|push\s+[^\n;|&]*--force|rebase\b)/.test(normalized)) {
+    risks.push("history or working-tree rewrite");
+  }
+  if (/\b(curl|wget)\b[^\n]*\|\s*(sh|bash|zsh|fish|sudo\s+(sh|bash))\b/.test(normalized)) {
+    risks.push("network download piped to shell");
+  }
+  if (/\b(token|api[_-]?key|password|passwd|secret)=\S+/i.test(command)) {
+    risks.push("secret-looking value in command text");
+  }
+
+  return risks;
+}
+
+function formatRiskNotice(command: string): string | undefined {
+  const risks = classifyCommandRisk(command);
+  return risks.length > 0 ? `Risk notice: ${risks.join(", ")}` : undefined;
+}
+
 export function renderEvent(event: BashGuardEvent): string | undefined {
   const payload = event.payload ?? {};
 
@@ -261,6 +286,8 @@ export function renderEvent(event: BashGuardEvent): string | undefined {
       const input = payload.input as Record<string, unknown> | undefined;
       if (tool === "bash") {
         const command = getString(input?.command);
+        const riskNotice = command ? formatRiskNotice(command) : undefined;
+        if (command && riskNotice) return `Running · ${command} · ${riskNotice}`;
         return command ? `Running · ${command}` : "Running shell command";
       }
       if (tool === "read") {
@@ -289,6 +316,8 @@ export function renderEvent(event: BashGuardEvent): string | undefined {
     }
     case "bash.user_requested": {
       const command = getString(payload.command);
+      const riskNotice = command ? formatRiskNotice(command) : undefined;
+      if (command && riskNotice) return `You ran · ${command} · ${riskNotice}`;
       return command ? `You ran · ${command}` : "You ran a shell command";
     }
     case "capture.gap": {
@@ -364,6 +393,7 @@ export function formatEventInspection(event: BashGuardEvent): string {
   const command = getString(payload.command) ?? getString(input?.command);
   const path = getString(payload.path) ?? getString(input?.path);
   const exitCode = getNumber(details?.exitCode);
+  const riskFactors = command ? classifyCommandRisk(command) : [];
 
   const lines = [
     "Event detail",
@@ -381,6 +411,7 @@ export function formatEventInspection(event: BashGuardEvent): string {
     formatField("Tool", normalized.toolName ?? getString(payload.toolName)),
     formatField("Tool call", normalized.toolCallId ?? getString(payload.toolCallId)),
     formatField("Command", command),
+    formatField("Risk factors", riskFactors.join(", ")),
     formatField("Path", path),
     formatField("Exit code", exitCode),
   ].filter((line): line is string => line !== undefined);
@@ -438,6 +469,10 @@ function formatDuration(ms: number): string {
   return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
 }
 
+function formatRiskyCommandReview(command: string, risks: string[]): string {
+  return `risky shell command observed: \`${command}\` (${risks.join(", ")})`;
+}
+
 function formatCommandReview(count: number, message: string, commands: string[]): string {
   const uniqueCommands = Array.from(new Set(commands.filter(Boolean)));
   if (count === 1 && uniqueCommands.length === 1) return `shell command ${message}: \`${uniqueCommands[0]}\``;
@@ -488,6 +523,17 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
       .map(pathFor)
       .filter((path): path is string => Boolean(path)),
   );
+  const riskyCommandReviews = Array.from(new Map(
+    normalizedEvents
+      .filter((event) => (event.type === "tool.requested" && toolNameFor(event) === "bash") || event.type === "bash.user_requested")
+      .map((event) => {
+        const command = commandFor(event);
+        if (!command) return undefined;
+        const risks = classifyCommandRisk(command);
+        return risks.length > 0 ? ([command, formatRiskyCommandReview(command, risks)] as const) : undefined;
+      })
+      .filter((entry): entry is readonly [string, string] => entry !== undefined),
+  ).values());
   const captureGapEventList = normalizedEvents.filter((event) => event.type === "capture.gap");
   const captureGapEvents = captureGapEventList.length;
   const captureGapContexts = captureGapEventList
@@ -504,7 +550,20 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const missingCaptureEvents = nonGapEvents.filter((event) => (event.capture?.missing.length ?? 0) > 0).length;
   const redactedEvents = nonGapEvents.filter((event) => (event.capture?.redacted.length ?? 0) > 0).length;
   const truncatedEvents = nonGapEvents.filter((event) => (event.capture?.truncated.length ?? 0) > 0).length;
+  const captureReviewItems = [
+    captureGapEvents > 0
+      ? `${formatCount(captureGapEvents, "capture gap")} occurred during recording${captureGapEvents === 1 && captureGapContexts[0] ? `: ${captureGapContexts[0]}` : ""}`
+      : undefined,
+    missingCaptureEvents > 0 ? `${formatCount(missingCaptureEvents, "event")} ${missingCaptureEvents === 1 ? "has" : "have"} missing capture fields` : undefined,
+    redactedEvents > 0
+      ? `${formatCount(redactedEvents, "event")} ${redactedEvents === 1 ? "has" : "have"} redacted fields (values hidden; run inspect on related events to see redacted paths)`
+      : undefined,
+    truncatedEvents > 0
+      ? `${formatCount(truncatedEvents, "event")} ${truncatedEvents === 1 ? "has" : "have"} truncated fields (large values shortened; run inspect to see truncated paths)`
+      : undefined,
+  ].filter((item): item is string => item !== undefined);
   const worthReviewing = [
+    ...riskyCommandReviews,
     failedWithoutExitCodeCount > 0
       ? formatCommandReview(failedWithoutExitCodeCount, "failed without exit-code details", failedWithoutExitCode.map(commandForCompletion).filter((command): command is string => Boolean(command)))
       : undefined,
@@ -521,16 +580,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     failedWithExitCode.filter((event) => !commandForCompletion(event)).length > 0
       ? `${formatCount(failedWithExitCode.filter((event) => !commandForCompletion(event)).length, "shell command")} failed`
       : undefined,
-    captureGapEvents > 0
-      ? `${formatCount(captureGapEvents, "capture gap")} occurred during recording${captureGapEvents === 1 && captureGapContexts[0] ? `: ${captureGapContexts[0]}` : ""}`
-      : undefined,
-    missingCaptureEvents > 0 ? `${formatCount(missingCaptureEvents, "event")} ${missingCaptureEvents === 1 ? "has" : "have"} missing capture fields` : undefined,
-    redactedEvents > 0
-      ? `${formatCount(redactedEvents, "event")} ${redactedEvents === 1 ? "has" : "have"} redacted fields (values hidden; run inspect on related events to see redacted paths)`
-      : undefined,
-    truncatedEvents > 0
-      ? `${formatCount(truncatedEvents, "event")} ${truncatedEvents === 1 ? "has" : "have"} truncated fields (large values shortened; run inspect to see truncated paths)`
-      : undefined,
+    ...captureReviewItems,
   ].filter((item): item is string => item !== undefined);
 
   return {
@@ -540,7 +590,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     shellCommands: shellRequests.length,
     filesObserved: files.size,
     failedCommands,
-    captureState: worthReviewing.length > 0 ? "Partial" : "Complete",
+    captureState: captureReviewItems.length > 0 ? "Partial" : "Complete",
     worthReviewing,
   };
 }

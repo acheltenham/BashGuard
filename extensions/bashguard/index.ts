@@ -8,6 +8,7 @@ type EvidenceKind = "observed" | "reported" | "inferred" | "redacted" | "missing
 type CaptureMetadata = {
   missing: string[];
   redacted: string[];
+  truncated: string[];
 };
 
 type BashGuardEvent = {
@@ -70,33 +71,34 @@ function makeId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function truncate(value: string): string {
+function truncate(value: string, path: string, truncated: string[]): string {
   if (value.length <= MAX_TEXT_LENGTH) return value;
+  truncated.push(path);
   return `${value.slice(0, MAX_TEXT_LENGTH)}\n...[truncated ${value.length - MAX_TEXT_LENGTH} characters]`;
 }
 
-function sanitize(value: unknown, key = "", depth = 0, redacted: string[] = [], path = "payload"): unknown {
+function sanitize(value: unknown, key = "", depth = 0, redacted: string[] = [], truncated: string[] = [], path = "payload"): unknown {
   if (depth > 8) return "[MAX_DEPTH]";
   if (shouldRedactKey(key)) {
     redacted.push(path);
     return REDACTED;
   }
   if (value === null || value === undefined) return value;
-  if (typeof value === "string") return truncate(value);
+  if (typeof value === "string") return truncate(value, path, truncated);
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return value.toString();
   if (value instanceof Error) {
     return {
       name: value.name,
-      message: truncate(value.message),
-      stack: value.stack ? truncate(value.stack) : undefined,
+      message: truncate(value.message, `${path}.message`, truncated),
+      stack: value.stack ? truncate(value.stack, `${path}.stack`, truncated) : undefined,
     };
   }
-  if (Array.isArray(value)) return value.map((entry, index) => sanitize(entry, key, depth + 1, redacted, `${path}.${index}`));
+  if (Array.isArray(value)) return value.map((entry, index) => sanitize(entry, key, depth + 1, redacted, truncated, `${path}.${index}`));
   if (typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
-      result[childKey] = sanitize(childValue, childKey, depth + 1, redacted, `${path}.${childKey}`);
+      result[childKey] = sanitize(childValue, childKey, depth + 1, redacted, truncated, `${path}.${childKey}`);
     }
     return result;
   }
@@ -156,7 +158,8 @@ export default function bashGuard(pi: ExtensionAPI): void {
     if (!state) state = await createSessionState(ctx);
     const sequence = ++state.sequence;
     const redacted: string[] = [];
-    const safePayload = sanitize(payload, "", 0, redacted) as Record<string, unknown>;
+    const truncated: string[] = [];
+    const safePayload = sanitize(payload, "", 0, redacted, truncated) as Record<string, unknown>;
     const missing: string[] = [];
     const event: BashGuardEvent = {
       schemaVersion: 1,
@@ -172,7 +175,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
       toolCallId: typeof safePayload.toolCallId === "string" ? safePayload.toolCallId : undefined,
       toolName: typeof safePayload.toolName === "string" ? safePayload.toolName : undefined,
       payload: safePayload,
-      capture: { missing, redacted },
+      capture: { missing, redacted, truncated },
     };
 
     writeChain = writeChain.then(() => appendFile(state!.eventsFile, `${JSON.stringify(event)}\n`, "utf8"));

@@ -19,6 +19,7 @@ export type SessionMetadata = {
 export type CaptureMetadata = {
   missing: string[];
   redacted: string[];
+  truncated: string[];
 };
 
 export type BashGuardEvent = {
@@ -92,6 +93,7 @@ export function normalizeEvent(event: BashGuardEvent): BashGuardEvent {
     capture: {
       missing: Array.isArray(event.capture?.missing) ? event.capture.missing : [],
       redacted: Array.isArray(event.capture?.redacted) ? event.capture.redacted : [],
+      truncated: Array.isArray(event.capture?.truncated) ? event.capture.truncated : [],
     },
   };
 }
@@ -290,6 +292,7 @@ export function formatEventInspection(event: BashGuardEvent): string {
     formatField("Evidence", normalized.evidence ?? "unknown"),
     formatField("Missing", normalized.capture?.missing.join(", ")),
     formatField("Redacted", normalized.capture?.redacted.join(", ")),
+    formatField("Truncated", normalized.capture?.truncated.join(", ")),
     formatField("Session", normalized.sessionId),
     formatField("Cwd", normalized.cwd),
     formatField("Tool", normalized.toolName ?? getString(payload.toolName)),
@@ -404,6 +407,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   );
   const missingCaptureEvents = normalizedEvents.filter((event) => (event.capture?.missing.length ?? 0) > 0).length;
   const redactedEvents = normalizedEvents.filter((event) => (event.capture?.redacted.length ?? 0) > 0).length;
+  const truncatedEvents = normalizedEvents.filter((event) => (event.capture?.truncated.length ?? 0) > 0).length;
   const worthReviewing = [
     failedWithoutExitCodeCount > 0
       ? formatCommandReview(failedWithoutExitCodeCount, "failed without exit-code details", failedWithoutExitCode.map(commandForCompletion).filter((command): command is string => Boolean(command)))
@@ -421,9 +425,12 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     failedWithExitCode.filter((event) => !commandForCompletion(event)).length > 0
       ? `${formatCount(failedWithExitCode.filter((event) => !commandForCompletion(event)).length, "shell command")} failed`
       : undefined,
-    missingCaptureEvents > 0 ? `${formatCount(missingCaptureEvents, "event")} has missing capture fields` : undefined,
+    missingCaptureEvents > 0 ? `${formatCount(missingCaptureEvents, "event")} ${missingCaptureEvents === 1 ? "has" : "have"} missing capture fields` : undefined,
     redactedEvents > 0
-      ? `${formatCount(redactedEvents, "event")} has redacted fields (values hidden; run inspect on related events to see redacted paths)`
+      ? `${formatCount(redactedEvents, "event")} ${redactedEvents === 1 ? "has" : "have"} redacted fields (values hidden; run inspect on related events to see redacted paths)`
+      : undefined,
+    truncatedEvents > 0
+      ? `${formatCount(truncatedEvents, "event")} ${truncatedEvents === 1 ? "has" : "have"} truncated fields (large values shortened; run inspect to see truncated paths)`
       : undefined,
   ].filter((item): item is string => item !== undefined);
 

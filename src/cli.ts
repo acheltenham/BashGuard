@@ -40,6 +40,17 @@ export type SessionSummary = {
   active: boolean;
 };
 
+export type DebriefSummary = {
+  durationMs: number;
+  prompts: number;
+  toolCalls: number;
+  shellCommands: number;
+  filesObserved: number;
+  failedCommands: number;
+  captureState: "Complete" | "Partial";
+  worthReviewing: string[];
+};
+
 const POLL_MS = 250;
 
 function getDataRoot(): string {
@@ -47,7 +58,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard attach [session-id]\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard attach [session-id]\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -241,7 +252,7 @@ export function findEvent(events: BashGuardEvent[], eventIdOrSequence: string): 
 
 function formatField(label: string, value: unknown): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
-  return `${label.padEnd(12)} ${String(value)}`;
+  return `${label.padEnd(16)} ${String(value)}`;
 }
 
 export function formatEventInspection(event: BashGuardEvent): string {
@@ -270,6 +281,101 @@ export function formatEventInspection(event: BashGuardEvent): string {
   ].filter((line): line is string => line !== undefined);
 
   lines.push("", "Payload", JSON.stringify(payload, null, 2));
+  return `${lines.join("\n")}\n`;
+}
+
+function inputFor(event: BashGuardEvent): Record<string, unknown> | undefined {
+  return event.payload?.input as Record<string, unknown> | undefined;
+}
+
+function toolNameFor(event: BashGuardEvent): string | undefined {
+  return event.toolName ?? getString(event.payload?.toolName);
+}
+
+function pathFor(event: BashGuardEvent): string | undefined {
+  const payload = event.payload ?? {};
+  return getString(payload.path) ?? getString(inputFor(event)?.path);
+}
+
+function bashExitCodeFor(event: BashGuardEvent): number | undefined {
+  return getNumber((event.payload?.details as Record<string, unknown> | undefined)?.exitCode);
+}
+
+function formatCount(value: number, singular: string, plural = `${singular}s`): string {
+  return `${value === 1 ? "one" : value} ${value === 1 ? singular : plural}`;
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
+}
+
+export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
+  const timestamps = events
+    .map((event) => Date.parse(event.timestamp))
+    .filter((timestamp) => Number.isFinite(timestamp));
+  const durationMs = timestamps.length > 1 ? Math.max(...timestamps) - Math.min(...timestamps) : 0;
+  const toolRequests = events.filter((event) => event.type === "tool.requested");
+  const shellRequests = toolRequests.filter((event) => toolNameFor(event) === "bash");
+  const bashCompletions = events.filter((event) => event.type === "tool.completed" && toolNameFor(event) === "bash");
+  const failedBashCompletions = bashCompletions.filter((event) => {
+    const exitCode = bashExitCodeFor(event);
+    return event.payload?.isError === true || (exitCode !== undefined && exitCode !== 0);
+  });
+  const failedCommands = failedBashCompletions.length;
+  const failedWithoutExitCodeCount = failedBashCompletions.filter((event) => bashExitCodeFor(event) === undefined).length;
+  const missingExitCodeCount = bashCompletions.filter((event) => bashExitCodeFor(event) === undefined).length;
+  const nonFailedMissingExitCodeCount = missingExitCodeCount - failedWithoutExitCodeCount;
+  const files = new Set(
+    toolRequests
+      .filter((event) => ["read", "write", "edit"].includes(toolNameFor(event) ?? ""))
+      .map(pathFor)
+      .filter((path): path is string => Boolean(path)),
+  );
+  const worthReviewing = [
+    failedWithoutExitCodeCount > 0
+      ? `${formatCount(failedWithoutExitCodeCount, "shell command")} failed without exit-code details`
+      : undefined,
+    nonFailedMissingExitCodeCount > 0
+      ? `${formatCount(nonFailedMissingExitCodeCount, "bash command")} completed without exit-code details`
+      : undefined,
+    failedCommands - failedWithoutExitCodeCount > 0
+      ? `${formatCount(failedCommands - failedWithoutExitCodeCount, "shell command")} failed`
+      : undefined,
+  ].filter((item): item is string => item !== undefined);
+
+  return {
+    durationMs,
+    prompts: events.filter((event) => event.type === "agent.before_start").length,
+    toolCalls: toolRequests.length,
+    shellCommands: shellRequests.length,
+    filesObserved: files.size,
+    failedCommands,
+    captureState: worthReviewing.length > 0 ? "Partial" : "Complete",
+    worthReviewing,
+  };
+}
+
+export function formatDebrief(summary: DebriefSummary): string {
+  const lines = [
+    "Session complete",
+    "",
+    formatField("Duration", formatDuration(summary.durationMs)),
+    formatField("Prompts", summary.prompts),
+    formatField("Tool calls", summary.toolCalls),
+    formatField("Shell commands", summary.shellCommands),
+    formatField("Files observed", summary.filesObserved),
+    formatField("Failed commands", summary.failedCommands),
+    formatField("Capture state", summary.captureState),
+  ].filter((line): line is string => line !== undefined);
+
+  if (summary.worthReviewing.length > 0) {
+    lines.push("", "Worth reviewing", ...summary.worthReviewing.map((item) => `- ${item}`));
+  }
+
   return `${lines.join("\n")}\n`;
 }
 
@@ -303,6 +409,14 @@ async function inspect(sessionId: string | undefined, eventIdOrSequence: string 
   if (!event) throw new Error(`Event ${eventIdOrSequence} was not found in session ${session.metadata.sessionId}`);
 
   process.stdout.write(formatEventInspection(event));
+}
+
+async function debrief(sessionId: string | undefined): Promise<void> {
+  if (!sessionId) throw new Error("Usage: bashguard debrief <session-id>");
+
+  const session = await chooseSession(sessionId);
+  const events = await readExistingEvents(session.eventsFile);
+  process.stdout.write(formatDebrief(buildDebrief(events)));
 }
 
 async function attach(requestedId?: string): Promise<void> {
@@ -392,6 +506,7 @@ async function main(): Promise<void> {
     if (command === "sessions") return await listSessions();
     if (command === "attach") return await attach(arg);
     if (command === "inspect") return await inspect(arg, flag === "--event" ? value : undefined);
+    if (command === "debrief") return await debrief(arg);
     usage();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

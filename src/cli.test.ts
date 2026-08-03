@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { discoverSessions, findEvent, formatEventInspection, parseJsonlEvents, renderEvent } from "./cli.ts";
+import { buildDebrief, discoverSessions, findEvent, formatDebrief, formatEventInspection, parseJsonlEvents, renderEvent } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -81,4 +81,66 @@ test("formatEventInspection prints event evidence and useful tool context", () =
   assert.match(output, /Tool call\s+call-123/);
   assert.match(output, /Command\s+npm test/);
   assert.match(output, /Payload/);
+});
+
+test("buildDebrief summarizes prompts, tools, shell commands, files, failures, and missing command exit codes", () => {
+  const summary = buildDebrief([
+    event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
+    event(2, "agent.before_start", { payload: { prompt: "Run tests" } }),
+    event(3, "tool.requested", { toolName: "read", payload: { input: { path: "README.md" } } }),
+    event(4, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } }),
+    event(5, "tool.completed", { toolName: "bash", payload: { isError: false, details: { exitCode: 1 } } }),
+    event(6, "tool.requested", { toolName: "write", payload: { input: { path: "result.txt" } } }),
+    event(7, "tool.requested", { toolName: "bash", payload: { input: { command: "git status" } } }),
+    event(8, "tool.completed", { toolName: "bash", payload: { isError: false } }),
+    event(9, "session.shutdown", { timestamp: "2026-08-03T12:00:08.000Z" }),
+  ]);
+
+  assert.equal(summary.durationMs, 8_000);
+  assert.equal(summary.prompts, 1);
+  assert.equal(summary.toolCalls, 4);
+  assert.equal(summary.shellCommands, 2);
+  assert.equal(summary.filesObserved, 2);
+  assert.equal(summary.failedCommands, 1);
+  assert.equal(summary.captureState, "Partial");
+  assert.deepEqual(summary.worthReviewing, [
+    "one bash command completed without exit-code details",
+    "one shell command failed",
+  ]);
+});
+
+test("buildDebrief combines failed bash commands that have no exit-code details into one review note", () => {
+  const summary = buildDebrief([
+    event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
+    event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } }),
+    event(3, "tool.completed", { toolName: "bash", payload: { isError: true } }),
+    event(4, "session.shutdown", { timestamp: "2026-08-03T12:00:01.000Z" }),
+  ]);
+
+  assert.equal(summary.failedCommands, 1);
+  assert.deepEqual(summary.worthReviewing, ["one shell command failed without exit-code details"]);
+});
+
+test("formatDebrief renders a concise aligned completed-session summary", () => {
+  const output = formatDebrief({
+    durationMs: 8_000,
+    prompts: 1,
+    toolCalls: 4,
+    shellCommands: 2,
+    filesObserved: 2,
+    failedCommands: 1,
+    captureState: "Partial",
+    worthReviewing: ["one shell command failed"],
+  });
+
+  assert.match(output, /Session complete/);
+  assert.match(output, /Duration\s+8s/);
+  assert.match(output, /Prompts\s+1/);
+  assert.match(output, /Tool calls\s+4/);
+  assert.match(output, /Shell commands\s{2,}2/);
+  assert.match(output, /Files observed\s{2,}2/);
+  assert.match(output, /Failed commands\s{2,}1/);
+  assert.match(output, /Capture state\s{2,}Partial/);
+  assert.match(output, /Worth reviewing/);
+  assert.match(output, /- one shell command failed/);
 });

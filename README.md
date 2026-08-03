@@ -33,6 +33,7 @@ bashguard attach
 bashguard sessions
 bashguard open <session-id>
 bashguard inspect <session-id> --event <event-id-or-sequence>
+bashguard debrief <session-id>
 bashguard replay <session-id>
 ```
 
@@ -117,6 +118,7 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-test pi -e .
 BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts sessions
 BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts attach
 BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts inspect <session-id> --event <event-id-or-sequence>
+BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts debrief <session-id>
 ```
 
 See [Separate-Terminal Attach Test](docs/testing/separate-terminal-attach.md).

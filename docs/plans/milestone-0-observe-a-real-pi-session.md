@@ -199,15 +199,15 @@ Completed foundation work:
 
 Next implementation order:
 
-1. Add event inspection through `bashguard inspect <session-id> --event <event-id-or-sequence>`.
-2. Add debrief aggregation for completed sessions.
-3. Tighten event schema/capture-completeness rendering.
-4. Replace or enhance the stream with the first interactive TUI.
+1. Tighten event schema/capture-completeness rendering.
+2. Add targeted `edit` tool capture coverage.
+3. Replace or enhance the stream with the first interactive TUI.
 
 Current hardening branch status:
 
-- Automated tests now cover JSONL parsing, session discovery/liveness, narration rendering, event lookup, and event detail formatting.
+- Automated tests now cover JSONL parsing, session discovery/liveness, narration rendering, event lookup, event detail formatting, and debrief aggregation.
 - The first `inspect` implementation prints one event by ID or sequence with evidence, session, cwd, tool, command/path, exit code, and pretty-printed payload.
+- The first `debrief` implementation summarizes duration, prompt count, tool calls, shell commands, observed files, failed commands, capture state, and review notes.
 
 ## Testing Strategy
 

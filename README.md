@@ -105,10 +105,10 @@ The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, 
 
 ### Install BashGuard as a default Pi extension
 
-From this repository:
+From your local BashGuard checkout:
 
 ```bash
-cd /Users/antoniocheltenham/BashGuard
+cd bashguard
 pi install .
 ```
 
@@ -117,7 +117,7 @@ That installs this local package into Pi user settings. Future Pi sessions start
 Start Pi normally from the project you want to record:
 
 ```bash
-cd /path/to/your/project
+cd your-project
 pi
 ```
 
@@ -131,10 +131,10 @@ bashguard inspect 1 --event <event-id-prefix-or-sequence>
 bashguard debrief 1
 ```
 
-During local development, run the CLI from this repository instead:
+During local development, run the CLI from your BashGuard checkout instead:
 
 ```bash
-cd /Users/antoniocheltenham/BashGuard
+cd bashguard
 npm exec -- node --experimental-strip-types src/cli.ts sessions
 npm exec -- node --experimental-strip-types src/cli.ts attach 1
 npm exec -- node --experimental-strip-types src/cli.ts inspect 1
@@ -156,10 +156,10 @@ Check installed Pi packages with:
 pi list
 ```
 
-Remove the local BashGuard package with:
+Remove the local BashGuard package with the same path you installed:
 
 ```bash
-pi remove /Users/antoniocheltenham/BashGuard
+pi remove /absolute/path/to/your/bashguard-checkout
 ```
 
 ### Where sessions are stored
@@ -185,7 +185,7 @@ BashGuard can only attach to sessions recorded while the BashGuard extension was
 For quick tests, load the local extension for one Pi run:
 
 ```bash
-cd /Users/antoniocheltenham/BashGuard
+cd bashguard
 pi -e .
 ```
 

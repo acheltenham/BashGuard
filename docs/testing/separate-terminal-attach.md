@@ -47,9 +47,16 @@ node --experimental-strip-types src/cli.ts sessions
 Expected shape:
 
 ```text
-STATE     SESSION              REPOSITORY           UPDATED
-active    <session-id>         BashGuard            2s ago
+#  STATE     SESSION              REPOSITORY           UPDATED
+1  active    019fc93a             BashGuard            2s ago
+
+Use a # or SESSION prefix, for example:
+  bashguard attach 1
+  bashguard inspect 1 --event <event-id-or-sequence>
+  bashguard debrief 1
 ```
+
+The `SESSION` value is a copyable unique prefix, not a middle-truncated display-only ID.
 
 ## Terminal 2: attach
 
@@ -60,9 +67,15 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
 node --experimental-strip-types src/cli.ts attach
 ```
 
-Or select a session explicitly:
+Or select a session explicitly by list number, `--session`, full ID, or unique prefix:
 
 ```bash
+BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
+node --experimental-strip-types src/cli.ts attach 1
+
+BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
+node --experimental-strip-types src/cli.ts attach --session 1
+
 BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
 node --experimental-strip-types src/cli.ts attach <session-id-or-unique-prefix>
 ```
@@ -70,12 +83,12 @@ node --experimental-strip-types src/cli.ts attach <session-id-or-unique-prefix>
 The initial renderer intentionally keeps the output simple. Expected narration includes lines such as:
 
 ```text
-15:42:10  Pi session started
-15:42:17  Prompt · Inspect the authentication flow and run the tests.
-15:42:20  Reading · README.md
-15:42:24  Running · git status --short
-15:42:24  Command complete · exit 0
-15:42:31  Editing · src/auth.ts
+ 1  msdmhl1a  15:42:10  Pi session started
+ 2  msdmhl1b  15:42:17  Prompt · Inspect the authentication flow and run the tests.
+ 9  msdmhl2c  15:42:20  Reading · README.md
+10  msdmhl2d  15:42:24  Running · git status --short
+11  msdmhl2e  15:42:24  Command complete · exit 0
+17  msdmhl3r  15:42:31  Editing · src/auth.ts
 ```
 
 Interactive user bash should appear separately:
@@ -86,18 +99,32 @@ Interactive user bash should appear separately:
 
 ## Terminal 2: inspect and debrief
 
-Find an event sequence from the timeline and inspect it:
+List inspectable events for a session:
 
 ```bash
 BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
-node --experimental-strip-types src/cli.ts inspect <session-id-or-prefix> --event <event-id-or-sequence>
+node --experimental-strip-types src/cli.ts inspect 1
+```
+
+Then inspect an event sequence or short event ID from the timeline:
+
+```bash
+BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
+node --experimental-strip-types src/cli.ts inspect 1 --event <event-id-prefix-or-sequence>
+```
+
+The `--session` form also works:
+
+```bash
+BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
+node --experimental-strip-types src/cli.ts inspect --session 1 --event <event-id-prefix-or-sequence>
 ```
 
 Generate a session debrief:
 
 ```bash
 BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
-node --experimental-strip-types src/cli.ts debrief <session-id-or-prefix>
+node --experimental-strip-types src/cli.ts debrief 1
 ```
 
 Expected debrief shape:
@@ -155,5 +182,7 @@ This is still a vertical slice, not the final TUI.
 - No durable attach cursor is persisted between separate CLI invocations; deduplication is based on event sequence during each invocation.
 - No file-impact or Git correlation yet beyond tool-level file paths and edit diffs/patches.
 - No policy or approval UI.
+
+BashGuard can only attach to sessions recorded while the BashGuard extension was loaded and writing to the same `BASHGUARD_DATA_DIR`. Older Pi sessions without BashGuard JSONL records cannot be attached retroactively.
 
 Please record Milestone 0 findings on Issue #1.

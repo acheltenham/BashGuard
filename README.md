@@ -115,12 +115,16 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-test pi -e .
 
 # Terminal 2
 BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts sessions
-BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts attach
-BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts inspect <session-id> --event <event-id-or-sequence>
-BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts debrief <session-id>
+BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts attach 1
+BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts attach --session 1
+BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts inspect 1
+BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts inspect 1 --event <event-id-prefix-or-sequence>
+BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts debrief 1
 ```
 
 See [Separate-Terminal Attach Test](docs/testing/separate-terminal-attach.md).
+
+BashGuard can only attach to sessions recorded while the BashGuard extension was loaded. Older Pi sessions without BashGuard JSONL records cannot be attached retroactively.
 
 ## Documents
 

@@ -58,6 +58,12 @@ export type DebriefSummary = {
   worthReviewing: string[];
 };
 
+export type ParsedCommandArgs = {
+  command?: string;
+  sessionId?: string;
+  eventId?: string;
+};
+
 const POLL_MS = 250;
 
 function getDataRoot(): string {
@@ -65,8 +71,33 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard attach [session-id]\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard attach [session-id]\n  bashguard attach --session <session-id>\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
+}
+
+export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
+  const [command, ...args] = argv;
+  let sessionId: string | undefined;
+  let eventId: string | undefined;
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--session") {
+      sessionId = args[++index];
+      continue;
+    }
+    if (arg === "--event") {
+      eventId = args[++index];
+      continue;
+    }
+    if (!sessionId) sessionId = arg;
+  }
+
+  const parsed: ParsedCommandArgs = {};
+  if (command !== undefined) parsed.command = command;
+  if (sessionId !== undefined) parsed.sessionId = sessionId;
+  if (eventId !== undefined) parsed.eventId = eventId;
+  return parsed;
 }
 
 async function readJsonFile<T>(path: string): Promise<T | undefined> {
@@ -163,8 +194,13 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
     .sort((a, b) => Number(b.active) - Number(a.active) || b.modifiedAt - a.modifiedAt);
 }
 
-function compactSessionId(sessionId: string): string {
-  return sessionId.length > 18 ? `${sessionId.slice(0, 8)}…${sessionId.slice(-6)}` : sessionId;
+function sessionPrefix(sessionId: string, allSessionIds: string[]): string {
+  const minLength = Math.min(8, sessionId.length);
+  for (let length = minLength; length <= sessionId.length; length++) {
+    const prefix = sessionId.slice(0, length);
+    if (allSessionIds.filter((id) => id.startsWith(prefix)).length === 1) return prefix;
+  }
+  return sessionId;
 }
 
 function formatAge(timestamp: number): string {
@@ -176,6 +212,20 @@ function formatAge(timestamp: number): string {
   return `${hours}h ago`;
 }
 
+export function formatSessionList(sessions: SessionSummary[]): string {
+  const sessionIds = sessions.map((session) => session.metadata.sessionId);
+  const lines = ["#  STATE     SESSION              REPOSITORY           UPDATED"];
+  for (const [index, session] of sessions.entries()) {
+    const state = session.active ? "active" : "complete";
+    const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
+    const selector = String(index + 1).padEnd(2);
+    lines.push(`${selector} ${state.padEnd(9)} ${sessionPrefix(session.metadata.sessionId, sessionIds).padEnd(20)} ${repo.slice(0, 20).padEnd(20)} ${formatAge(session.modifiedAt)}`);
+  }
+
+  lines.push("", "Use a # or SESSION prefix, for example:", "  bashguard attach 1", "  bashguard inspect 1 --event <event-id-or-sequence>", "  bashguard debrief 1");
+  return `${lines.join("\n")}\n`;
+}
+
 async function listSessions(): Promise<void> {
   const sessions = await discoverSessions();
   if (sessions.length === 0) {
@@ -183,12 +233,7 @@ async function listSessions(): Promise<void> {
     return;
   }
 
-  process.stdout.write("STATE     SESSION              REPOSITORY           UPDATED\n");
-  for (const session of sessions) {
-    const state = session.active ? "active" : "complete";
-    const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
-    process.stdout.write(`${state.padEnd(9)} ${compactSessionId(session.metadata.sessionId).padEnd(20)} ${repo.slice(0, 20).padEnd(20)} ${formatAge(session.modifiedAt)}\n`);
-  }
+  process.stdout.write(formatSessionList(sessions));
 }
 
 function getString(value: unknown): string | undefined {
@@ -268,13 +313,42 @@ function renderTimestamp(timestamp: string): string {
   return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+export function formatTimelineEvent(event: BashGuardEvent): string | undefined {
+  const rendered = renderEvent(event);
+  if (!rendered) return undefined;
+  const eventSelector = event.id.slice(0, 8).padEnd(8);
+  return `${String(event.sequence).padStart(2)}  ${eventSelector}  ${renderTimestamp(event.timestamp)}  ${rendered}`;
+}
+
+export function formatInspectableEvents(sessionSelector: string, events: BashGuardEvent[]): string {
+  const renderedEvents = events
+    .map(formatTimelineEvent)
+    .filter((line): line is string => line !== undefined);
+  const visibleEvents = renderedEvents.slice(-50);
+  const firstEventId = events.find((event) => renderEvent(event))?.id.slice(0, 8);
+  const lines = ["Inspectable events", "", ...visibleEvents];
+
+  if (renderedEvents.length > visibleEvents.length) {
+    lines.splice(2, 0, `Showing last ${visibleEvents.length} of ${renderedEvents.length} rendered events.`);
+  }
+
+  lines.push("", "Inspect an event with:");
+  lines.push(`  bashguard inspect ${sessionSelector} --event ${firstEventId ?? "<event-id-or-sequence>"}`);
+  return `${lines.join("\n")}\n`;
+}
+
 export function findEvent(events: BashGuardEvent[], eventIdOrSequence: string): BashGuardEvent | undefined {
   const sequence = Number(eventIdOrSequence);
   if (Number.isInteger(sequence) && sequence > 0) {
     const bySequence = events.find((event) => event.sequence === sequence);
     if (bySequence) return bySequence;
   }
-  return events.find((event) => event.id === eventIdOrSequence);
+
+  const exact = events.find((event) => event.id === eventIdOrSequence);
+  if (exact) return exact;
+
+  const prefixMatches = events.filter((event) => event.id.startsWith(eventIdOrSequence));
+  return prefixMatches.length === 1 ? prefixMatches[0] : undefined;
 }
 
 function formatField(label: string, value: unknown): string | undefined {
@@ -491,17 +565,35 @@ export function formatDebrief(summary: DebriefSummary): string {
   return `${lines.join("\n")}\n`;
 }
 
+function formatSessionNotFound(requestedId: string, root: string, sessions: SessionSummary[]): string {
+  return [
+    `Session ${requestedId} was not found in ${root}.`,
+    "",
+    "BashGuard can only attach to sessions recorded while the BashGuard extension was loaded.",
+    "Older Pi sessions or sessions recorded with a different BASHGUARD_DATA_DIR are not available here.",
+    "",
+    sessions.length > 0 ? "Available BashGuard sessions:" : undefined,
+    sessions.length > 0 ? formatSessionList(sessions).trimEnd() : undefined,
+    "Run:",
+    "  bashguard sessions",
+    "  bashguard attach 1",
+  ].filter((line): line is string => line !== undefined).join("\n");
+}
+
 export async function chooseSession(requestedId?: string, root = getDataRoot()): Promise<SessionSummary> {
   const sessions = await discoverSessions(root);
   if (sessions.length === 0) throw new Error(`No BashGuard sessions found in ${root}`);
 
   if (requestedId) {
+    const index = Number(requestedId);
+    if (Number.isInteger(index) && index >= 1 && index <= sessions.length) return sessions[index - 1]!;
+
     const exact = sessions.find((session) => session.metadata.sessionId === requestedId);
     if (exact) return exact;
     const prefixMatches = sessions.filter((session) => session.metadata.sessionId.startsWith(requestedId));
     if (prefixMatches.length === 1) return prefixMatches[0];
     if (prefixMatches.length > 1) throw new Error(`Session prefix ${requestedId} is ambiguous`);
-    throw new Error(`Session ${requestedId} was not found`);
+    throw new Error(formatSessionNotFound(requestedId, root, sessions));
   }
 
   const active = sessions.filter((session) => session.active);
@@ -511,12 +603,18 @@ export async function chooseSession(requestedId?: string, root = getDataRoot()):
 }
 
 async function inspect(sessionId: string | undefined, eventIdOrSequence: string | undefined): Promise<void> {
-  if (!sessionId || !eventIdOrSequence) {
+  if (!sessionId) {
     throw new Error("Usage: bashguard inspect <session-id> --event <event-id-or-sequence>");
   }
 
   const session = await chooseSession(sessionId);
   const events = await readExistingEvents(session.eventsFile);
+
+  if (!eventIdOrSequence) {
+    process.stdout.write(formatInspectableEvents(sessionId, events));
+    return;
+  }
+
   const event = findEvent(events, eventIdOrSequence);
   if (!event) throw new Error(`Event ${eventIdOrSequence} was not found in session ${session.metadata.sessionId}`);
 
@@ -548,8 +646,8 @@ async function attach(requestedId?: string): Promise<void> {
   const existing = await readExistingEvents(session.eventsFile);
   for (const event of existing) {
     lastSequence = Math.max(lastSequence, event.sequence);
-    const rendered = renderEvent(event);
-    if (rendered) process.stdout.write(`${renderTimestamp(event.timestamp)}  ${rendered}\n`);
+    const rendered = formatTimelineEvent(event);
+    if (rendered) process.stdout.write(`${rendered}\n`);
   }
 
   try {
@@ -601,8 +699,8 @@ async function attach(requestedId?: string): Promise<void> {
         if (event.sequence <= lastSequence) continue;
         lastSequence = event.sequence;
         if (event.type === "session.shutdown") shutdownSeen = true;
-        const rendered = renderEvent(event);
-        if (rendered) process.stdout.write(`${renderTimestamp(event.timestamp)}  ${rendered}\n`);
+        const rendered = formatTimelineEvent(event);
+        if (rendered) process.stdout.write(`${rendered}\n`);
       } catch {
         // Malformed complete lines are ignored in this first slice rather than crashing attachment.
       }
@@ -613,12 +711,12 @@ async function attach(requestedId?: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const [command, arg, flag, value] = process.argv.slice(2);
+  const { command, sessionId, eventId } = parseCommandArgs(process.argv.slice(2));
   try {
     if (command === "sessions") return await listSessions();
-    if (command === "attach") return await attach(arg);
-    if (command === "inspect") return await inspect(arg, flag === "--event" ? value : undefined);
-    if (command === "debrief") return await debrief(arg);
+    if (command === "attach") return await attach(sessionId);
+    if (command === "inspect") return await inspect(sessionId, eventId);
+    if (command === "debrief") return await debrief(sessionId);
     usage();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

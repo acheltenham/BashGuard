@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildDebrief, discoverSessions, findEvent, formatDebrief, formatEventInspection, normalizeEvent, parseJsonlEvents, renderEvent } from "./cli.ts";
+import { buildDebrief, chooseSession, discoverSessions, findEvent, formatDebrief, formatEventInspection, formatInspectableEvents, formatSessionList, formatTimelineEvent, normalizeEvent, parseCommandArgs, parseJsonlEvents, renderEvent } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -46,6 +46,59 @@ test("discoverSessions marks sessions with shutdown events complete even if the 
   assert.equal(sessions[0]?.active, false);
 });
 
+test("formatSessionList shows copyable selectors and prefixes without middle ellipsis", () => {
+  const output = formatSessionList([
+    {
+      metadata: { sessionId: "019fc93a-1111-2222-3333-abcdefaaaaaa", repository: "BashGuard" },
+      directory: "/tmp/one",
+      eventsFile: "/tmp/one/events.jsonl",
+      modifiedAt: Date.now(),
+      active: true,
+    },
+    {
+      metadata: { sessionId: "019fc909-1111-2222-3333-abcdefbbbbbb", repository: "Evidence" },
+      directory: "/tmp/two",
+      eventsFile: "/tmp/two/events.jsonl",
+      modifiedAt: Date.now(),
+      active: false,
+    },
+  ]);
+
+  assert.match(output, /#\s+STATE\s+SESSION/);
+  assert.match(output, /1\s+active\s+019fc93a/);
+  assert.match(output, /2\s+complete\s+019fc909/);
+  assert.doesNotMatch(output, /…/);
+  assert.match(output, /bashguard attach 1/);
+});
+
+test("chooseSession accepts session list index selectors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "session-a", [event(1, "session.started"), event(2, "session.shutdown")]);
+  await writeSession(root, "session-b", [event(1, "session.started"), event(2, "session.shutdown")]);
+
+  const sessions = await discoverSessions(root);
+  const selected = await chooseSession("2", root);
+
+  assert.equal(selected.metadata.sessionId, sessions[1]?.metadata.sessionId);
+});
+
+test("chooseSession not-found errors explain BashGuard recorded-session scope", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "session-a", [event(1, "session.started"), event(2, "session.shutdown")]);
+
+  await assert.rejects(
+    () => chooseSession("missing-session", root),
+    /BashGuard can only attach to sessions recorded while the BashGuard extension was loaded\./,
+  );
+});
+
+test("parseCommandArgs accepts positional and --session selectors", () => {
+  assert.deepEqual(parseCommandArgs(["attach", "1"]), { command: "attach", sessionId: "1" });
+  assert.deepEqual(parseCommandArgs(["attach", "--session", "1"]), { command: "attach", sessionId: "1" });
+  assert.deepEqual(parseCommandArgs(["inspect", "--session", "1", "--event", "evt-1"]), { command: "inspect", sessionId: "1", eventId: "evt-1" });
+  assert.deepEqual(parseCommandArgs(["debrief", "--session", "1"]), { command: "debrief", sessionId: "1" });
+});
+
 test("renderEvent narrates user bash, agent bash, edits, and capture gaps", () => {
   assert.equal(
     renderEvent(event(1, "bash.user_requested", { payload: { command: "pwd" } })),
@@ -65,12 +118,32 @@ test("renderEvent narrates user bash, agent bash, edits, and capture gaps", () =
   );
 });
 
-test("findEvent resolves events by id or sequence string", () => {
-  const events = [event(1, "session.started"), event(2, "tool.requested", { id: "evt-tool" })];
+test("findEvent resolves events by id, unique id prefix, or sequence string", () => {
+  const events = [event(1, "session.started"), event(2, "tool.requested", { id: "evt-tool-abcdef" })];
 
+  assert.equal(findEvent(events, "evt-tool-abcdef")?.sequence, 2);
   assert.equal(findEvent(events, "evt-tool")?.sequence, 2);
   assert.equal(findEvent(events, "1")?.type, "session.started");
   assert.equal(findEvent(events, "missing"), undefined);
+});
+
+test("formatTimelineEvent prefixes rendered events with sequence and event-id prefix", () => {
+  assert.equal(
+    formatTimelineEvent(event(17, "tool.requested", { id: "msdmhl3r-7cifg5sy", timestamp: "2026-08-03T12:00:00.000Z", toolName: "edit", payload: { input: { path: "sample.txt" } } })),
+    "17  msdmhl3r  08:00:00  Editing · sample.txt",
+  );
+});
+
+test("formatInspectableEvents lists events and next inspect command when no event is selected", () => {
+  const output = formatInspectableEvents("1", [
+    event(1, "session.started", { id: "evt-start-abcdef", timestamp: "2026-08-03T12:00:00.000Z" }),
+    event(2, "tool.requested", { id: "evt-tool-abcdef", timestamp: "2026-08-03T12:00:01.000Z", toolName: "bash", payload: { input: { command: "npm test" } } }),
+  ]);
+
+  assert.match(output, /Inspectable events/);
+  assert.match(output, /1\s+evt-star\s+08:00:00\s+Pi session started/);
+  assert.match(output, /2\s+evt-tool\s+08:00:01\s+Running · npm test/);
+  assert.match(output, /bashguard inspect 1 --event evt-star/);
 });
 
 test("normalizeEvent defaults missing capture metadata for older events", () => {

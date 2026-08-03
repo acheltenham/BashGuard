@@ -28,9 +28,9 @@ Useful manual commands:
 ```bash
 # Run the CLI directly during development
 node --experimental-strip-types src/cli.ts sessions
-node --experimental-strip-types src/cli.ts attach <session-id>
-node --experimental-strip-types src/cli.ts inspect <session-id> --event <event-id-or-sequence>
-node --experimental-strip-types src/cli.ts debrief <session-id>
+node --experimental-strip-types src/cli.ts attach 1
+node --experimental-strip-types src/cli.ts inspect 1 --event <event-id-prefix-or-sequence>
+node --experimental-strip-types src/cli.ts debrief 1
 
 # Run Pi with the local BashGuard extension/package
 pi -e .

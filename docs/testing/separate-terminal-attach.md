@@ -4,13 +4,15 @@ This test validates the first BashGuard companion workflow: Pi runs in one termi
 
 ## Current result
 
-Validated on August 3, 2026 against Pi `0.80.6` and PR #5. A second process successfully discovered an active Pi session, attached to the JSONL stream, rendered live file/shell/write events, observed `session.shutdown`, and reopened the completed session by ID prefix.
+Validated on August 3, 2026 against Pi `0.80.6`. A second process successfully discovered an active Pi session, attached to the JSONL stream, rendered live file/shell/write/edit/capture-gap events, observed `session.shutdown`, reopened the completed session by ID prefix, inspected individual events, and generated a debrief.
 
-## Branch
+## Setup
+
+Use current `main` unless testing a feature branch:
 
 ```bash
-git switch agent/separate-terminal-attach
 npm install
+npm test
 npm run check
 ```
 
@@ -25,7 +27,7 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
 pi -e /path/to/BashGuard
 ```
 
-Run a normal coding prompt that causes Pi to read a file and execute at least one shell command.
+Run a normal coding prompt that causes Pi to read a file, edit or write a file, and execute at least one shell command.
 
 Inside Pi you can confirm recording with:
 
@@ -82,6 +84,38 @@ Interactive user bash should appear separately:
 15:43:01  You ran · pwd
 ```
 
+## Terminal 2: inspect and debrief
+
+Find an event sequence from the timeline and inspect it:
+
+```bash
+BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
+node --experimental-strip-types src/cli.ts inspect <session-id-or-prefix> --event <event-id-or-sequence>
+```
+
+Generate a session debrief:
+
+```bash
+BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
+node --experimental-strip-types src/cli.ts debrief <session-id-or-prefix>
+```
+
+Expected debrief shape:
+
+```text
+Session complete
+
+Duration         18s
+Prompts          1
+Tool calls       5
+Shell commands   1
+Files observed   2
+Failed commands  0
+Capture state    Complete
+```
+
+Capture gaps, redactions, and truncations should make `Capture state` partial and appear under `Worth reviewing`.
+
 ## What to verify
 
 ### Session discovery
@@ -116,11 +150,10 @@ The reader intentionally buffers a partial final JSONL line until a newline arri
 This is still a vertical slice, not the final TUI.
 
 - No full-screen interface yet.
-- No keyboard navigation or event expansion yet.
+- No keyboard navigation or in-terminal event selection yet; use `inspect` with event ID or sequence.
 - Narration covers only the event types already proven useful.
-- Session liveness is inferred from the recorder's process ID.
 - No durable attach cursor is persisted between separate CLI invocations; deduplication is based on event sequence during each invocation.
-- No file-diff or Git correlation yet.
+- No file-impact or Git correlation yet beyond tool-level file paths and edit diffs/patches.
 - No policy or approval UI.
 
-Please record findings on Issue #3.
+Please record Milestone 0 findings on Issue #1.

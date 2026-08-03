@@ -1,6 +1,6 @@
 # Milestone 0: Observe a Real Pi Session
 
-**Status:** In implementation  
+**Status:** Foundation implemented; final validation in progress  
 **Last updated:** August 3, 2026
 
 ## Objective
@@ -191,16 +191,19 @@ Do not calculate an unexplained trust or confidence score.
 
 Completed foundation work:
 
-1. Pi lifecycle capture spike records session, prompt, agent, turn, message, tool, user-bash, and shutdown events.
+1. Pi lifecycle capture records session, prompt, agent, turn, message, tool, user-bash, and shutdown events.
 2. Append-only JSONL is written under the user-level BashGuard data directory, defaulting to `~/.bashguard/sessions/<session-id>/`.
 3. `bashguard sessions` discovers active and completed recorded sessions from a separate process.
 4. `bashguard attach [session-id]` renders historical events and follows live JSONL updates without a daemon.
-5. Session completion is detected from recorded `session.shutdown`, avoiding PID-only liveness claims.
+5. `bashguard inspect <session-id> --event <event-id-or-sequence>` renders detailed evidence for one event.
+6. `bashguard debrief <session-id>` summarizes completed sessions with evidence-based review notes.
+7. Session completion is detected from recorded `session.shutdown`, avoiding PID-only liveness claims.
+8. Capture-completeness metadata covers missing, redacted, truncated, and capture-gap evidence.
 
 Next implementation order:
 
-1. Replace or enhance the stream with the first interactive TUI.
-2. Run a final Milestone 0 manual session and docs pass.
+1. Run a final Milestone 0 manual session using current `sessions`, `attach`, `inspect`, and `debrief` commands.
+2. Decide whether the first interactive TUI enhancement is required before closing Milestone 0, or whether it becomes the next milestone.
 
 Current hardening branch status:
 

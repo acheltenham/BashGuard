@@ -26,24 +26,23 @@ A developer runs Pi in one terminal and BashGuard in another:
 
 BashGuard should narrate the session rather than dump raw logs. Safe work stays quiet. Risky actions surface the resolved command, relevant context, reason for interruption, and safer alternatives.
 
-## Core Commands
+## Current Commands
+
+Implemented in the Milestone 0 vertical slice:
 
 ```bash
-bashguard attach
 bashguard sessions
-bashguard open <session-id>
+bashguard attach [session-id]
 bashguard inspect <session-id> --event <event-id-or-sequence>
 bashguard debrief <session-id>
-bashguard replay <session-id>
 ```
 
-- `attach` follows the active Pi session in a separate terminal.
-- `sessions` lists recent and active sessions.
-- `open` opens a concise session view.
-- `inspect` opens the full terminal investigation interface.
-- `replay` walks through the recorded execution story.
+- `sessions` lists recent and active recorded sessions.
+- `attach` follows an active session or renders a completed session timeline.
+- `inspect` prints evidence for one recorded event by ID or sequence.
+- `debrief` summarizes a completed session with evidence-based review notes.
 
-The exact command names may evolve, but the interaction model is foundational.
+Planned later commands include richer `open`/TUI and `replay` experiences.
 
 ## Why BashGuard
 
@@ -96,9 +95,9 @@ The MVP does not require a cloud service, account, hosted dashboard, support for
 
 ## Current Status
 
-BashGuard has proven the first Milestone 0 foundation: a Pi extension can record a real session into local append-only JSONL, and a separate `bashguard` CLI process can discover and attach to that session without terminal scraping or a daemon.
+BashGuard has a working Milestone 0 foundation: a Pi extension records real sessions into local append-only JSONL, and a separate `bashguard` CLI can discover, attach to, inspect, and debrief those sessions without terminal scraping or a daemon.
 
-Current implementation focus: harden the CLI/session stream with automated tests, then add event inspection and session debriefs.
+The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, file read/write/edit, shell command, capture-completeness, truncation/redaction, and capture-gap evidence. Remaining work is focused on final manual validation, richer terminal UX, command-resolution/risk previews, and file/Git impact correlation.
 
 ## Local Development
 

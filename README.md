@@ -103,16 +103,50 @@ The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, 
 
 ## Installation and Usage
 
+### Load BashGuard for one Pi session
+
+To try BashGuard from GitHub without installing it permanently:
+
+```bash
+pi -e git:github.com/acheltenham/BashGuard
+```
+
+You can pin a branch, tag, or commit:
+
+```bash
+pi -e git:github.com/acheltenham/BashGuard@main
+pi -e git:github.com/acheltenham/BashGuard@v0.1.0
+```
+
+For local development, load your checkout for one Pi run:
+
+```bash
+cd bashguard
+pi -e .
+```
+
 ### Install BashGuard as a default Pi extension
 
-From your local BashGuard checkout:
+Install from GitHub so future Pi sessions load BashGuard automatically:
+
+```bash
+pi install git:github.com/acheltenham/BashGuard
+```
+
+For repeatable installs, prefer a tagged release when available:
+
+```bash
+pi install git:github.com/acheltenham/BashGuard@v0.1.0
+```
+
+Or install from your local BashGuard checkout:
 
 ```bash
 cd bashguard
 pi install .
 ```
 
-That installs this local package into Pi user settings. Future Pi sessions started from any project should load the BashGuard extension automatically.
+These commands install the BashGuard Pi extension/package into Pi settings. Future Pi sessions started from any project should load the BashGuard extension automatically.
 
 Start Pi normally from the project you want to record:
 
@@ -156,9 +190,10 @@ Check installed Pi packages with:
 pi list
 ```
 
-Remove the local BashGuard package with the same path you installed:
+Remove the package using the same source you installed:
 
 ```bash
+pi remove git:github.com/acheltenham/BashGuard
 pi remove /absolute/path/to/your/bashguard-checkout
 ```
 
@@ -180,14 +215,9 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-test bashguard sessions
 
 BashGuard can only attach to sessions recorded while the BashGuard extension was loaded and writing to the same data directory. Older Pi sessions without BashGuard JSONL records cannot be attached retroactively.
 
-### Development mode without installing
+### CLI availability
 
-For quick tests, load the local extension for one Pi run:
-
-```bash
-cd bashguard
-pi -e .
-```
+`pi -e ...` and `pi install ...` load the BashGuard Pi extension. They do not necessarily install the `bashguard` shell command globally. During early development, run the CLI from a local checkout with `npm exec -- node --experimental-strip-types src/cli.ts ...` unless you have separately installed a packaged CLI.
 
 ## Local Development
 

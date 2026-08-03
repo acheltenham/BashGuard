@@ -42,7 +42,7 @@ bashguard debrief 1
 - `sessions` lists recent and active recorded sessions with a `#` selector and copyable session prefix.
 - `attach` follows an active session or renders a completed session timeline. It accepts a session number, full session ID, unique session prefix, or `--session`.
 - `inspect` without `--event` lists inspectable events for a session. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or sequence.
-- `debrief` summarizes a completed session with evidence-based review notes.
+- `debrief` summarizes a completed session with evidence-based review notes, including non-blocking risk notices for explicit risky shell command patterns.
 
 Planned later commands include richer `open`/TUI and `replay` experiences.
 
@@ -99,7 +99,7 @@ The MVP does not require a cloud service, account, hosted dashboard, support for
 
 BashGuard has a working Milestone 0 foundation: a Pi extension records real sessions into local append-only JSONL, and a separate `bashguard` CLI can discover, attach to, inspect, and debrief those sessions without terminal scraping or a daemon.
 
-The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, file read/write/edit, shell command, capture-completeness, truncation/redaction, and capture-gap evidence. Remaining work is focused on final manual validation, richer terminal UX, command-resolution/risk previews, and file/Git impact correlation.
+The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, file read/write/edit, shell command, capture-completeness, truncation/redaction, capture-gap evidence, and non-blocking risk notices for a small explicit set of risky shell command patterns. Remaining work is focused on final manual validation, richer terminal UX, pre-execution command-resolution/risk previews, and file/Git impact correlation.
 
 ## Installation and Usage
 

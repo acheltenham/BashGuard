@@ -53,10 +53,12 @@ export type DebriefSummary = {
   toolCalls: number;
   shellCommands: number;
   filesObserved: number;
+  fileToolActions: number;
   failedCommands: number;
   riskyCommands: number;
   captureState: "Complete" | "Partial";
   worthReviewing: string[];
+  fileActivity: string[];
 };
 
 export type ParsedCommandArgs = {
@@ -398,7 +400,7 @@ export function findEvent(events: BashGuardEvent[], eventIdOrSequence: string): 
 
 function formatField(label: string, value: unknown): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
-  return `${label.padEnd(16)} ${String(value)}`;
+  return `${label.padEnd(18)} ${String(value)}`;
 }
 
 export function formatEventInspection(event: BashGuardEvent): string {
@@ -497,6 +499,22 @@ function formatRiskyCommandReview(event: BashGuardEvent, command: string, risks:
   return [`risky shell command observed at event ${event.sequence}: \`${command}\``, ...details].join("\n");
 }
 
+function formatFileActivity(event: BashGuardEvent): string | undefined {
+  const tool = toolNameFor(event);
+  const path = pathFor(event);
+  if (!path) return undefined;
+  if (tool === "read") {
+    return [`read ${path}`, "  Meaning: Pi read file contents", "  Evidence: read tool event", `  Inspect: --event ${event.sequence}`].join("\n");
+  }
+  if (tool === "edit") {
+    return [`edit ${path}`, "  Meaning: Pi requested targeted text replacement", "  Evidence: edit tool event", `  Inspect: --event ${event.sequence}`].join("\n");
+  }
+  if (tool === "write") {
+    return [`write tool ${path}`, "  Meaning: Pi wrote full file content; may create, overwrite, or leave content unchanged", "  Evidence: write tool event", `  Inspect: --event ${event.sequence}`].join("\n");
+  }
+  return undefined;
+}
+
 function formatCommandReview(count: number, message: string, commands: string[]): string {
   const uniqueCommands = Array.from(new Set(commands.filter(Boolean)));
   if (count === 1 && uniqueCommands.length === 1) return `shell command ${message}: \`${uniqueCommands[0]}\``;
@@ -541,12 +559,13 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const missingExitCode = bashCompletions.filter((event) => bashExitCodeFor(event) === undefined);
   const missingExitCodeCount = missingExitCode.length;
   const nonFailedMissingExitCodeCount = missingExitCodeCount - failedWithoutExitCodeCount;
+  const fileToolRequests = toolRequests.filter((event) => ["read", "write", "edit"].includes(toolNameFor(event) ?? ""));
   const files = new Set(
-    toolRequests
-      .filter((event) => ["read", "write", "edit"].includes(toolNameFor(event) ?? ""))
+    fileToolRequests
       .map(pathFor)
       .filter((path): path is string => Boolean(path)),
   );
+  const fileActivity = fileToolRequests.map(formatFileActivity).filter((activity): activity is string => activity !== undefined);
   const completionByToolCallId = new Map(
     bashCompletions
       .map((event) => {
@@ -630,10 +649,12 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     toolCalls: toolRequests.length,
     shellCommands: shellRequests.length,
     filesObserved: files.size,
+    fileToolActions: fileActivity.length,
     failedCommands,
     riskyCommands,
     captureState: captureReviewItems.length > 0 ? "Partial" : "Complete",
     worthReviewing,
+    fileActivity,
   };
 }
 
@@ -646,6 +667,7 @@ export function formatDebrief(summary: DebriefSummary): string {
     formatField("Tool calls", summary.toolCalls),
     formatField("Shell commands", summary.shellCommands),
     formatField("Files observed", summary.filesObserved),
+    formatField("File tool actions", summary.fileToolActions),
     formatField("Failed commands", summary.failedCommands),
     formatField("Risk notices", summary.riskyCommands),
     formatField("Capture state", summary.captureState),
@@ -653,6 +675,10 @@ export function formatDebrief(summary: DebriefSummary): string {
 
   if (summary.worthReviewing.length > 0) {
     lines.push("", "Worth reviewing", ...summary.worthReviewing.map((item) => `- ${item}`));
+  }
+
+  if (summary.fileActivity.length > 0) {
+    lines.push("", "File tool activity", ...summary.fileActivity.map((item) => `- ${item}`));
   }
 
   return `${lines.join("\n")}\n`;

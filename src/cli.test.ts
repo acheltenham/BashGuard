@@ -244,16 +244,23 @@ test("buildDebrief summarizes prompts, tools, shell commands, files, failures, a
     event(4, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } }),
     event(5, "tool.completed", { toolName: "bash", payload: { isError: false, details: { exitCode: 1 } } }),
     event(6, "tool.requested", { toolName: "edit", payload: { input: { path: "result.txt" } } }),
-    event(7, "tool.requested", { toolName: "bash", capture: { missing: ["turnId"], redacted: ["payload.input.apiKey"], truncated: ["payload.input.edits.0.newText"] }, payload: { input: { command: "git status" } } }),
-    event(8, "tool.completed", { toolName: "bash", payload: { isError: false } }),
-    event(9, "session.shutdown", { timestamp: "2026-08-03T12:00:08.000Z" }),
+    event(7, "tool.requested", { toolName: "write", payload: { input: { path: "docs/example.md" } } }),
+    event(8, "tool.requested", { toolName: "bash", capture: { missing: ["turnId"], redacted: ["payload.input.apiKey"], truncated: ["payload.input.edits.0.newText"] }, payload: { input: { command: "git status" } } }),
+    event(9, "tool.completed", { toolName: "bash", payload: { isError: false } }),
+    event(10, "session.shutdown", { timestamp: "2026-08-03T12:00:08.000Z" }),
   ]);
 
   assert.equal(summary.durationMs, 8_000);
   assert.equal(summary.prompts, 1);
-  assert.equal(summary.toolCalls, 4);
+  assert.equal(summary.toolCalls, 5);
   assert.equal(summary.shellCommands, 2);
-  assert.equal(summary.filesObserved, 2);
+  assert.equal(summary.filesObserved, 3);
+  assert.equal(summary.fileToolActions, 3);
+  assert.deepEqual(summary.fileActivity, [
+    "read README.md\n  Meaning: Pi read file contents\n  Evidence: read tool event\n  Inspect: --event 3",
+    "edit result.txt\n  Meaning: Pi requested targeted text replacement\n  Evidence: edit tool event\n  Inspect: --event 6",
+    "write tool docs/example.md\n  Meaning: Pi wrote full file content; may create, overwrite, or leave content unchanged\n  Evidence: write tool event\n  Inspect: --event 7",
+  ]);
   assert.equal(summary.failedCommands, 1);
   assert.equal(summary.riskyCommands, 0);
   assert.equal(summary.captureState, "Partial");
@@ -306,10 +313,15 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
     toolCalls: 4,
     shellCommands: 2,
     filesObserved: 2,
+    fileToolActions: 2,
     failedCommands: 1,
     riskyCommands: 1,
     captureState: "Partial",
     worthReviewing: ["one shell command failed"],
+    fileActivity: [
+      "read README.md\n  Meaning: Pi read file contents\n  Evidence: read tool event\n  Inspect: --event 3",
+      "write tool docs/example.md\n  Meaning: Pi wrote full file content; may create, overwrite, or leave content unchanged\n  Evidence: write tool event\n  Inspect: --event 7",
+    ],
   });
 
   assert.match(output, /Session complete/);
@@ -318,11 +330,15 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /Tool calls\s+4/);
   assert.match(output, /Shell commands\s{2,}2/);
   assert.match(output, /Files observed\s{2,}2/);
+  assert.match(output, /File tool actions\s{2,}2/);
   assert.match(output, /Failed commands\s{2,}1/);
   assert.match(output, /Risk notices\s{2,}1/);
   assert.match(output, /Capture state\s{2,}Partial/);
   assert.match(output, /Worth reviewing/);
   assert.match(output, /- one shell command failed/);
+  assert.match(output, /File tool activity/);
+  assert.match(output, /- read README\.md\n  Meaning: Pi read file contents\n  Evidence: read tool event\n  Inspect: --event 3/);
+  assert.match(output, /- write tool docs\/example\.md\n  Meaning: Pi wrote full file content; may create, overwrite, or leave content unchanged\n  Evidence: write tool event\n  Inspect: --event 7/);
 });
 
 test("buildDebrief uses plural wording for multiple truncated events", () => {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { discoverSessions, parseJsonlEvents, renderEvent } from "./cli.ts";
+import { discoverSessions, findEvent, formatEventInspection, parseJsonlEvents, renderEvent } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -55,4 +55,30 @@ test("renderEvent narrates user bash distinctly from agent bash", () => {
     renderEvent(event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } })),
     "Running · npm test",
   );
+});
+
+test("findEvent resolves events by id or sequence string", () => {
+  const events = [event(1, "session.started"), event(2, "tool.requested", { id: "evt-tool" })];
+
+  assert.equal(findEvent(events, "evt-tool")?.sequence, 2);
+  assert.equal(findEvent(events, "1")?.type, "session.started");
+  assert.equal(findEvent(events, "missing"), undefined);
+});
+
+test("formatEventInspection prints event evidence and useful tool context", () => {
+  const output = formatEventInspection(event(3, "tool.requested", {
+    evidence: "observed",
+    cwd: "/tmp/repo",
+    toolName: "bash",
+    toolCallId: "call-123",
+    payload: { input: { command: "npm test" } },
+  }));
+
+  assert.match(output, /Sequence\s+3/);
+  assert.match(output, /Type\s+tool\.requested/);
+  assert.match(output, /Evidence\s+observed/);
+  assert.match(output, /Tool\s+bash/);
+  assert.match(output, /Tool call\s+call-123/);
+  assert.match(output, /Command\s+npm test/);
+  assert.match(output, /Payload/);
 });

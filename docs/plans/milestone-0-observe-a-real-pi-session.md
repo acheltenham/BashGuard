@@ -199,11 +199,15 @@ Completed foundation work:
 
 Next implementation order:
 
-1. Add automated tests for JSONL parsing, session discovery, liveness detection, and narration rendering.
-2. Add event inspection through `bashguard inspect <session-id> --event <event-id>`.
-3. Add debrief aggregation for completed sessions.
-4. Tighten event schema/capture-completeness rendering.
-5. Replace or enhance the stream with the first interactive TUI.
+1. Add event inspection through `bashguard inspect <session-id> --event <event-id-or-sequence>`.
+2. Add debrief aggregation for completed sessions.
+3. Tighten event schema/capture-completeness rendering.
+4. Replace or enhance the stream with the first interactive TUI.
+
+Current hardening branch status:
+
+- Automated tests now cover JSONL parsing, session discovery/liveness, narration rendering, event lookup, and event detail formatting.
+- The first `inspect` implementation prints one event by ID or sequence with evidence, session, cwd, tool, command/path, exit code, and pretty-printed payload.
 
 ## Testing Strategy
 

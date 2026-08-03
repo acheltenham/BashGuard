@@ -32,7 +32,7 @@ BashGuard should narrate the session rather than dump raw logs. Safe work stays 
 bashguard attach
 bashguard sessions
 bashguard open <session-id>
-bashguard inspect <session-id>
+bashguard inspect <session-id> --event <event-id-or-sequence>
 bashguard replay <session-id>
 ```
 
@@ -116,6 +116,7 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-test pi -e .
 # Terminal 2
 BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts sessions
 BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts attach
+BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts inspect <session-id> --event <event-id-or-sequence>
 ```
 
 See [Separate-Terminal Attach Test](docs/testing/separate-terminal-attach.md).

@@ -45,7 +45,7 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 | Performance | Add capture with low overhead | Avoid making Pi feel slower | Unknown | Measure event latency, write overhead, and memory use |
 | Failure isolation | Allow Pi to continue if BashGuard fails | Preserve the developer workflow | Confirmed | Invalid data directory surfaced extension errors while Pi still exited successfully in smoke test |
 | Secret redaction | Remove likely secrets before persistence | Keep local records safer to inspect and share | Partial | Key matching implemented; false-positive on `totalTokens` found and fixed; value-based secret detection remains future work |
-| Capture completeness | Mark missing or uncertain links | Avoid inventing provenance | BashGuard-owned | Evidence states exist in schema; capture-gap events still need implementation |
+| Capture completeness | Mark missing or uncertain links | Avoid inventing provenance | Partial | Event envelope now supports `capture.missing` and `capture.redacted`; CLI inspect/debrief surface these fields. Dedicated capture-gap event types still need implementation. |
 
 ## Spike 1 Results: Lifecycle and Correlation
 
@@ -81,6 +81,8 @@ Observed event sequence included:
 - A recorder storage failure did not make Pi unusable, which validates the desired failure-isolation direction.
 - Storage failures are not yet represented as explicit capture-gap events.
 - Initial secret-key matching was too broad and incorrectly redacted `totalTokens`. The spike now uses exact normalized secret-key matching instead of substring matching.
+- Capture metadata is now represented as `capture.missing` and `capture.redacted` on events and is visible in CLI inspection/debrief output.
+- Redaction notices mean values were intentionally hidden before persistence. Inspection should show redacted payload paths so users know what kind of evidence was withheld without exposing the secret value.
 
 ## Required Spikes
 

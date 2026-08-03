@@ -16,6 +16,11 @@ export type SessionMetadata = {
   piMode?: string;
 };
 
+export type CaptureMetadata = {
+  missing: string[];
+  redacted: string[];
+};
+
 export type BashGuardEvent = {
   schemaVersion: number;
   id: string;
@@ -30,6 +35,7 @@ export type BashGuardEvent = {
   toolCallId?: string;
   toolName?: string;
   payload?: Record<string, unknown>;
+  capture?: CaptureMetadata;
 };
 
 export type SessionSummary = {
@@ -80,6 +86,16 @@ function processIsAlive(pid?: number): boolean {
   }
 }
 
+export function normalizeEvent(event: BashGuardEvent): BashGuardEvent {
+  return {
+    ...event,
+    capture: {
+      missing: Array.isArray(event.capture?.missing) ? event.capture.missing : [],
+      redacted: Array.isArray(event.capture?.redacted) ? event.capture.redacted : [],
+    },
+  };
+}
+
 export function parseJsonlEvents(text: string): BashGuardEvent[] {
   const lines = text.split("\n");
   const hasCompleteFinalLine = text.endsWith("\n");
@@ -89,7 +105,7 @@ export function parseJsonlEvents(text: string): BashGuardEvent[] {
   for (const line of lines) {
     if (!line.trim()) continue;
     try {
-      events.push(JSON.parse(line) as BashGuardEvent);
+      events.push(normalizeEvent(JSON.parse(line) as BashGuardEvent));
     } catch {
       // Malformed complete lines are ignored in this first slice rather than crashing attachment.
     }
@@ -256,7 +272,8 @@ function formatField(label: string, value: unknown): string | undefined {
 }
 
 export function formatEventInspection(event: BashGuardEvent): string {
-  const payload = event.payload ?? {};
+  const normalized = normalizeEvent(event);
+  const payload = normalized.payload ?? {};
   const input = payload.input as Record<string, unknown> | undefined;
   const details = payload.details as Record<string, unknown> | undefined;
   const command = getString(payload.command) ?? getString(input?.command);
@@ -266,15 +283,17 @@ export function formatEventInspection(event: BashGuardEvent): string {
   const lines = [
     "Event detail",
     "",
-    formatField("Sequence", event.sequence),
-    formatField("Event ID", event.id),
-    formatField("Type", event.type),
-    formatField("Timestamp", event.timestamp),
-    formatField("Evidence", event.evidence ?? "unknown"),
-    formatField("Session", event.sessionId),
-    formatField("Cwd", event.cwd),
-    formatField("Tool", event.toolName ?? getString(payload.toolName)),
-    formatField("Tool call", event.toolCallId ?? getString(payload.toolCallId)),
+    formatField("Sequence", normalized.sequence),
+    formatField("Event ID", normalized.id),
+    formatField("Type", normalized.type),
+    formatField("Timestamp", normalized.timestamp),
+    formatField("Evidence", normalized.evidence ?? "unknown"),
+    formatField("Missing", normalized.capture?.missing.join(", ")),
+    formatField("Redacted", normalized.capture?.redacted.join(", ")),
+    formatField("Session", normalized.sessionId),
+    formatField("Cwd", normalized.cwd),
+    formatField("Tool", normalized.toolName ?? getString(payload.toolName)),
+    formatField("Tool call", normalized.toolCallId ?? getString(payload.toolCallId)),
     formatField("Command", command),
     formatField("Path", path),
     formatField("Exit code", exitCode),
@@ -297,8 +316,28 @@ function pathFor(event: BashGuardEvent): string | undefined {
   return getString(payload.path) ?? getString(inputFor(event)?.path);
 }
 
+function commandFor(event: BashGuardEvent): string | undefined {
+  const payload = event.payload ?? {};
+  return getString(payload.command) ?? getString(inputFor(event)?.command);
+}
+
+function toolCallIdFor(event: BashGuardEvent): string | undefined {
+  return event.toolCallId ?? getString(event.payload?.toolCallId);
+}
+
 function bashExitCodeFor(event: BashGuardEvent): number | undefined {
-  return getNumber((event.payload?.details as Record<string, unknown> | undefined)?.exitCode);
+  const detailsExitCode = getNumber((event.payload?.details as Record<string, unknown> | undefined)?.exitCode);
+  if (detailsExitCode !== undefined) return detailsExitCode;
+
+  const content = event.payload?.content;
+  if (!Array.isArray(content)) return undefined;
+  for (const item of content) {
+    if (typeof item !== "object" || item === null) continue;
+    const text = getString((item as Record<string, unknown>).text);
+    const match = text?.match(/Command exited with code (\d+)/);
+    if (match?.[1]) return Number(match[1]);
+  }
+  return undefined;
 }
 
 function formatCount(value: number, singular: string, plural = `${singular}s`): string {
@@ -313,21 +352,49 @@ function formatDuration(ms: number): string {
   return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
 }
 
+function formatCommandReview(count: number, message: string, commands: string[]): string {
+  const uniqueCommands = Array.from(new Set(commands.filter(Boolean)));
+  if (count === 1 && uniqueCommands.length === 1) return `shell command ${message}: \`${uniqueCommands[0]}\``;
+  if (uniqueCommands.length > 0 && uniqueCommands.length <= 3) {
+    return `${formatCount(count, "shell command")} ${message}: ${uniqueCommands.map((command) => `\`${command}\``).join(", ")}`;
+  }
+  return `${formatCount(count, "shell command")} ${message}`;
+}
+
 export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
-  const timestamps = events
+  const normalizedEvents = events.map(normalizeEvent);
+  const timestamps = normalizedEvents
     .map((event) => Date.parse(event.timestamp))
     .filter((timestamp) => Number.isFinite(timestamp));
   const durationMs = timestamps.length > 1 ? Math.max(...timestamps) - Math.min(...timestamps) : 0;
-  const toolRequests = events.filter((event) => event.type === "tool.requested");
+  const toolRequests = normalizedEvents.filter((event) => event.type === "tool.requested");
   const shellRequests = toolRequests.filter((event) => toolNameFor(event) === "bash");
-  const bashCompletions = events.filter((event) => event.type === "tool.completed" && toolNameFor(event) === "bash");
+  const commandByToolCallId = new Map(
+    shellRequests
+      .map((event) => {
+        const toolCallId = toolCallIdFor(event);
+        const command = commandFor(event);
+        return toolCallId && command ? ([toolCallId, command] as const) : undefined;
+      })
+      .filter((entry): entry is readonly [string, string] => entry !== undefined),
+  );
+  const commandForCompletion = (event: BashGuardEvent): string | undefined => {
+    const directCommand = commandFor(event);
+    if (directCommand) return directCommand;
+    const toolCallId = toolCallIdFor(event);
+    return toolCallId ? commandByToolCallId.get(toolCallId) : undefined;
+  };
+  const bashCompletions = normalizedEvents.filter((event) => event.type === "tool.completed" && toolNameFor(event) === "bash");
   const failedBashCompletions = bashCompletions.filter((event) => {
     const exitCode = bashExitCodeFor(event);
     return event.payload?.isError === true || (exitCode !== undefined && exitCode !== 0);
   });
   const failedCommands = failedBashCompletions.length;
-  const failedWithoutExitCodeCount = failedBashCompletions.filter((event) => bashExitCodeFor(event) === undefined).length;
-  const missingExitCodeCount = bashCompletions.filter((event) => bashExitCodeFor(event) === undefined).length;
+  const failedWithoutExitCode = failedBashCompletions.filter((event) => bashExitCodeFor(event) === undefined);
+  const failedWithExitCode = failedBashCompletions.filter((event) => bashExitCodeFor(event) !== undefined);
+  const failedWithoutExitCodeCount = failedWithoutExitCode.length;
+  const missingExitCode = bashCompletions.filter((event) => bashExitCodeFor(event) === undefined);
+  const missingExitCodeCount = missingExitCode.length;
   const nonFailedMissingExitCodeCount = missingExitCodeCount - failedWithoutExitCodeCount;
   const files = new Set(
     toolRequests
@@ -335,21 +402,34 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
       .map(pathFor)
       .filter((path): path is string => Boolean(path)),
   );
+  const missingCaptureEvents = normalizedEvents.filter((event) => (event.capture?.missing.length ?? 0) > 0).length;
+  const redactedEvents = normalizedEvents.filter((event) => (event.capture?.redacted.length ?? 0) > 0).length;
   const worthReviewing = [
     failedWithoutExitCodeCount > 0
-      ? `${formatCount(failedWithoutExitCodeCount, "shell command")} failed without exit-code details`
+      ? formatCommandReview(failedWithoutExitCodeCount, "failed without exit-code details", failedWithoutExitCode.map(commandForCompletion).filter((command): command is string => Boolean(command)))
       : undefined,
     nonFailedMissingExitCodeCount > 0
-      ? `${formatCount(nonFailedMissingExitCodeCount, "bash command")} completed without exit-code details`
+      ? formatCommandReview(nonFailedMissingExitCodeCount, "completed without exit-code details", missingExitCode.filter((event) => !failedWithoutExitCode.includes(event)).map(commandForCompletion).filter((command): command is string => Boolean(command)))
       : undefined,
-    failedCommands - failedWithoutExitCodeCount > 0
-      ? `${formatCount(failedCommands - failedWithoutExitCodeCount, "shell command")} failed`
+    ...failedWithExitCode.map((event) => {
+      const exitCode = bashExitCodeFor(event);
+      const command = commandForCompletion(event);
+      return command && exitCode !== undefined
+        ? `shell command failed with exit ${exitCode}: \`${command}\``
+        : undefined;
+    }),
+    failedWithExitCode.filter((event) => !commandForCompletion(event)).length > 0
+      ? `${formatCount(failedWithExitCode.filter((event) => !commandForCompletion(event)).length, "shell command")} failed`
+      : undefined,
+    missingCaptureEvents > 0 ? `${formatCount(missingCaptureEvents, "event")} has missing capture fields` : undefined,
+    redactedEvents > 0
+      ? `${formatCount(redactedEvents, "event")} has redacted fields (values hidden; run inspect on related events to see redacted paths)`
       : undefined,
   ].filter((item): item is string => item !== undefined);
 
   return {
     durationMs,
-    prompts: events.filter((event) => event.type === "agent.before_start").length,
+    prompts: normalizedEvents.filter((event) => event.type === "agent.before_start").length,
     toolCalls: toolRequests.length,
     shellCommands: shellRequests.length,
     filesObserved: files.size,

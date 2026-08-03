@@ -5,6 +5,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 type EvidenceKind = "observed" | "reported" | "inferred" | "redacted" | "missing";
 
+type CaptureMetadata = {
+  missing: string[];
+  redacted: string[];
+};
+
 type BashGuardEvent = {
   schemaVersion: 1;
   id: string;
@@ -19,6 +24,7 @@ type BashGuardEvent = {
   toolCallId?: string;
   toolName?: string;
   payload: Record<string, unknown>;
+  capture: CaptureMetadata;
 };
 
 type SessionState = {
@@ -69,9 +75,12 @@ function truncate(value: string): string {
   return `${value.slice(0, MAX_TEXT_LENGTH)}\n...[truncated ${value.length - MAX_TEXT_LENGTH} characters]`;
 }
 
-function sanitize(value: unknown, key = "", depth = 0): unknown {
+function sanitize(value: unknown, key = "", depth = 0, redacted: string[] = [], path = "payload"): unknown {
   if (depth > 8) return "[MAX_DEPTH]";
-  if (shouldRedactKey(key)) return REDACTED;
+  if (shouldRedactKey(key)) {
+    redacted.push(path);
+    return REDACTED;
+  }
   if (value === null || value === undefined) return value;
   if (typeof value === "string") return truncate(value);
   if (typeof value === "number" || typeof value === "boolean") return value;
@@ -83,11 +92,11 @@ function sanitize(value: unknown, key = "", depth = 0): unknown {
       stack: value.stack ? truncate(value.stack) : undefined,
     };
   }
-  if (Array.isArray(value)) return value.map((entry) => sanitize(entry, key, depth + 1));
+  if (Array.isArray(value)) return value.map((entry, index) => sanitize(entry, key, depth + 1, redacted, `${path}.${index}`));
   if (typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
-      result[childKey] = sanitize(childValue, childKey, depth + 1);
+      result[childKey] = sanitize(childValue, childKey, depth + 1, redacted, `${path}.${childKey}`);
     }
     return result;
   }
@@ -146,7 +155,9 @@ export default function bashGuard(pi: ExtensionAPI): void {
   ): Promise<void> => {
     if (!state) state = await createSessionState(ctx);
     const sequence = ++state.sequence;
-    const safePayload = sanitize(payload) as Record<string, unknown>;
+    const redacted: string[] = [];
+    const safePayload = sanitize(payload, "", 0, redacted) as Record<string, unknown>;
+    const missing: string[] = [];
     const event: BashGuardEvent = {
       schemaVersion: 1,
       id: makeId(),
@@ -161,6 +172,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
       toolCallId: typeof safePayload.toolCallId === "string" ? safePayload.toolCallId : undefined,
       toolName: typeof safePayload.toolName === "string" ? safePayload.toolName : undefined,
       payload: safePayload,
+      capture: { missing, redacted },
     };
 
     writeChain = writeChain.then(() => appendFile(state!.eventsFile, `${JSON.stringify(event)}\n`, "utf8"));

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildDebrief, discoverSessions, findEvent, formatDebrief, formatEventInspection, parseJsonlEvents, renderEvent } from "./cli.ts";
+import { buildDebrief, discoverSessions, findEvent, formatDebrief, formatEventInspection, normalizeEvent, parseJsonlEvents, renderEvent } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -65,9 +65,25 @@ test("findEvent resolves events by id or sequence string", () => {
   assert.equal(findEvent(events, "missing"), undefined);
 });
 
-test("formatEventInspection prints event evidence and useful tool context", () => {
+test("normalizeEvent defaults missing capture metadata for older events", () => {
+  assert.deepEqual(normalizeEvent(event(1, "session.started")).capture, { missing: [], redacted: [] });
+});
+
+test("buildDebrief treats events without explicit capture gaps as complete capture", () => {
+  const summary = buildDebrief([
+    event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
+    event(2, "tool.requested", { toolName: "read", payload: { input: { path: "README.md" } } }),
+    event(3, "session.shutdown", { timestamp: "2026-08-03T12:00:01.000Z" }),
+  ]);
+
+  assert.equal(summary.captureState, "Complete");
+  assert.deepEqual(summary.worthReviewing, []);
+});
+
+test("formatEventInspection prints event evidence, capture metadata, and useful tool context", () => {
   const output = formatEventInspection(event(3, "tool.requested", {
     evidence: "observed",
+    capture: { missing: ["turnId"], redacted: ["payload.input.apiKey"] },
     cwd: "/tmp/repo",
     toolName: "bash",
     toolCallId: "call-123",
@@ -77,13 +93,15 @@ test("formatEventInspection prints event evidence and useful tool context", () =
   assert.match(output, /Sequence\s+3/);
   assert.match(output, /Type\s+tool\.requested/);
   assert.match(output, /Evidence\s+observed/);
+  assert.match(output, /Missing\s+turnId/);
+  assert.match(output, /Redacted\s+payload\.input\.apiKey/);
   assert.match(output, /Tool\s+bash/);
   assert.match(output, /Tool call\s+call-123/);
   assert.match(output, /Command\s+npm test/);
   assert.match(output, /Payload/);
 });
 
-test("buildDebrief summarizes prompts, tools, shell commands, files, failures, and missing command exit codes", () => {
+test("buildDebrief summarizes prompts, tools, shell commands, files, failures, and capture gaps", () => {
   const summary = buildDebrief([
     event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
     event(2, "agent.before_start", { payload: { prompt: "Run tests" } }),
@@ -91,7 +109,7 @@ test("buildDebrief summarizes prompts, tools, shell commands, files, failures, a
     event(4, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } }),
     event(5, "tool.completed", { toolName: "bash", payload: { isError: false, details: { exitCode: 1 } } }),
     event(6, "tool.requested", { toolName: "write", payload: { input: { path: "result.txt" } } }),
-    event(7, "tool.requested", { toolName: "bash", payload: { input: { command: "git status" } } }),
+    event(7, "tool.requested", { toolName: "bash", capture: { missing: ["turnId"], redacted: ["payload.input.apiKey"] }, payload: { input: { command: "git status" } } }),
     event(8, "tool.completed", { toolName: "bash", payload: { isError: false } }),
     event(9, "session.shutdown", { timestamp: "2026-08-03T12:00:08.000Z" }),
   ]);
@@ -104,21 +122,44 @@ test("buildDebrief summarizes prompts, tools, shell commands, files, failures, a
   assert.equal(summary.failedCommands, 1);
   assert.equal(summary.captureState, "Partial");
   assert.deepEqual(summary.worthReviewing, [
-    "one bash command completed without exit-code details",
+    "one shell command completed without exit-code details",
     "one shell command failed",
+    "one event has missing capture fields",
+    "one event has redacted fields (values hidden; run inspect on related events to see redacted paths)",
   ]);
 });
 
 test("buildDebrief combines failed bash commands that have no exit-code details into one review note", () => {
   const summary = buildDebrief([
     event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
-    event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } }),
-    event(3, "tool.completed", { toolName: "bash", payload: { isError: true } }),
+    event(2, "tool.requested", { toolName: "bash", toolCallId: "call-1", payload: { toolCallId: "call-1", input: { command: "npm test" } } }),
+    event(3, "tool.completed", { toolName: "bash", toolCallId: "call-1", payload: { toolCallId: "call-1", isError: true } }),
     event(4, "session.shutdown", { timestamp: "2026-08-03T12:00:01.000Z" }),
   ]);
 
   assert.equal(summary.failedCommands, 1);
-  assert.deepEqual(summary.worthReviewing, ["one shell command failed without exit-code details"]);
+  assert.deepEqual(summary.worthReviewing, ["shell command failed without exit-code details: `npm test`"]);
+});
+
+test("buildDebrief extracts bash exit code from command output when details are empty", () => {
+  const summary = buildDebrief([
+    event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
+    event(2, "tool.requested", { toolName: "bash", toolCallId: "call-1", payload: { toolCallId: "call-1", input: { command: "bashguard debrief session" } } }),
+    event(3, "tool.completed", {
+      toolName: "bash",
+      toolCallId: "call-1",
+      payload: {
+        toolCallId: "call-1",
+        isError: true,
+        details: {},
+        content: [{ type: "text", text: "/bin/bash: bashguard: command not found\n\n\nCommand exited with code 127" }],
+      },
+    }),
+    event(4, "session.shutdown", { timestamp: "2026-08-03T12:00:01.000Z" }),
+  ]);
+
+  assert.equal(summary.failedCommands, 1);
+  assert.deepEqual(summary.worthReviewing, ["shell command failed with exit 127: `bashguard debrief session`"]);
 });
 
 test("formatDebrief renders a concise aligned completed-session summary", () => {

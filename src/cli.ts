@@ -636,6 +636,20 @@ function formatCommandReview(count: number, message: string, commands: string[])
   return `${formatCount(count, "shell command")} ${message}`;
 }
 
+function formatRiskGitTemporalReview(riskyEvents: BashGuardEvent[], gitEndSnapshot: BashGuardEvent | undefined, startGitCount: number | undefined, endGitCount: number | undefined): string | undefined {
+  if (!gitEndSnapshot || startGitCount === undefined || endGitCount === undefined || startGitCount === endGitCount) return undefined;
+  const riskyEventsBeforeGitSnapshot = riskyEvents.filter((event) => event.sequence < gitEndSnapshot.sequence);
+  if (riskyEventsBeforeGitSnapshot.length === 0) return undefined;
+  const riskSequences = riskyEventsBeforeGitSnapshot.map((event) => event.sequence).join(", ");
+  const changedPathText = `${endGitCount} changed ${endGitCount === 1 ? "path" : "paths"}`;
+  return [
+    "Risky shell command occurred before shutdown Git snapshot that showed changes",
+    `  Risk events: ${riskSequences}`,
+    `  Git evidence: shutdown snapshot at event ${gitEndSnapshot.sequence} showed ${changedPathText}`,
+    "  Correlation confidence: temporal proximity only",
+  ].join("\n");
+}
+
 export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const normalizedEvents = events.map(normalizeEvent);
   const timestamps = normalizedEvents
@@ -703,9 +717,13 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     if (exitCode !== undefined) return `exit ${exitCode}`;
     return completion.payload?.isError === true ? "failed without exit-code details" : "completed without exit-code details";
   };
+  const riskyCommandEvents = normalizedEvents.filter((event) => {
+    if (!((event.type === "tool.requested" && toolNameFor(event) === "bash") || event.type === "bash.user_requested")) return false;
+    const command = commandFor(event);
+    return command ? classifyCommandRisk(command).length > 0 : false;
+  });
   const riskyCommandReviews = Array.from(new Map(
-    normalizedEvents
-      .filter((event) => (event.type === "tool.requested" && toolNameFor(event) === "bash") || event.type === "bash.user_requested")
+    riskyCommandEvents
       .map((event) => {
         const command = commandFor(event);
         if (!command) return undefined;
@@ -728,6 +746,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const gitReviewItem = startGitCount !== undefined && endGitCount !== undefined && startGitCount !== endGitCount
     ? `Git working tree changed during session: ${startGitCount} -> ${endGitCount} changed paths`
     : undefined;
+  const riskGitTemporalReview = formatRiskGitTemporalReview(riskyCommandEvents, gitEndSnapshot, startGitCount, endGitCount);
   const captureGapEventList = normalizedEvents.filter((event) => event.type === "capture.gap");
   const captureGapEvents = captureGapEventList.length;
   const captureGapContexts = captureGapEventList
@@ -794,6 +813,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
       ? `${formatCount(failedWithExitCode.filter((event) => !commandForCompletion(event)).length, "shell command")} failed`
       : undefined,
     gitReviewItem,
+    riskGitTemporalReview,
     ...captureReviewItems,
   ].filter((item): item is string => item !== undefined);
 

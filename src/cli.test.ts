@@ -336,6 +336,38 @@ test("buildDebrief summarizes git status snapshot comparison", () => {
   ]);
 });
 
+test("buildDebrief flags risky commands before Git changes as temporal-only correlation", () => {
+  const summary = buildDebrief([
+    event(1, "session.started"),
+    event(2, "git.status.snapshot", { payload: { phase: "start", isRepository: true, branch: "main", worktree: "/tmp/project", changedFiles: [] } }),
+    event(3, "tool.requested", { toolName: "bash", toolCallId: "call-risk", payload: { toolCallId: "call-risk", input: { command: "rm -rf build" } } }),
+    event(4, "tool.completed", { toolName: "bash", toolCallId: "call-risk", payload: { toolCallId: "call-risk", isError: false, details: { exitCode: 0 } } }),
+    event(5, "git.status.snapshot", { payload: { phase: "shutdown", isRepository: true, branch: "main", worktree: "/tmp/project", changedFiles: ["README.md"], changedFileDetails: [{ path: "README.md", status: "M" }] } }),
+    event(6, "session.shutdown"),
+  ]);
+
+  assert.deepEqual(summary.worthReviewing, [
+    "risky shell command observed at event 3: `rm -rf build`\n  Risk: destructive filesystem removal — recursively deletes files without a trash/undo step\n  Result: exit 0\n  Inspect: --event 3",
+    "Git working tree changed during session: 0 -> 1 changed paths",
+    "Risky shell command occurred before shutdown Git snapshot that showed changes\n  Risk events: 3\n  Git evidence: shutdown snapshot at event 5 showed 1 changed path\n  Correlation confidence: temporal proximity only",
+  ]);
+});
+
+test("buildDebrief does not add temporal risk/Git correlation when Git did not change", () => {
+  const summary = buildDebrief([
+    event(1, "session.started"),
+    event(2, "git.status.snapshot", { payload: { phase: "start", isRepository: true, branch: "main", worktree: "/tmp/project", changedFiles: [] } }),
+    event(3, "tool.requested", { toolName: "bash", toolCallId: "call-risk", payload: { toolCallId: "call-risk", input: { command: "rm -rf build" } } }),
+    event(4, "tool.completed", { toolName: "bash", toolCallId: "call-risk", payload: { toolCallId: "call-risk", isError: false, details: { exitCode: 0 } } }),
+    event(5, "git.status.snapshot", { payload: { phase: "shutdown", isRepository: true, branch: "main", worktree: "/tmp/project", changedFiles: [] } }),
+    event(6, "session.shutdown"),
+  ]);
+
+  assert.deepEqual(summary.worthReviewing, [
+    "risky shell command observed at event 3: `rm -rf build`\n  Risk: destructive filesystem removal — recursively deletes files without a trash/undo step\n  Result: exit 0\n  Inspect: --event 3",
+  ]);
+});
+
 test("buildDebrief summarizes prompts, tools, shell commands, files, failures, and capture gaps", () => {
   const summary = buildDebrief([
     event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),

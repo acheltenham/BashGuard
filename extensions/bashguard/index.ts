@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 type EvidenceKind = "observed" | "reported" | "inferred" | "redacted" | "missing";
@@ -34,6 +36,8 @@ type SessionState = {
   directory: string;
   eventsFile: string;
 };
+
+const execFileAsync = promisify(execFile);
 
 const REDACTED = "[REDACTED]";
 const MAX_TEXT_LENGTH = 16_000;
@@ -119,6 +123,54 @@ function resolveSessionId(ctx: ExtensionContext): string {
 
 function getDataRoot(): string {
   return process.env.BASHGUARD_DATA_DIR ?? join(homedir(), ".bashguard", "sessions");
+}
+
+function parseGitStatusPorcelain(stdout: string): string[] {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .map((line) => line.slice(3));
+}
+
+async function readGitValue(cwd: string, args: string[]): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd,
+      timeout: 2_000,
+      maxBuffer: 64 * 1024,
+    });
+    const value = stdout.trim();
+    return value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readGitStatus(cwd: string, phase: "start" | "shutdown"): Promise<Record<string, unknown>> {
+  try {
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], {
+      cwd,
+      timeout: 2_000,
+      maxBuffer: 128 * 1024,
+    });
+    const changedFiles = parseGitStatusPorcelain(stdout);
+    return {
+      phase,
+      isRepository: true,
+      branch: await readGitValue(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+      worktree: await readGitValue(cwd, ["rev-parse", "--show-toplevel"]),
+      gitCommonDir: await readGitValue(cwd, ["rev-parse", "--git-common-dir"]),
+      changedFiles,
+      changedFileCount: changedFiles.length,
+    };
+  } catch (error) {
+    return {
+      phase,
+      isRepository: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 async function createSessionState(ctx: ExtensionContext): Promise<SessionState> {
@@ -225,9 +277,14 @@ export default function bashGuard(pi: ExtensionAPI): void {
     await writeChain;
   };
 
+  const recordGitStatus = async (ctx: ExtensionContext, phase: "start" | "shutdown"): Promise<void> => {
+    await record("git.status.snapshot", ctx, await readGitStatus(ctx.cwd, phase));
+  };
+
   pi.on("session_start", async (event, ctx) => {
     state = await createSessionState(ctx);
     await record("session.started", ctx, { event });
+    await recordGitStatus(ctx, "start");
     if (ctx.hasUI) {
       ctx.ui.setStatus("bashguard", `BashGuard recording · ${state.sessionId}`);
       ctx.ui.notify(`BashGuard recording to ${state.directory}`, "info");
@@ -235,6 +292,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async (event, ctx) => {
+    await recordGitStatus(ctx, "shutdown");
     await record("session.shutdown", ctx, { event });
     await writeChain;
     if (ctx.hasUI) ctx.ui.setStatus("bashguard", undefined);

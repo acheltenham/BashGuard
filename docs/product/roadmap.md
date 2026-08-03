@@ -70,6 +70,7 @@ Goal: make a Pi session understandable after it happens.
 - command output references;
 - non-blocking risk-notice counts and notes for explicit risky shell command patterns with event, cwd, command-result evidence context, and plain-language risk explanations;
 - file tool activity summaries for observed read, edit, and write-tool events without inferring create, overwrite, or delete impact;
+- session start/shutdown Git status snapshots with branch and worktree path for before/after working-tree comparison;
 - richer session debrief;
 - items-worth-reviewing summary;
 - completed-session browsing.

@@ -116,6 +116,10 @@ test("renderEvent narrates user bash, agent bash, edits, and capture gaps", () =
     renderEvent(event(4, "capture.gap", { payload: { reason: "failed to persist tool.completed event", failedToolName: "bash", command: "curl google.com" } })),
     "Capture gap · failed to persist tool.completed event · bash · curl google.com",
   );
+  assert.equal(
+    renderEvent(event(5, "git.status.snapshot", { payload: { phase: "start", isRepository: true, changedFiles: ["README.md"] } })),
+    "Git status snapshot · start · dirty · 1 changed path",
+  );
 });
 
 test("classifyCommandRisk identifies explicit risky shell command patterns", () => {
@@ -268,6 +272,22 @@ test("formatEventInspection prints event evidence, capture metadata, and useful 
   assert.match(output, /Payload/);
 });
 
+test("buildDebrief summarizes git status snapshot comparison", () => {
+  const summary = buildDebrief([
+    event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
+    event(2, "git.status.snapshot", { payload: { phase: "start", isRepository: true, branch: "main", worktree: "/tmp/project", changedFiles: [] } }),
+    event(3, "tool.requested", { toolName: "edit", payload: { input: { path: "README.md" } } }),
+    event(4, "git.status.snapshot", { payload: { phase: "shutdown", isRepository: true, branch: "main", worktree: "/tmp/project", changedFiles: ["README.md", "src/cli.ts"] } }),
+    event(5, "session.shutdown", { timestamp: "2026-08-03T12:00:05.000Z" }),
+  ]);
+
+  assert.equal(summary.gitStatus, "clean -> dirty");
+  assert.equal(summary.gitBranch, "main");
+  assert.equal(summary.gitWorktree, "/tmp/project");
+  assert.equal(summary.gitChangedPaths, "0 -> 2");
+  assert.deepEqual(summary.worthReviewing, ["Git working tree changed during session: 0 -> 2 changed paths"]);
+});
+
 test("buildDebrief summarizes prompts, tools, shell commands, files, failures, and capture gaps", () => {
   const summary = buildDebrief([
     event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
@@ -295,6 +315,8 @@ test("buildDebrief summarizes prompts, tools, shell commands, files, failures, a
   ]);
   assert.equal(summary.failedCommands, 1);
   assert.equal(summary.riskyCommands, 0);
+  assert.equal(summary.gitStatus, undefined);
+  assert.equal(summary.gitChangedPaths, undefined);
   assert.equal(summary.captureState, "Partial");
   assert.deepEqual(summary.worthReviewing, [
     "one shell command completed without exit-code details",
@@ -348,6 +370,10 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
     fileToolActions: 2,
     failedCommands: 1,
     riskyCommands: 1,
+    gitStatus: "clean -> dirty",
+    gitBranch: "main",
+    gitWorktree: "/tmp/project",
+    gitChangedPaths: "0 -> 2",
     captureState: "Partial",
     worthReviewing: ["one shell command failed"],
     fileActivity: [
@@ -365,6 +391,10 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /File tool actions\s{2,}2/);
   assert.match(output, /Failed commands\s{2,}1/);
   assert.match(output, /Risk notices\s{2,}1/);
+  assert.match(output, /Git status\s{2,}clean -> dirty/);
+  assert.match(output, /Git branch\s{2,}main/);
+  assert.match(output, /Git worktree\s{2,}\/tmp\/project/);
+  assert.match(output, /Git changed paths\s{2,}0 -> 2/);
   assert.match(output, /Capture state\s{2,}Partial/);
   assert.match(output, /Worth reviewing/);
   assert.match(output, /- one shell command failed/);

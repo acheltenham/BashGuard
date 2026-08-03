@@ -40,9 +40,9 @@ bashguard debrief 1
 ```
 
 - `sessions` lists recent and active recorded sessions with a `#` selector and copyable session prefix.
-- `attach` follows an active session or renders a completed session timeline. It accepts a session number, full session ID, unique session prefix, or `--session`.
+- `attach` follows an active session or renders a completed session timeline. It accepts a session number, full session ID, unique session prefix, or `--session`. Risk notices in the timeline are explicitly non-blocking.
 - `inspect` without `--event` lists inspectable events for a session. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or sequence, including file-tool meaning for read/edit/write-tool events and Git snapshot details for Git status events.
-- `debrief` summarizes a completed session with evidence-based review notes, including Git status before/after, a risk-notice count, non-blocking risky-command notes, and a `File tool activity` section for observed read/edit/write-tool events.
+- `debrief` summarizes a completed session with evidence-based review notes, including evidence completeness, Git status before/after, a risk-notice count, non-blocking risky-command notes, correlation confidence for direct path matches, and a `File tool activity` section for observed read/edit/write-tool events.
 
 Planned later commands include richer `open`/TUI and `replay` experiences.
 
@@ -99,7 +99,7 @@ The MVP does not require a cloud service, account, hosted dashboard, support for
 
 BashGuard has a working Milestone 0 foundation: a Pi extension records real sessions into local append-only JSONL, and a separate `bashguard` CLI can discover, attach to, inspect, and debrief those sessions without terminal scraping or a daemon.
 
-The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, file read/write/edit, shell command, capture-completeness, truncation/redaction, capture-gap evidence, non-blocking risk notices for a small explicit set of risky shell command patterns, file tool activity, and Git status snapshots at session start/shutdown. Risk review notes include event, cwd, command-result evidence, and plain-language risk explanations when available. File activity is reported as observed Pi tool activity rather than inferred create/overwrite/delete impact. Git status snapshots report branch, worktree path, working-tree state, and changed-file details before/after the session, including status, line counts, changed line ranges, and any observed matching file-tool event by path. They do not yet claim causality or attribute exact Git diffs to individual events. Remaining work is focused on final manual validation, richer terminal UX, pre-execution command-resolution/risk previews, and deeper file/Git impact correlation.
+The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, file read/write/edit, shell command, capture-completeness, truncation/redaction, capture-gap evidence, non-blocking risk notices for a small explicit set of risky shell command patterns, file tool activity, and Git status snapshots at session start/shutdown. Risk review notes include event, cwd, command-result evidence, and plain-language risk explanations when available. File activity is reported as observed Pi tool activity rather than inferred create/overwrite/delete impact. Git status snapshots report branch, worktree path, working-tree state, and changed-file details before/after the session, including status, line counts, changed line ranges, and any observed matching file-tool event by path. Direct path matches include a correlation confidence label. They do not yet claim causality or attribute exact Git diffs to individual events. Remaining work is focused on final manual validation, richer terminal UX, pre-execution command-resolution/risk previews, and deeper file/Git impact correlation.
 
 ## Installation and Usage
 

@@ -63,6 +63,7 @@ export type DebriefSummary = {
   gitChangedFiles: string[];
   captureState: "Complete" | "Partial";
   worthReviewing: string[];
+  evidenceCompleteness: string[];
   fileActivity: string[];
 };
 
@@ -289,7 +290,7 @@ function formatRiskWithExplanation(risk: string): string {
 
 function formatRiskNotice(command: string): string | undefined {
   const risks = classifyCommandRisk(command);
-  return risks.length > 0 ? `Risk notice: ${risks.join(", ")}` : undefined;
+  return risks.length > 0 ? `Non-blocking risk notice: ${risks.join(", ")}` : undefined;
 }
 
 export function renderEvent(event: BashGuardEvent): string | undefined {
@@ -605,9 +606,11 @@ function formatGitChangedFileDetail(detail: unknown, matchingFileToolEvent: Bash
     if (matchingFileToolEvent) {
       const action = fileActionForTool(toolNameFor(matchingFileToolEvent));
       lines.push(`  Observed matching file tool event: ${action} at event ${matchingFileToolEvent.sequence}`);
+      lines.push("  Correlation confidence: direct path match");
       lines.push(`  Inspect: --event ${matchingFileToolEvent.sequence}`);
     } else {
       lines.push("  Observed matching file tool event: none recorded");
+      lines.push("  Correlation confidence: no direct file-tool match");
     }
   }
   return lines.join("\n");
@@ -741,6 +744,25 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const missingCaptureEvents = nonGapEvents.filter((event) => (event.capture?.missing.length ?? 0) > 0).length;
   const redactedEvents = nonGapEvents.filter((event) => (event.capture?.redacted.length ?? 0) > 0).length;
   const truncatedEvents = nonGapEvents.filter((event) => (event.capture?.truncated.length ?? 0) > 0).length;
+  const gitSnapshotCompleteness = gitSnapshots.length === 0
+    ? "missing"
+    : gitStartSnapshot && gitEndSnapshot
+      ? "start + shutdown present"
+      : gitStartSnapshot
+        ? "start present; shutdown missing"
+        : "shutdown present; start missing";
+  const commandResultsWithExitCode = Math.min(shellRequests.length, bashCompletions.filter((completion) => bashExitCodeFor(completion) !== undefined).length);
+  const commandResultCompleteness = shellRequests.length === 0
+    ? "no bash commands observed"
+    : `${commandResultsWithExitCode}/${shellRequests.length} bash commands have exit-code evidence`;
+  const evidenceCompleteness = [
+    `Capture gaps: ${captureGapEvents}`,
+    `Redacted events: ${redactedEvents}`,
+    `Truncated events: ${truncatedEvents}`,
+    `Events with missing fields: ${missingCaptureEvents}`,
+    `Git snapshots: ${gitSnapshotCompleteness}`,
+    `Command results: ${commandResultCompleteness}`,
+  ];
   const captureReviewItems = [
     captureGapEvents > 0
       ? `${formatCount(captureGapEvents, "capture gap")} occurred during recording${captureGapEvents === 1 && captureGapContexts[0] ? `: ${captureGapContexts[0]}` : ""}`
@@ -791,8 +813,16 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     gitChangedFiles,
     captureState: captureReviewItems.length > 0 ? "Partial" : "Complete",
     worthReviewing,
+    evidenceCompleteness,
     fileActivity,
   };
+}
+
+function formatCaptureState(summary: DebriefSummary): string {
+  if (summary.captureState !== "Partial") return summary.captureState;
+  const captureGapLine = summary.evidenceCompleteness.find((line) => line.startsWith("Capture gaps: "));
+  const captureGapCount = captureGapLine ? Number(captureGapLine.slice("Capture gaps: ".length)) : 0;
+  return captureGapCount > 0 ? "Partial (capture gap recorded)" : summary.captureState;
 }
 
 export function formatDebrief(summary: DebriefSummary): string {
@@ -811,11 +841,15 @@ export function formatDebrief(summary: DebriefSummary): string {
     formatField("Git branch", summary.gitBranch),
     formatField("Git worktree", summary.gitWorktree),
     formatField("Git changed paths", summary.gitChangedPaths),
-    formatField("Capture state", summary.captureState),
+    formatField("Capture state", formatCaptureState(summary)),
   ].filter((line): line is string => line !== undefined);
 
   if (summary.worthReviewing.length > 0) {
     lines.push("", "Worth reviewing", ...summary.worthReviewing.map((item) => `- ${item}`));
+  }
+
+  if (summary.evidenceCompleteness.length > 0) {
+    lines.push("", "Evidence completeness", ...summary.evidenceCompleteness.map((item) => `- ${item}`));
   }
 
   if (summary.gitChangedFiles.length > 0) {

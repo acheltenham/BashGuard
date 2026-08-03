@@ -132,7 +132,7 @@ test("classifyCommandRisk identifies explicit risky shell command patterns", () 
 test("renderEvent surfaces non-blocking risk notices for risky bash commands", () => {
   assert.equal(
     renderEvent(event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "rm -rf build" } } })),
-    "Running · rm -rf build · Risk notice: destructive filesystem removal",
+    "Running · rm -rf build · Non-blocking risk notice: destructive filesystem removal",
   );
 });
 
@@ -321,11 +321,19 @@ test("buildDebrief summarizes git status snapshot comparison", () => {
   assert.equal(summary.gitWorktree, "/tmp/project");
   assert.equal(summary.gitChangedPaths, "0 -> 2");
   assert.deepEqual(summary.gitChangedFiles, [
-    "M README.md (+12 -3)\n  Lines: 14-18, 42\n  Observed matching file tool event: edit at event 3\n  Inspect: --event 3",
-    "A src/cli.ts (+40 -0)\n  Lines: 1-40\n  Observed matching file tool event: write tool at event 4\n  Inspect: --event 4",
-    "?? notes/new.md\n  Observed matching file tool event: none recorded",
+    "M README.md (+12 -3)\n  Lines: 14-18, 42\n  Observed matching file tool event: edit at event 3\n  Correlation confidence: direct path match\n  Inspect: --event 3",
+    "A src/cli.ts (+40 -0)\n  Lines: 1-40\n  Observed matching file tool event: write tool at event 4\n  Correlation confidence: direct path match\n  Inspect: --event 4",
+    "?? notes/new.md\n  Observed matching file tool event: none recorded\n  Correlation confidence: no direct file-tool match",
   ]);
   assert.deepEqual(summary.worthReviewing, ["Git working tree changed during session: 0 -> 2 changed paths"]);
+  assert.deepEqual(summary.evidenceCompleteness, [
+    "Capture gaps: 0",
+    "Redacted events: 0",
+    "Truncated events: 0",
+    "Events with missing fields: 0",
+    "Git snapshots: start + shutdown present",
+    "Command results: no bash commands observed",
+  ]);
 });
 
 test("buildDebrief summarizes prompts, tools, shell commands, files, failures, and capture gaps", () => {
@@ -358,6 +366,14 @@ test("buildDebrief summarizes prompts, tools, shell commands, files, failures, a
   assert.equal(summary.gitStatus, undefined);
   assert.equal(summary.gitChangedPaths, undefined);
   assert.equal(summary.captureState, "Partial");
+  assert.deepEqual(summary.evidenceCompleteness, [
+    "Capture gaps: 0",
+    "Redacted events: 1",
+    "Truncated events: 1",
+    "Events with missing fields: 1",
+    "Git snapshots: missing",
+    "Command results: 1/2 bash commands have exit-code evidence",
+  ]);
   assert.deepEqual(summary.worthReviewing, [
     "one shell command completed without exit-code details",
     "one shell command failed",
@@ -415,11 +431,19 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
     gitWorktree: "/tmp/project",
     gitChangedPaths: "0 -> 2",
     gitChangedFiles: [
-      "M README.md (+12 -3)\n  Lines: 14-18, 42\n  Observed matching file tool event: edit at event 3\n  Inspect: --event 3",
-      "A src/cli.ts (+40 -0)\n  Lines: 1-40\n  Observed matching file tool event: write tool at event 7\n  Inspect: --event 7",
+      "M README.md (+12 -3)\n  Lines: 14-18, 42\n  Observed matching file tool event: edit at event 3\n  Correlation confidence: direct path match\n  Inspect: --event 3",
+      "A src/cli.ts (+40 -0)\n  Lines: 1-40\n  Observed matching file tool event: write tool at event 7\n  Correlation confidence: direct path match\n  Inspect: --event 7",
     ],
     captureState: "Partial",
     worthReviewing: ["one shell command failed"],
+    evidenceCompleteness: [
+      "Capture gaps: 0",
+      "Redacted events: 0",
+      "Truncated events: 0",
+      "Events with missing fields: 0",
+      "Git snapshots: start + shutdown present",
+      "Command results: 1/2 bash commands have exit-code evidence",
+    ],
     fileActivity: [
       "read README.md\n  Meaning: Pi read file contents\n  Evidence: read tool event\n  Inspect: --event 3",
       "write tool docs/example.md\n  Meaning: Pi wrote full file content; may create, overwrite, or leave content unchanged\n  Evidence: write tool event\n  Inspect: --event 7",
@@ -443,8 +467,11 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /Worth reviewing/);
   assert.match(output, /- one shell command failed/);
   assert.match(output, /Git changed files/);
-  assert.match(output, /- M README\.md \(\+12 -3\)\n  Lines: 14-18, 42\n  Observed matching file tool event: edit at event 3\n  Inspect: --event 3/);
-  assert.match(output, /- A src\/cli\.ts \(\+40 -0\)\n  Lines: 1-40\n  Observed matching file tool event: write tool at event 7\n  Inspect: --event 7/);
+  assert.match(output, /Evidence completeness/);
+  assert.match(output, /- Git snapshots: start \+ shutdown present/);
+  assert.match(output, /- Command results: 1\/2 bash commands have exit-code evidence/);
+  assert.match(output, /- M README\.md \(\+12 -3\)\n  Lines: 14-18, 42\n  Observed matching file tool event: edit at event 3\n  Correlation confidence: direct path match\n  Inspect: --event 3/);
+  assert.match(output, /- A src\/cli\.ts \(\+40 -0\)\n  Lines: 1-40\n  Observed matching file tool event: write tool at event 7\n  Correlation confidence: direct path match\n  Inspect: --event 7/);
   assert.match(output, /File tool activity/);
   assert.match(output, /- read README\.md\n  Meaning: Pi read file contents\n  Evidence: read tool event\n  Inspect: --event 3/);
   assert.match(output, /- write tool docs\/example\.md\n  Meaning: Pi wrote full file content; may create, overwrite, or leave content unchanged\n  Evidence: write tool event\n  Inspect: --event 7/);
@@ -470,4 +497,5 @@ test("buildDebrief reports capture gap events", () => {
 
   assert.equal(summary.captureState, "Partial");
   assert.deepEqual(summary.worthReviewing, ["one capture gap occurred during recording: bash `curl google.com`"]);
+  assert.match(formatDebrief(summary), /Capture state\s+Partial \(capture gap recorded\)/);
 });

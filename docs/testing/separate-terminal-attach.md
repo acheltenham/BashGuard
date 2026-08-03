@@ -2,6 +2,10 @@
 
 This test validates the first BashGuard companion workflow: Pi runs in one terminal while the `bashguard` CLI discovers and follows the same local session from another terminal.
 
+## Current result
+
+Validated on August 3, 2026 against Pi `0.80.6` and PR #5. A second process successfully discovered an active Pi session, attached to the JSONL stream, rendered live file/shell/write events, observed `session.shutdown`, and reopened the completed session by ID prefix.
+
 ## Branch
 
 ```bash

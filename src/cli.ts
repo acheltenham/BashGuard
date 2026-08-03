@@ -4,8 +4,9 @@ import { createReadStream, existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-type SessionMetadata = {
+export type SessionMetadata = {
   schemaVersion?: number;
   sessionId: string;
   cwd?: string;
@@ -15,7 +16,7 @@ type SessionMetadata = {
   piMode?: string;
 };
 
-type BashGuardEvent = {
+export type BashGuardEvent = {
   schemaVersion: number;
   id: string;
   sequence: number;
@@ -31,7 +32,7 @@ type BashGuardEvent = {
   payload?: Record<string, unknown>;
 };
 
-type SessionSummary = {
+export type SessionSummary = {
   metadata: SessionMetadata;
   directory: string;
   eventsFile: string;
@@ -68,32 +69,36 @@ function processIsAlive(pid?: number): boolean {
   }
 }
 
-async function readExistingEvents(eventsFile: string): Promise<BashGuardEvent[]> {
-  let text = "";
-  try {
-    text = await readFile(eventsFile, "utf8");
-  } catch {
-    return [];
-  }
+export function parseJsonlEvents(text: string): BashGuardEvent[] {
+  const lines = text.split("\n");
+  const hasCompleteFinalLine = text.endsWith("\n");
+  if (!hasCompleteFinalLine) lines.pop();
 
   const events: BashGuardEvent[] = [];
-  for (const line of text.split("\n")) {
+  for (const line of lines) {
     if (!line.trim()) continue;
     try {
       events.push(JSON.parse(line) as BashGuardEvent);
     } catch {
-      // Ignore an incomplete final JSONL line. A later poll will retry once complete.
+      // Malformed complete lines are ignored in this first slice rather than crashing attachment.
     }
   }
   return events.sort((a, b) => a.sequence - b.sequence);
+}
+
+async function readExistingEvents(eventsFile: string): Promise<BashGuardEvent[]> {
+  try {
+    return parseJsonlEvents(await readFile(eventsFile, "utf8"));
+  } catch {
+    return [];
+  }
 }
 
 function sessionHasShutdown(events: BashGuardEvent[]): boolean {
   return events.some((event) => event.type === "session.shutdown");
 }
 
-async function discoverSessions(): Promise<SessionSummary[]> {
-  const root = getDataRoot();
+export async function discoverSessions(root = getDataRoot()): Promise<SessionSummary[]> {
   let entries: string[] = [];
   try {
     entries = await readdir(root);
@@ -165,7 +170,7 @@ function getNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function renderEvent(event: BashGuardEvent): string | undefined {
+export function renderEvent(event: BashGuardEvent): string | undefined {
   const payload = event.payload ?? {};
 
   switch (event.type) {
@@ -225,9 +230,9 @@ function renderTimestamp(timestamp: string): string {
   return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-async function chooseSession(requestedId?: string): Promise<SessionSummary> {
-  const sessions = await discoverSessions();
-  if (sessions.length === 0) throw new Error(`No BashGuard sessions found in ${getDataRoot()}`);
+export async function chooseSession(requestedId?: string, root = getDataRoot()): Promise<SessionSummary> {
+  const sessions = await discoverSessions(root);
+  if (sessions.length === 0) throw new Error(`No BashGuard sessions found in ${root}`);
 
   if (requestedId) {
     const exact = sessions.find((session) => session.metadata.sessionId === requestedId);
@@ -338,4 +343,6 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  void main();
+}

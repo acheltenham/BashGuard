@@ -80,7 +80,7 @@ Observed event sequence included:
 ### Failure and privacy findings
 
 - A recorder storage failure did not make Pi unusable, which validates the desired failure-isolation direction.
-- Storage failures are not yet represented as explicit capture-gap events.
+- Recorder write failures now attempt to record explicit `capture.gap` events; total stream unavailability falls back to Pi UI notification.
 - Initial secret-key matching was too broad and incorrectly redacted `totalTokens`. The spike now uses exact normalized secret-key matching instead of substring matching.
 - Capture metadata is now represented as `capture.missing`, `capture.redacted`, and `capture.truncated` on events and is visible in CLI inspection/debrief output.
 - Redaction notices mean values were intentionally hidden before persistence. Inspection should show redacted payload paths so users know what kind of evidence was withheld without exposing the secret value.
@@ -126,7 +126,6 @@ PR #5 proved that a second process can:
 
 Remaining hardening work:
 
-- add automated tests around discovery, JSONL parsing, and narration;
 - verify two simultaneous interactive Pi sessions;
 - persist attach cursors only if later UX requires independent-invocation resume.
 

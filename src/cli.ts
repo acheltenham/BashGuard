@@ -403,16 +403,33 @@ function formatField(label: string, value: unknown): string | undefined {
   return `${label.padEnd(18)} ${String(value)}`;
 }
 
+function fileActionForTool(tool: string | undefined): string | undefined {
+  if (tool === "read") return "read";
+  if (tool === "edit") return "edit";
+  if (tool === "write") return "write tool";
+  return undefined;
+}
+
+function fileMeaningForTool(tool: string | undefined): string | undefined {
+  if (tool === "read") return "Pi read file contents";
+  if (tool === "edit") return "Pi requested targeted text replacement";
+  if (tool === "write") return "Pi wrote full file content; may create, overwrite, or leave content unchanged";
+  return undefined;
+}
+
 export function formatEventInspection(event: BashGuardEvent): string {
   const normalized = normalizeEvent(event);
   const payload = normalized.payload ?? {};
   const input = payload.input as Record<string, unknown> | undefined;
   const details = payload.details as Record<string, unknown> | undefined;
+  const tool = normalized.toolName ?? getString(payload.toolName);
   const command = getString(payload.command) ?? getString(input?.command);
   const path = getString(payload.path) ?? getString(input?.path);
   const exitCode = getNumber(details?.exitCode);
   const riskFactors = command ? classifyCommandRisk(command) : [];
   const riskWhy = riskFactors.map(explainRisk);
+  const fileAction = path ? fileActionForTool(tool) : undefined;
+  const fileMeaning = path ? fileMeaningForTool(tool) : undefined;
 
   const lines = [
     "Event detail",
@@ -427,12 +444,14 @@ export function formatEventInspection(event: BashGuardEvent): string {
     formatField("Truncated", normalized.capture?.truncated.join(", ")),
     formatField("Session", normalized.sessionId),
     formatField("Cwd", normalized.cwd),
-    formatField("Tool", normalized.toolName ?? getString(payload.toolName)),
+    formatField("Tool", tool),
     formatField("Tool call", normalized.toolCallId ?? getString(payload.toolCallId)),
     formatField("Command", command),
     formatField("Risk factors", riskFactors.join(", ")),
     formatField("Risk why", riskWhy.join("; ")),
     formatField("Path", path),
+    formatField("File action", fileAction),
+    formatField("File meaning", fileMeaning),
     formatField("Exit code", exitCode),
   ].filter((line): line is string => line !== undefined);
 
@@ -502,17 +521,10 @@ function formatRiskyCommandReview(event: BashGuardEvent, command: string, risks:
 function formatFileActivity(event: BashGuardEvent): string | undefined {
   const tool = toolNameFor(event);
   const path = pathFor(event);
-  if (!path) return undefined;
-  if (tool === "read") {
-    return [`read ${path}`, "  Meaning: Pi read file contents", "  Evidence: read tool event", `  Inspect: --event ${event.sequence}`].join("\n");
-  }
-  if (tool === "edit") {
-    return [`edit ${path}`, "  Meaning: Pi requested targeted text replacement", "  Evidence: edit tool event", `  Inspect: --event ${event.sequence}`].join("\n");
-  }
-  if (tool === "write") {
-    return [`write tool ${path}`, "  Meaning: Pi wrote full file content; may create, overwrite, or leave content unchanged", "  Evidence: write tool event", `  Inspect: --event ${event.sequence}`].join("\n");
-  }
-  return undefined;
+  const action = fileActionForTool(tool);
+  const meaning = fileMeaningForTool(tool);
+  if (!path || !action || !meaning) return undefined;
+  return [`${action} ${path}`, `  Meaning: ${meaning}`, `  Evidence: ${tool} tool event`, `  Inspect: --event ${event.sequence}`].join("\n");
 }
 
 function formatCommandReview(count: number, message: string, commands: string[]): string {

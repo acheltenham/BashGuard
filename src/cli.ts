@@ -246,6 +246,15 @@ export function renderEvent(event: BashGuardEvent): string | undefined {
       const command = getString(payload.command);
       return command ? `You ran · ${command}` : "You ran a shell command";
     }
+    case "capture.gap": {
+      const reason = getString(payload.reason);
+      const tool = getString(payload.failedToolName);
+      const command = getString(payload.command);
+      const path = getString(payload.path);
+      const context = [tool, command ?? path].filter(Boolean).join(" · ");
+      const base = reason ? `Capture gap · ${reason}` : "Capture gap";
+      return context ? `${base} · ${context}` : base;
+    }
     case "agent.ended":
       return "Agent turn complete";
     default:
@@ -405,9 +414,22 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
       .map(pathFor)
       .filter((path): path is string => Boolean(path)),
   );
-  const missingCaptureEvents = normalizedEvents.filter((event) => (event.capture?.missing.length ?? 0) > 0).length;
-  const redactedEvents = normalizedEvents.filter((event) => (event.capture?.redacted.length ?? 0) > 0).length;
-  const truncatedEvents = normalizedEvents.filter((event) => (event.capture?.truncated.length ?? 0) > 0).length;
+  const captureGapEventList = normalizedEvents.filter((event) => event.type === "capture.gap");
+  const captureGapEvents = captureGapEventList.length;
+  const captureGapContexts = captureGapEventList
+    .map((event) => {
+      const tool = getString(event.payload?.failedToolName);
+      const command = getString(event.payload?.command);
+      const path = getString(event.payload?.path);
+      if (tool && command) return `${tool} \`${command}\``;
+      if (tool && path) return `${tool} ${path}`;
+      return tool ?? command ?? path;
+    })
+    .filter((context): context is string => Boolean(context));
+  const nonGapEvents = normalizedEvents.filter((event) => event.type !== "capture.gap");
+  const missingCaptureEvents = nonGapEvents.filter((event) => (event.capture?.missing.length ?? 0) > 0).length;
+  const redactedEvents = nonGapEvents.filter((event) => (event.capture?.redacted.length ?? 0) > 0).length;
+  const truncatedEvents = nonGapEvents.filter((event) => (event.capture?.truncated.length ?? 0) > 0).length;
   const worthReviewing = [
     failedWithoutExitCodeCount > 0
       ? formatCommandReview(failedWithoutExitCodeCount, "failed without exit-code details", failedWithoutExitCode.map(commandForCompletion).filter((command): command is string => Boolean(command)))
@@ -424,6 +446,9 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     }),
     failedWithExitCode.filter((event) => !commandForCompletion(event)).length > 0
       ? `${formatCount(failedWithExitCode.filter((event) => !commandForCompletion(event)).length, "shell command")} failed`
+      : undefined,
+    captureGapEvents > 0
+      ? `${formatCount(captureGapEvents, "capture gap")} occurred during recording${captureGapEvents === 1 && captureGapContexts[0] ? `: ${captureGapContexts[0]}` : ""}`
       : undefined,
     missingCaptureEvents > 0 ? `${formatCount(missingCaptureEvents, "event")} ${missingCaptureEvents === 1 ? "has" : "have"} missing capture fields` : undefined,
     redactedEvents > 0

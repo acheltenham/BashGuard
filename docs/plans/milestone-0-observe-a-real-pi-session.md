@@ -199,8 +199,8 @@ Completed foundation work:
 
 Next implementation order:
 
-1. Add explicit capture-gap events for recorder/storage failures.
-2. Replace or enhance the stream with the first interactive TUI.
+1. Replace or enhance the stream with the first interactive TUI.
+2. Run a final Milestone 0 manual session and docs pass.
 
 Current hardening branch status:
 
@@ -210,6 +210,7 @@ Current hardening branch status:
 - Redacted-field review notes are informational: values were intentionally hidden before persistence; use `inspect` to see which payload paths were redacted, not the secret values themselves.
 - Truncated-field review notes are informational: large values were shortened before persistence; use `inspect` to see which edit text, diff, patch, or output paths are partial.
 - Targeted `edit` tool capture is confirmed: BashGuard records `tool.requested` and `tool.completed` with matching `toolCallId`, edited path, edit blocks, and diff/patch details.
+- `capture.gap` events are supported in timeline/debrief output for degraded recorder behavior. Recorder write failures attempt a best-effort gap event with failed event type, tool name, tool-call ID, and command/path context when available; if the stream cannot be written at all, BashGuard notifies inside Pi instead of blocking Pi.
 
 ## Testing Strategy
 

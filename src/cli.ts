@@ -63,6 +63,7 @@ export type DebriefSummary = {
   gitChangedFiles: string[];
   captureState: "Complete" | "Partial";
   worthReviewing: string[];
+  nextInspectCommands: string[];
   evidenceCompleteness: string[];
   fileActivity: string[];
 };
@@ -650,6 +651,16 @@ function formatRiskGitTemporalReview(riskyEvents: BashGuardEvent[], gitEndSnapsh
   ].join("\n");
 }
 
+function inspectCommand(sequence: number, label: string): string {
+  return `bashguard inspect <session> --event ${sequence}  # ${label}`;
+}
+
+function addInspectCommand(commands: string[], sequence: number | undefined, label: string): void {
+  if (sequence === undefined) return;
+  const command = inspectCommand(sequence, label);
+  if (!commands.includes(command)) commands.push(command);
+}
+
 export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const normalizedEvents = events.map(normalizeEvent);
   const timestamps = normalizedEvents
@@ -794,6 +805,16 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
       ? `${formatCount(truncatedEvents, "event")} ${truncatedEvents === 1 ? "has" : "have"} truncated fields (large values shortened; run inspect to see truncated paths)`
       : undefined,
   ].filter((item): item is string => item !== undefined);
+  const nextInspectCommands: string[] = [];
+  for (const event of riskyCommandEvents) addInspectCommand(nextInspectCommands, event.sequence, "risky shell command");
+  if (gitReviewItem && gitEndSnapshot) addInspectCommand(nextInspectCommands, gitEndSnapshot.sequence, "shutdown Git snapshot");
+  for (const detail of Array.isArray(gitEndSnapshot?.payload?.changedFileDetails) ? gitEndSnapshot.payload.changedFileDetails : []) {
+    const path = typeof detail === "object" && detail !== null ? getString((detail as Record<string, unknown>).path) : undefined;
+    const matchingEvent = path ? matchingFileToolEvents.get(path) : undefined;
+    if (path && matchingEvent) addInspectCommand(nextInspectCommands, matchingEvent.sequence, `matching file tool event for ${path}`);
+  }
+  for (const event of captureGapEventList) addInspectCommand(nextInspectCommands, event.sequence, "capture gap");
+
   const worthReviewing = [
     ...riskyCommandReviews,
     failedWithoutExitCodeCount > 0
@@ -833,6 +854,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     gitChangedFiles,
     captureState: captureReviewItems.length > 0 ? "Partial" : "Complete",
     worthReviewing,
+    nextInspectCommands,
     evidenceCompleteness,
     fileActivity,
   };
@@ -845,7 +867,15 @@ function formatCaptureState(summary: DebriefSummary): string {
   return captureGapCount > 0 ? "Partial (capture gap recorded)" : summary.captureState;
 }
 
-export function formatDebrief(summary: DebriefSummary): string {
+type DebriefFormatOptions = {
+  sessionSelector?: string;
+};
+
+function formatNextInspectCommand(command: string, options: DebriefFormatOptions): string {
+  return options.sessionSelector ? command.replace("<session>", options.sessionSelector) : command;
+}
+
+export function formatDebrief(summary: DebriefSummary, options: DebriefFormatOptions = {}): string {
   const lines = [
     "Session complete",
     "",
@@ -866,6 +896,10 @@ export function formatDebrief(summary: DebriefSummary): string {
 
   if (summary.worthReviewing.length > 0) {
     lines.push("", "Worth reviewing", ...summary.worthReviewing.map((item) => `- ${item}`));
+  }
+
+  if (summary.nextInspectCommands.length > 0) {
+    lines.push("", "Next inspect commands", ...summary.nextInspectCommands.map((item) => `- ${formatNextInspectCommand(item, options)}`));
   }
 
   if (summary.evidenceCompleteness.length > 0) {
@@ -944,7 +978,7 @@ async function debrief(sessionId: string | undefined): Promise<void> {
 
   const session = await chooseSession(sessionId);
   const events = await readExistingEvents(session.eventsFile);
-  process.stdout.write(formatDebrief(buildDebrief(events)));
+  process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: sessionId }));
 }
 
 async function attach(requestedId?: string): Promise<void> {

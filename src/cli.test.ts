@@ -325,6 +325,11 @@ test("buildDebrief summarizes git status snapshot comparison", () => {
     "A src/cli.ts (+40 -0)\n  Lines: 1-40\n  Observed matching file tool event: write tool at event 4\n  Correlation confidence: direct path match\n  Inspect: --event 4",
     "?? notes/new.md\n  Observed matching file tool event: none recorded\n  Correlation confidence: no direct file-tool match",
   ]);
+  assert.deepEqual(summary.nextInspectCommands, [
+    "bashguard inspect <session> --event 5  # shutdown Git snapshot",
+    "bashguard inspect <session> --event 3  # matching file tool event for README.md",
+    "bashguard inspect <session> --event 4  # matching file tool event for src/cli.ts",
+  ]);
   assert.deepEqual(summary.worthReviewing, ["Git working tree changed during session: 0 -> 2 changed paths"]);
   assert.deepEqual(summary.evidenceCompleteness, [
     "Capture gaps: 0",
@@ -350,6 +355,10 @@ test("buildDebrief flags risky commands before Git changes as temporal-only corr
     "risky shell command observed at event 3: `rm -rf build`\n  Risk: destructive filesystem removal — recursively deletes files without a trash/undo step\n  Result: exit 0\n  Inspect: --event 3",
     "Git working tree changed during session: 0 -> 1 changed paths",
     "Risky shell command occurred before shutdown Git snapshot that showed changes\n  Risk events: 3\n  Git evidence: shutdown snapshot at event 5 showed 1 changed path\n  Correlation confidence: temporal proximity only",
+  ]);
+  assert.deepEqual(summary.nextInspectCommands, [
+    "bashguard inspect <session> --event 3  # risky shell command",
+    "bashguard inspect <session> --event 5  # shutdown Git snapshot",
   ]);
 });
 
@@ -468,6 +477,10 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
     ],
     captureState: "Partial",
     worthReviewing: ["one shell command failed"],
+    nextInspectCommands: [
+      "bashguard inspect <session> --event 3  # risky shell command",
+      "bashguard inspect <session> --event 7  # matching file tool event for src/cli.ts",
+    ],
     evidenceCompleteness: [
       "Capture gaps: 0",
       "Redacted events: 0",
@@ -498,6 +511,25 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /Capture state\s{2,}Partial/);
   assert.match(output, /Worth reviewing/);
   assert.match(output, /- one shell command failed/);
+  assert.match(output, /Next inspect commands/);
+  assert.match(output, /- bashguard inspect <session> --event 3  # risky shell command/);
+  assert.match(output, /- bashguard inspect <session> --event 7  # matching file tool event for src\/cli\.ts/);
+  assert.match(formatDebrief({
+    durationMs: 0,
+    prompts: 0,
+    toolCalls: 0,
+    shellCommands: 0,
+    filesObserved: 0,
+    fileToolActions: 0,
+    failedCommands: 0,
+    riskyCommands: 0,
+    gitChangedFiles: [],
+    captureState: "Complete",
+    worthReviewing: [],
+    nextInspectCommands: ["bashguard inspect <session> --event 3  # risky shell command"],
+    evidenceCompleteness: [],
+    fileActivity: [],
+  }, { sessionSelector: "1" }), /- bashguard inspect 1 --event 3  # risky shell command/);
   assert.match(output, /Git changed files/);
   assert.match(output, /Evidence completeness/);
   assert.match(output, /- Git snapshots: start \+ shutdown present/);
@@ -529,5 +561,6 @@ test("buildDebrief reports capture gap events", () => {
 
   assert.equal(summary.captureState, "Partial");
   assert.deepEqual(summary.worthReviewing, ["one capture gap occurred during recording: bash `curl google.com`"]);
+  assert.deepEqual(summary.nextInspectCommands, ["bashguard inspect <session> --event 2  # capture gap"]);
   assert.match(formatDebrief(summary), /Capture state\s+Partial \(capture gap recorded\)/);
 });

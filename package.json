@@ -1,9 +1,12 @@
 {
   "name": "bashguard",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Local-first observability and safeguards for Pi coding sessions.",
   "type": "module",
+  "bin": {
+    "bashguard": "./src/cli.ts"
+  },
   "keywords": [
     "pi-package",
     "pi",
@@ -18,13 +21,14 @@
     ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*"
   },
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "sessions": "node --experimental-strip-types src/cli.ts sessions"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "latest",
+    "@earendil-works/pi-coding-agent": "latest",
     "@types/node": "latest",
     "typescript": "latest"
   }

@@ -47,7 +47,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard attach [session-id]\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard attach [session-id]\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -230,6 +230,49 @@ function renderTimestamp(timestamp: string): string {
   return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+export function findEvent(events: BashGuardEvent[], eventIdOrSequence: string): BashGuardEvent | undefined {
+  const sequence = Number(eventIdOrSequence);
+  if (Number.isInteger(sequence) && sequence > 0) {
+    const bySequence = events.find((event) => event.sequence === sequence);
+    if (bySequence) return bySequence;
+  }
+  return events.find((event) => event.id === eventIdOrSequence);
+}
+
+function formatField(label: string, value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  return `${label.padEnd(12)} ${String(value)}`;
+}
+
+export function formatEventInspection(event: BashGuardEvent): string {
+  const payload = event.payload ?? {};
+  const input = payload.input as Record<string, unknown> | undefined;
+  const details = payload.details as Record<string, unknown> | undefined;
+  const command = getString(payload.command) ?? getString(input?.command);
+  const path = getString(payload.path) ?? getString(input?.path);
+  const exitCode = getNumber(details?.exitCode);
+
+  const lines = [
+    "Event detail",
+    "",
+    formatField("Sequence", event.sequence),
+    formatField("Event ID", event.id),
+    formatField("Type", event.type),
+    formatField("Timestamp", event.timestamp),
+    formatField("Evidence", event.evidence ?? "unknown"),
+    formatField("Session", event.sessionId),
+    formatField("Cwd", event.cwd),
+    formatField("Tool", event.toolName ?? getString(payload.toolName)),
+    formatField("Tool call", event.toolCallId ?? getString(payload.toolCallId)),
+    formatField("Command", command),
+    formatField("Path", path),
+    formatField("Exit code", exitCode),
+  ].filter((line): line is string => line !== undefined);
+
+  lines.push("", "Payload", JSON.stringify(payload, null, 2));
+  return `${lines.join("\n")}\n`;
+}
+
 export async function chooseSession(requestedId?: string, root = getDataRoot()): Promise<SessionSummary> {
   const sessions = await discoverSessions(root);
   if (sessions.length === 0) throw new Error(`No BashGuard sessions found in ${root}`);
@@ -247,6 +290,19 @@ export async function chooseSession(requestedId?: string, root = getDataRoot()):
   if (active.length === 1) return active[0];
   if (active.length > 1) throw new Error("More than one active session found. Pass a session ID from `bashguard sessions`.");
   return sessions[0];
+}
+
+async function inspect(sessionId: string | undefined, eventIdOrSequence: string | undefined): Promise<void> {
+  if (!sessionId || !eventIdOrSequence) {
+    throw new Error("Usage: bashguard inspect <session-id> --event <event-id-or-sequence>");
+  }
+
+  const session = await chooseSession(sessionId);
+  const events = await readExistingEvents(session.eventsFile);
+  const event = findEvent(events, eventIdOrSequence);
+  if (!event) throw new Error(`Event ${eventIdOrSequence} was not found in session ${session.metadata.sessionId}`);
+
+  process.stdout.write(formatEventInspection(event));
 }
 
 async function attach(requestedId?: string): Promise<void> {
@@ -331,10 +387,11 @@ async function attach(requestedId?: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const [command, arg] = process.argv.slice(2);
+  const [command, arg, flag, value] = process.argv.slice(2);
   try {
     if (command === "sessions") return await listSessions();
     if (command === "attach") return await attach(arg);
+    if (command === "inspect") return await inspect(arg, flag === "--event" ? value : undefined);
     usage();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

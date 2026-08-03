@@ -178,7 +178,50 @@ export default function bashGuard(pi: ExtensionAPI): void {
       capture: { missing, redacted, truncated },
     };
 
-    writeChain = writeChain.then(() => appendFile(state!.eventsFile, `${JSON.stringify(event)}\n`, "utf8"));
+    const eventLine = `${JSON.stringify(event)}\n`;
+    writeChain = writeChain
+      .then(() => appendFile(state!.eventsFile, eventLine, "utf8"))
+      .catch(async (error: unknown) => {
+        const gapSequence = ++state!.sequence;
+        const gapEvent: BashGuardEvent = {
+          schemaVersion: 1,
+          id: makeId(),
+          sequence: gapSequence,
+          timestamp: new Date().toISOString(),
+          type: "capture.gap",
+          evidence: "missing",
+          sessionId: state!.sessionId,
+          repository: basename(ctx.cwd),
+          cwd: ctx.cwd,
+          payload: {
+            reason: `failed to persist ${type} event`,
+            failedEventType: type,
+            failedToolName: typeof safePayload.toolName === "string" ? safePayload.toolName : undefined,
+            failedToolCallId: typeof safePayload.toolCallId === "string" ? safePayload.toolCallId : undefined,
+            command: typeof (safePayload.input as Record<string, unknown> | undefined)?.command === "string"
+              ? (safePayload.input as Record<string, unknown>).command
+              : undefined,
+            path: typeof (safePayload.input as Record<string, unknown> | undefined)?.path === "string"
+              ? (safePayload.input as Record<string, unknown>).path
+              : undefined,
+            error: sanitize(error),
+          } as Record<string, unknown>,
+          capture: {
+            missing: [`event:${type}`],
+            redacted: [],
+            truncated: [],
+          },
+        };
+
+        try {
+          await appendFile(state!.eventsFile, `${JSON.stringify(gapEvent)}\n`, "utf8");
+        } catch (gapError) {
+          if (ctx.hasUI) {
+            const message = gapError instanceof Error ? gapError.message : String(gapError);
+            ctx.ui.notify(`BashGuard capture failed: ${message}`, "error");
+          }
+        }
+      });
     await writeChain;
   };
 

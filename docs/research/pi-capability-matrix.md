@@ -45,7 +45,7 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 | Performance | Add capture with low overhead | Avoid making Pi feel slower | Unknown | Measure event latency, write overhead, and memory use |
 | Failure isolation | Allow Pi to continue if BashGuard fails | Preserve the developer workflow | Confirmed | Invalid data directory surfaced extension errors while Pi still exited successfully in smoke test |
 | Secret redaction | Remove likely secrets before persistence | Keep local records safer to inspect and share | Partial | Key matching implemented; false-positive on `totalTokens` found and fixed; value-based secret detection remains future work |
-| Capture completeness | Mark missing or uncertain links | Avoid inventing provenance | Partial | Event envelope now supports `capture.missing`, `capture.redacted`, and `capture.truncated`; CLI inspect/debrief surface these fields. Dedicated capture-gap event types still need implementation. |
+| Capture completeness | Mark missing or uncertain links | Avoid inventing provenance | Partial | Event envelope supports `capture.missing`, `capture.redacted`, and `capture.truncated`; CLI inspect/debrief surface these fields. `capture.gap` timeline events are supported and recorder write failures attempt a best-effort gap event, but total storage failure can still only be surfaced through Pi UI notification. |
 
 ## Spike 1 Results: Lifecycle and Correlation
 
@@ -85,6 +85,7 @@ Observed event sequence included:
 - Capture metadata is now represented as `capture.missing`, `capture.redacted`, and `capture.truncated` on events and is visible in CLI inspection/debrief output.
 - Redaction notices mean values were intentionally hidden before persistence. Inspection should show redacted payload paths so users know what kind of evidence was withheld without exposing the secret value.
 - Truncation notices mean very large values were shortened before persistence. This is expected for large edits, diffs, patches, or command output; inspection shows the truncated payload paths so the user knows which evidence is partial.
+- Capture-gap events (`capture.gap`) represent degraded recorder behavior such as failed event persistence. They include failed event type, tool name, tool-call ID, and command/path context when available. If the event stream itself is unavailable, BashGuard can only notify inside Pi rather than recording the gap.
 
 ## Required Spikes
 

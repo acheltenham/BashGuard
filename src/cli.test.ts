@@ -46,7 +46,7 @@ test("discoverSessions marks sessions with shutdown events complete even if the 
   assert.equal(sessions[0]?.active, false);
 });
 
-test("renderEvent narrates user bash distinctly from agent bash", () => {
+test("renderEvent narrates user bash, agent bash, edits, and capture gaps", () => {
   assert.equal(
     renderEvent(event(1, "bash.user_requested", { payload: { command: "pwd" } })),
     "You ran · pwd",
@@ -58,6 +58,10 @@ test("renderEvent narrates user bash distinctly from agent bash", () => {
   assert.equal(
     renderEvent(event(3, "tool.requested", { toolName: "edit", payload: { input: { path: "sample.txt" } } })),
     "Editing · sample.txt",
+  );
+  assert.equal(
+    renderEvent(event(4, "capture.gap", { payload: { reason: "failed to persist tool.completed event", failedToolName: "bash", command: "curl google.com" } })),
+    "Capture gap · failed to persist tool.completed event · bash · curl google.com",
   );
 });
 
@@ -201,4 +205,15 @@ test("buildDebrief uses plural wording for multiple truncated events", () => {
   assert.deepEqual(summary.worthReviewing, [
     "2 events have truncated fields (large values shortened; run inspect to see truncated paths)",
   ]);
+});
+
+test("buildDebrief reports capture gap events", () => {
+  const summary = buildDebrief([
+    event(1, "session.started"),
+    event(2, "capture.gap", { evidence: "missing", capture: { missing: ["event:tool.completed"], redacted: [], truncated: [] }, payload: { reason: "failed to persist tool.completed event", failedToolName: "bash", command: "curl google.com" } }),
+    event(3, "session.shutdown"),
+  ]);
+
+  assert.equal(summary.captureState, "Partial");
+  assert.deepEqual(summary.worthReviewing, ["one capture gap occurred during recording: bash `curl google.com`"]);
 });

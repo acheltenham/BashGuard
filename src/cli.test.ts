@@ -277,7 +277,11 @@ test("buildDebrief summarizes git status snapshot comparison", () => {
     event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
     event(2, "git.status.snapshot", { payload: { phase: "start", isRepository: true, branch: "main", worktree: "/tmp/project", changedFiles: [] } }),
     event(3, "tool.requested", { toolName: "edit", payload: { input: { path: "README.md" } } }),
-    event(4, "git.status.snapshot", { payload: { phase: "shutdown", isRepository: true, branch: "main", worktree: "/tmp/project", changedFiles: ["README.md", "src/cli.ts"] } }),
+    event(4, "git.status.snapshot", { payload: { phase: "shutdown", isRepository: true, branch: "main", worktree: "/tmp/project", changedFiles: ["README.md", "src/cli.ts"], changedFileDetails: [
+      { path: "README.md", status: "M", additions: 12, deletions: 3, lineRanges: ["14-18", "42"] },
+      { path: "src/cli.ts", status: "A", additions: 40, deletions: 0, lineRanges: ["1-40"] },
+      { path: "notes/new.md", status: "??" },
+    ] } }),
     event(5, "session.shutdown", { timestamp: "2026-08-03T12:00:05.000Z" }),
   ]);
 
@@ -285,6 +289,11 @@ test("buildDebrief summarizes git status snapshot comparison", () => {
   assert.equal(summary.gitBranch, "main");
   assert.equal(summary.gitWorktree, "/tmp/project");
   assert.equal(summary.gitChangedPaths, "0 -> 2");
+  assert.deepEqual(summary.gitChangedFiles, [
+    "M README.md (+12 -3)\n  Lines: 14-18, 42",
+    "A src/cli.ts (+40 -0)\n  Lines: 1-40",
+    "?? notes/new.md",
+  ]);
   assert.deepEqual(summary.worthReviewing, ["Git working tree changed during session: 0 -> 2 changed paths"]);
 });
 
@@ -374,6 +383,10 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
     gitBranch: "main",
     gitWorktree: "/tmp/project",
     gitChangedPaths: "0 -> 2",
+    gitChangedFiles: [
+      "M README.md (+12 -3)\n  Lines: 14-18, 42",
+      "A src/cli.ts (+40 -0)\n  Lines: 1-40",
+    ],
     captureState: "Partial",
     worthReviewing: ["one shell command failed"],
     fileActivity: [
@@ -398,6 +411,9 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /Capture state\s{2,}Partial/);
   assert.match(output, /Worth reviewing/);
   assert.match(output, /- one shell command failed/);
+  assert.match(output, /Git changed files/);
+  assert.match(output, /- M README\.md \(\+12 -3\)\n  Lines: 14-18, 42/);
+  assert.match(output, /- A src\/cli\.ts \(\+40 -0\)\n  Lines: 1-40/);
   assert.match(output, /File tool activity/);
   assert.match(output, /- read README\.md\n  Meaning: Pi read file contents\n  Evidence: read tool event\n  Inspect: --event 3/);
   assert.match(output, /- write tool docs\/example\.md\n  Meaning: Pi wrote full file content; may create, overwrite, or leave content unchanged\n  Evidence: write tool event\n  Inspect: --event 7/);

@@ -60,6 +60,7 @@ export type DebriefSummary = {
   gitBranch?: string;
   gitWorktree?: string;
   gitChangedPaths?: string;
+  gitChangedFiles: string[];
   captureState: "Complete" | "Partial";
   worthReviewing: string[];
   fileActivity: string[];
@@ -567,6 +568,32 @@ function formatGitSnapshotValue(key: string, start: BashGuardEvent | undefined, 
   return endValue ?? startValue;
 }
 
+function getNumberFromRecord(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function formatGitChangedFileDetail(detail: unknown): string | undefined {
+  if (typeof detail !== "object" || detail === null) return undefined;
+  const record = detail as Record<string, unknown>;
+  const path = getString(record.path);
+  const status = getString(record.status);
+  if (!path || !status) return undefined;
+  const additions = getNumberFromRecord(record, "additions");
+  const deletions = getNumberFromRecord(record, "deletions");
+  const stats = additions !== undefined && deletions !== undefined ? ` (+${additions} -${deletions})` : "";
+  const lineRanges = getStringArray(record.lineRanges);
+  const lines = [`${status} ${path}${stats}`];
+  if (lineRanges.length > 0) lines.push(`  Lines: ${lineRanges.join(", ")}`);
+  return lines.join("\n");
+}
+
+function gitChangedFileDetails(event: BashGuardEvent | undefined): string[] {
+  const details = event?.payload?.changedFileDetails;
+  if (!Array.isArray(details)) return [];
+  return details.map(formatGitChangedFileDetail).filter((detail): detail is string => detail !== undefined);
+}
+
 function formatCommandReview(count: number, message: string, commands: string[]): string {
   const uniqueCommands = Array.from(new Set(commands.filter(Boolean)));
   if (count === 1 && uniqueCommands.length === 1) return `shell command ${message}: \`${uniqueCommands[0]}\``;
@@ -653,6 +680,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const gitBranch = formatGitSnapshotValue("branch", gitStartSnapshot, gitEndSnapshot);
   const gitWorktree = formatGitSnapshotValue("worktree", gitStartSnapshot, gitEndSnapshot);
   const gitChangedPaths = formatGitChangedPaths(gitStartSnapshot, gitEndSnapshot);
+  const gitChangedFiles = gitChangedFileDetails(gitEndSnapshot);
   const startGitCount = gitSnapshotCount(gitStartSnapshot);
   const endGitCount = gitSnapshotCount(gitEndSnapshot);
   const gitReviewItem = startGitCount !== undefined && endGitCount !== undefined && startGitCount !== endGitCount
@@ -721,6 +749,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     gitBranch,
     gitWorktree,
     gitChangedPaths,
+    gitChangedFiles,
     captureState: captureReviewItems.length > 0 ? "Partial" : "Complete",
     worthReviewing,
     fileActivity,
@@ -748,6 +777,10 @@ export function formatDebrief(summary: DebriefSummary): string {
 
   if (summary.worthReviewing.length > 0) {
     lines.push("", "Worth reviewing", ...summary.worthReviewing.map((item) => `- ${item}`));
+  }
+
+  if (summary.gitChangedFiles.length > 0) {
+    lines.push("", "Git changed files", ...summary.gitChangedFiles.map((item) => `- ${item}`));
   }
 
   if (summary.fileActivity.length > 0) {

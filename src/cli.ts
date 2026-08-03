@@ -573,7 +573,7 @@ function getNumberFromRecord(record: Record<string, unknown>, key: string): numb
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function formatGitChangedFileDetail(detail: unknown): string | undefined {
+function formatGitChangedFileDetail(detail: unknown, matchingFileToolEvent: BashGuardEvent | undefined): string | undefined {
   if (typeof detail !== "object" || detail === null) return undefined;
   const record = detail as Record<string, unknown>;
   const path = getString(record.path);
@@ -585,13 +585,25 @@ function formatGitChangedFileDetail(detail: unknown): string | undefined {
   const lineRanges = getStringArray(record.lineRanges);
   const lines = [`${status} ${path}${stats}`];
   if (lineRanges.length > 0) lines.push(`  Lines: ${lineRanges.join(", ")}`);
+  if (matchingFileToolEvent) {
+    const action = fileActionForTool(toolNameFor(matchingFileToolEvent));
+    lines.push(`  Observed matching file tool event: ${action} at event ${matchingFileToolEvent.sequence}`);
+    lines.push(`  Inspect: --event ${matchingFileToolEvent.sequence}`);
+  } else {
+    lines.push("  Observed matching file tool event: none recorded");
+  }
   return lines.join("\n");
 }
 
-function gitChangedFileDetails(event: BashGuardEvent | undefined): string[] {
+function gitChangedFileDetails(event: BashGuardEvent | undefined, matchingFileToolEvents: Map<string, BashGuardEvent>): string[] {
   const details = event?.payload?.changedFileDetails;
   if (!Array.isArray(details)) return [];
-  return details.map(formatGitChangedFileDetail).filter((detail): detail is string => detail !== undefined);
+  return details
+    .map((detail) => {
+      const path = typeof detail === "object" && detail !== null ? getString((detail as Record<string, unknown>).path) : undefined;
+      return formatGitChangedFileDetail(detail, path ? matchingFileToolEvents.get(path) : undefined);
+    })
+    .filter((detail): detail is string => detail !== undefined);
 }
 
 function formatCommandReview(count: number, message: string, commands: string[]): string {
@@ -645,6 +657,15 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
       .filter((path): path is string => Boolean(path)),
   );
   const fileActivity = fileToolRequests.map(formatFileActivity).filter((activity): activity is string => activity !== undefined);
+  const matchingFileToolEvents = new Map(
+    fileToolRequests
+      .filter((event) => ["edit", "write"].includes(toolNameFor(event) ?? ""))
+      .map((event) => {
+        const path = pathFor(event);
+        return path ? ([path, event] as const) : undefined;
+      })
+      .filter((entry): entry is readonly [string, BashGuardEvent] => entry !== undefined),
+  );
   const completionByToolCallId = new Map(
     bashCompletions
       .map((event) => {
@@ -680,7 +701,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const gitBranch = formatGitSnapshotValue("branch", gitStartSnapshot, gitEndSnapshot);
   const gitWorktree = formatGitSnapshotValue("worktree", gitStartSnapshot, gitEndSnapshot);
   const gitChangedPaths = formatGitChangedPaths(gitStartSnapshot, gitEndSnapshot);
-  const gitChangedFiles = gitChangedFileDetails(gitEndSnapshot);
+  const gitChangedFiles = gitChangedFileDetails(gitEndSnapshot, matchingFileToolEvents);
   const startGitCount = gitSnapshotCount(gitStartSnapshot);
   const endGitCount = gitSnapshotCount(gitEndSnapshot);
   const gitReviewItem = startGitCount !== undefined && endGitCount !== undefined && startGitCount !== endGitCount

@@ -41,7 +41,7 @@ bashguard debrief 1
 
 - `sessions` lists recent and active recorded sessions with a `#` selector and copyable session prefix.
 - `attach` follows an active session or renders a completed session timeline. It accepts a session number, full session ID, unique session prefix, or `--session`.
-- `inspect` without `--event` lists inspectable events for a session. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or sequence.
+- `inspect` without `--event` lists inspectable events for a session. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or sequence, including file-tool meaning for read/edit/write-tool events.
 - `debrief` summarizes a completed session with evidence-based review notes, including a risk-notice count, non-blocking risky-command notes, and a `File tool activity` section for observed read/edit/write-tool events.
 
 Planned later commands include richer `open`/TUI and `replay` experiences.

@@ -214,6 +214,38 @@ test("buildDebrief treats events without explicit capture gaps as complete captu
   assert.deepEqual(summary.worthReviewing, []);
 });
 
+test("formatEventInspection explains read file tool activity", () => {
+  const output = formatEventInspection(event(2, "tool.requested", {
+    toolName: "read",
+    payload: { input: { path: "README.md" } },
+  }));
+
+  assert.match(output, /Tool\s+read/);
+  assert.match(output, /Path\s+README\.md/);
+  assert.match(output, /File action\s+read/);
+  assert.match(output, /File meaning\s+Pi read file contents/);
+});
+
+test("formatEventInspection explains edit file tool activity", () => {
+  const output = formatEventInspection(event(3, "tool.requested", {
+    toolName: "edit",
+    payload: { input: { path: "src\/cli.ts" } },
+  }));
+
+  assert.match(output, /File action\s+edit/);
+  assert.match(output, /File meaning\s+Pi requested targeted text replacement/);
+});
+
+test("formatEventInspection explains write tool activity without inferring create or overwrite", () => {
+  const output = formatEventInspection(event(4, "tool.requested", {
+    toolName: "write",
+    payload: { input: { path: "docs\/example.md" } },
+  }));
+
+  assert.match(output, /File action\s+write tool/);
+  assert.match(output, /File meaning\s+Pi wrote full file content; may create, overwrite, or leave content unchanged/);
+});
+
 test("formatEventInspection prints event evidence, capture metadata, and useful tool context", () => {
   const output = formatEventInspection(event(3, "tool.requested", {
     evidence: "observed",

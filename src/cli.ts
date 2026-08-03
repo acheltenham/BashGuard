@@ -265,6 +265,21 @@ export function classifyCommandRisk(command: string): string[] {
   return risks;
 }
 
+const RISK_EXPLANATIONS: Record<string, string> = {
+  "destructive filesystem removal": "recursively deletes files without a trash/undo step",
+  "history or working-tree rewrite": "can discard local changes or rewrite repository state",
+  "network download piped to shell": "downloads code from the network and executes it in a shell",
+  "secret-looking value in command text": "may expose sensitive values in logs, shell history, or recorded output",
+};
+
+function explainRisk(risk: string): string {
+  return RISK_EXPLANATIONS[risk] ?? "review the recorded command before trusting the result";
+}
+
+function formatRiskWithExplanation(risk: string): string {
+  return `${risk} — ${explainRisk(risk)}`;
+}
+
 function formatRiskNotice(command: string): string | undefined {
   const risks = classifyCommandRisk(command);
   return risks.length > 0 ? `Risk notice: ${risks.join(", ")}` : undefined;
@@ -395,6 +410,7 @@ export function formatEventInspection(event: BashGuardEvent): string {
   const path = getString(payload.path) ?? getString(input?.path);
   const exitCode = getNumber(details?.exitCode);
   const riskFactors = command ? classifyCommandRisk(command) : [];
+  const riskWhy = riskFactors.map(explainRisk);
 
   const lines = [
     "Event detail",
@@ -413,6 +429,7 @@ export function formatEventInspection(event: BashGuardEvent): string {
     formatField("Tool call", normalized.toolCallId ?? getString(payload.toolCallId)),
     formatField("Command", command),
     formatField("Risk factors", riskFactors.join(", ")),
+    formatField("Risk why", riskWhy.join("; ")),
     formatField("Path", path),
     formatField("Exit code", exitCode),
   ].filter((line): line is string => line !== undefined);
@@ -471,13 +488,13 @@ function formatDuration(ms: number): string {
 }
 
 function formatRiskyCommandReview(event: BashGuardEvent, command: string, risks: string[], resultEvidence: string): string {
-  const context = [
-    risks.join(", "),
-    event.cwd ? `cwd: ${event.cwd}` : undefined,
-    `result: ${resultEvidence}`,
-    `inspect: --event ${event.sequence}`,
+  const details = [
+    `  Risk: ${risks.map(formatRiskWithExplanation).join(", ")}`,
+    event.cwd ? `  Cwd: ${event.cwd}` : undefined,
+    `  Result: ${resultEvidence}`,
+    `  Inspect: --event ${event.sequence}`,
   ].filter((item): item is string => item !== undefined);
-  return `risky shell command observed at event ${event.sequence}: \`${command}\` (${context.join("; ")})`;
+  return [`risky shell command observed at event ${event.sequence}: \`${command}\``, ...details].join("\n");
 }
 
 function formatCommandReview(count: number, message: string, commands: string[]): string {

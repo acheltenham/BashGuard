@@ -55,6 +55,10 @@ test("renderEvent narrates user bash distinctly from agent bash", () => {
     renderEvent(event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } })),
     "Running · npm test",
   );
+  assert.equal(
+    renderEvent(event(3, "tool.requested", { toolName: "edit", payload: { input: { path: "sample.txt" } } })),
+    "Editing · sample.txt",
+  );
 });
 
 test("findEvent resolves events by id or sequence string", () => {
@@ -66,7 +70,7 @@ test("findEvent resolves events by id or sequence string", () => {
 });
 
 test("normalizeEvent defaults missing capture metadata for older events", () => {
-  assert.deepEqual(normalizeEvent(event(1, "session.started")).capture, { missing: [], redacted: [] });
+  assert.deepEqual(normalizeEvent(event(1, "session.started")).capture, { missing: [], redacted: [], truncated: [] });
 });
 
 test("buildDebrief treats events without explicit capture gaps as complete capture", () => {
@@ -83,7 +87,7 @@ test("buildDebrief treats events without explicit capture gaps as complete captu
 test("formatEventInspection prints event evidence, capture metadata, and useful tool context", () => {
   const output = formatEventInspection(event(3, "tool.requested", {
     evidence: "observed",
-    capture: { missing: ["turnId"], redacted: ["payload.input.apiKey"] },
+    capture: { missing: ["turnId"], redacted: ["payload.input.apiKey"], truncated: ["payload.input.edits.0.newText"] },
     cwd: "/tmp/repo",
     toolName: "bash",
     toolCallId: "call-123",
@@ -95,6 +99,7 @@ test("formatEventInspection prints event evidence, capture metadata, and useful 
   assert.match(output, /Evidence\s+observed/);
   assert.match(output, /Missing\s+turnId/);
   assert.match(output, /Redacted\s+payload\.input\.apiKey/);
+  assert.match(output, /Truncated\s+payload\.input\.edits\.0\.newText/);
   assert.match(output, /Tool\s+bash/);
   assert.match(output, /Tool call\s+call-123/);
   assert.match(output, /Command\s+npm test/);
@@ -108,8 +113,8 @@ test("buildDebrief summarizes prompts, tools, shell commands, files, failures, a
     event(3, "tool.requested", { toolName: "read", payload: { input: { path: "README.md" } } }),
     event(4, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } }),
     event(5, "tool.completed", { toolName: "bash", payload: { isError: false, details: { exitCode: 1 } } }),
-    event(6, "tool.requested", { toolName: "write", payload: { input: { path: "result.txt" } } }),
-    event(7, "tool.requested", { toolName: "bash", capture: { missing: ["turnId"], redacted: ["payload.input.apiKey"] }, payload: { input: { command: "git status" } } }),
+    event(6, "tool.requested", { toolName: "edit", payload: { input: { path: "result.txt" } } }),
+    event(7, "tool.requested", { toolName: "bash", capture: { missing: ["turnId"], redacted: ["payload.input.apiKey"], truncated: ["payload.input.edits.0.newText"] }, payload: { input: { command: "git status" } } }),
     event(8, "tool.completed", { toolName: "bash", payload: { isError: false } }),
     event(9, "session.shutdown", { timestamp: "2026-08-03T12:00:08.000Z" }),
   ]);
@@ -126,6 +131,7 @@ test("buildDebrief summarizes prompts, tools, shell commands, files, failures, a
     "one shell command failed",
     "one event has missing capture fields",
     "one event has redacted fields (values hidden; run inspect on related events to see redacted paths)",
+    "one event has truncated fields (large values shortened; run inspect to see truncated paths)",
   ]);
 });
 
@@ -184,4 +190,15 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /Capture state\s{2,}Partial/);
   assert.match(output, /Worth reviewing/);
   assert.match(output, /- one shell command failed/);
+});
+
+test("buildDebrief uses plural wording for multiple truncated events", () => {
+  const summary = buildDebrief([
+    event(1, "tool.completed", { capture: { missing: [], redacted: [], truncated: ["payload.details.patch"] } }),
+    event(2, "tool.completed", { capture: { missing: [], redacted: [], truncated: ["payload.details.diff"] } }),
+  ]);
+
+  assert.deepEqual(summary.worthReviewing, [
+    "2 events have truncated fields (large values shortened; run inspect to see truncated paths)",
+  ]);
 });

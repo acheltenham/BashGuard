@@ -33,7 +33,7 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 | Working directory | Capture effective command directory | Explain command scope and targeted repository | Confirmed | `ctx.cwd` recorded consistently in tested session |
 | Environment context | Observe relevant environment metadata | Explain hidden execution context without exposing secrets | Partial | Define which context is necessary and safe to persist |
 | File reads | Observe file-read tools | Narrate repository exploration | Confirmed | `read` observed as correlated tool request/result events |
-| File writes | Observe file-edit/write tools | Connect actions to modified files | Partial | `write` confirmed; targeted `edit` test remains |
+| File writes | Observe file-edit/write tools | Connect actions to modified files | Confirmed | `write` confirmed in earlier spike; targeted `edit` test on Aug 3, 2026 captured correlated request/result events with path, edit blocks, diff, patch, and `firstChangedLine` |
 | Out-of-band changes | Detect file changes caused by shell commands | Correlate command execution with repository impact | Unknown | Compare Git state before and after controlled command windows |
 | Git context | Read repository root, branch, and dirty state | Provide file-impact and recovery context | External capability | Prove reliable Git queries with timeouts and non-repo fallback |
 | Extension state | Persist BashGuard metadata in Pi sessions | Keep event correlation close to Pi data | Documented | Current spike uses independent JSONL; extension-entry semantics still need evaluation |
@@ -45,7 +45,7 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 | Performance | Add capture with low overhead | Avoid making Pi feel slower | Unknown | Measure event latency, write overhead, and memory use |
 | Failure isolation | Allow Pi to continue if BashGuard fails | Preserve the developer workflow | Confirmed | Invalid data directory surfaced extension errors while Pi still exited successfully in smoke test |
 | Secret redaction | Remove likely secrets before persistence | Keep local records safer to inspect and share | Partial | Key matching implemented; false-positive on `totalTokens` found and fixed; value-based secret detection remains future work |
-| Capture completeness | Mark missing or uncertain links | Avoid inventing provenance | Partial | Event envelope now supports `capture.missing` and `capture.redacted`; CLI inspect/debrief surface these fields. Dedicated capture-gap event types still need implementation. |
+| Capture completeness | Mark missing or uncertain links | Avoid inventing provenance | Partial | Event envelope now supports `capture.missing`, `capture.redacted`, and `capture.truncated`; CLI inspect/debrief surface these fields. Dedicated capture-gap event types still need implementation. |
 
 ## Spike 1 Results: Lifecycle and Correlation
 
@@ -74,15 +74,17 @@ Observed event sequence included:
 - Agent shell execution is distinguishable as the `bash` tool.
 - Direct interactive user shell execution is distinguishable as `bash.user_requested`.
 - Confirmed interactive examples included `pwd` and `curl google.com` with `payload.command` and `payload.excludeFromContext: false`.
-- File reads and writes are directly visible as Pi tool events; `edit` still needs a dedicated test.
+- File reads, writes, and edits are directly visible as Pi tool events.
+- Targeted `edit` capture confirmed `tool.requested` and `tool.completed` with matching `toolCallId`, `input.path`, edit blocks, result text, `details.diff`, `details.patch`, and `details.firstChangedLine`.
 
 ### Failure and privacy findings
 
 - A recorder storage failure did not make Pi unusable, which validates the desired failure-isolation direction.
 - Storage failures are not yet represented as explicit capture-gap events.
 - Initial secret-key matching was too broad and incorrectly redacted `totalTokens`. The spike now uses exact normalized secret-key matching instead of substring matching.
-- Capture metadata is now represented as `capture.missing` and `capture.redacted` on events and is visible in CLI inspection/debrief output.
+- Capture metadata is now represented as `capture.missing`, `capture.redacted`, and `capture.truncated` on events and is visible in CLI inspection/debrief output.
 - Redaction notices mean values were intentionally hidden before persistence. Inspection should show redacted payload paths so users know what kind of evidence was withheld without exposing the secret value.
+- Truncation notices mean very large values were shortened before persistence. This is expected for large edits, diffs, patches, or command output; inspection shows the truncated payload paths so the user knows which evidence is partial.
 
 ## Required Spikes
 
@@ -90,7 +92,7 @@ Observed event sequence included:
 
 **Status: Complete for the Milestone 0 foundation.**
 
-Confirmed lifecycle, prompt, turn, message, tool, user-bash, and shutdown capture against real Pi 0.80.6 sessions. `edit` still deserves a targeted test before file-impact work, but it is not blocking the capture/attach foundation.
+Confirmed lifecycle, prompt, turn, message, tool, user-bash, edit-tool, and shutdown capture against real Pi 0.80.6 sessions.
 
 ### Spike 2: Command Resolution
 

@@ -199,16 +199,17 @@ Completed foundation work:
 
 Next implementation order:
 
-1. Add targeted `edit` tool capture coverage.
-2. Add explicit capture-gap events for recorder/storage failures.
-3. Replace or enhance the stream with the first interactive TUI.
+1. Add explicit capture-gap events for recorder/storage failures.
+2. Replace or enhance the stream with the first interactive TUI.
 
 Current hardening branch status:
 
 - Automated tests now cover JSONL parsing, session discovery/liveness, narration rendering, event lookup, event detail formatting, debrief aggregation, and capture-completeness defaults/rendering.
 - The first `inspect` implementation prints one event by ID or sequence with evidence, capture metadata, session, cwd, tool, command/path, exit code, and pretty-printed payload.
-- The first `debrief` implementation summarizes duration, prompt count, tool calls, shell commands, observed files, failed commands, capture state, and review notes, including missing/redacted capture metadata.
+- The first `debrief` implementation summarizes duration, prompt count, tool calls, shell commands, observed files, failed commands, capture state, and review notes, including missing/redacted/truncated capture metadata.
 - Redacted-field review notes are informational: values were intentionally hidden before persistence; use `inspect` to see which payload paths were redacted, not the secret values themselves.
+- Truncated-field review notes are informational: large values were shortened before persistence; use `inspect` to see which edit text, diff, patch, or output paths are partial.
+- Targeted `edit` tool capture is confirmed: BashGuard records `tool.requested` and `tool.completed` with matching `toolCallId`, edited path, edit blocks, and diff/patch details.
 
 ## Testing Strategy
 

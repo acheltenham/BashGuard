@@ -250,6 +250,36 @@ test("formatEventInspection explains write tool activity without inferring creat
   assert.match(output, /File meaning\s+Pi wrote full file content; may create, overwrite, or leave content unchanged/);
 });
 
+test("formatEventInspection explains git status snapshots", () => {
+  const output = formatEventInspection(event(5, "git.status.snapshot", {
+    payload: {
+      phase: "shutdown",
+      isRepository: true,
+      branch: "agent/git-inspect",
+      worktree: "/tmp/worktrees/git-inspect",
+      gitCommonDir: "/tmp/repo/.git",
+      changedFiles: ["README.md", "notes/new.md"],
+      changedFileDetails: [
+        { path: "README.md", status: "M", additions: 12, deletions: 3, lineRanges: ["14-18", "42"] },
+        { path: "notes/new.md", status: "??" },
+      ],
+      changedFileCount: 2,
+    },
+  }));
+
+  assert.match(output, /Git phase\s+shutdown/);
+  assert.match(output, /Git repository\s+yes/);
+  assert.match(output, /Git branch\s+agent\/git-inspect/);
+  assert.match(output, /Git worktree\s+\/tmp\/worktrees\/git-inspect/);
+  assert.match(output, /Git common dir\s+\/tmp\/repo\/\.git/);
+  assert.match(output, /Git state\s+dirty/);
+  assert.match(output, /Changed paths\s+2/);
+  assert.match(output, /Git changed files/);
+  assert.match(output, /- M README\.md \(\+12 -3\)\n  Lines: 14-18, 42/);
+  assert.match(output, /- \?\? notes\/new\.md/);
+  assert.doesNotMatch(output, /Observed matching file tool event/);
+});
+
 test("formatEventInspection prints event evidence, capture metadata, and useful tool context", () => {
   const output = formatEventInspection(event(3, "tool.requested", {
     evidence: "observed",

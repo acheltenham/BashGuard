@@ -442,6 +442,11 @@ export function formatEventInspection(event: BashGuardEvent): string {
   const riskWhy = riskFactors.map(explainRisk);
   const fileAction = path ? fileActionForTool(tool) : undefined;
   const fileMeaning = path ? fileMeaningForTool(tool) : undefined;
+  const isGitSnapshot = normalized.type === "git.status.snapshot";
+  const gitChangedFileDetails = isGitSnapshot && Array.isArray(payload.changedFileDetails)
+    ? payload.changedFileDetails.map((detail) => formatGitChangedFileDetail(detail, undefined, false)).filter((detail): detail is string => detail !== undefined)
+    : [];
+  const changedPathCount = getNumber(payload.changedFileCount) ?? getStringArray(payload.changedFiles).length;
 
   const lines = [
     "Event detail",
@@ -465,7 +470,18 @@ export function formatEventInspection(event: BashGuardEvent): string {
     formatField("File action", fileAction),
     formatField("File meaning", fileMeaning),
     formatField("Exit code", exitCode),
+    formatField("Git phase", isGitSnapshot ? getString(payload.phase) : undefined),
+    formatField("Git repository", isGitSnapshot ? (payload.isRepository === false ? "no" : "yes") : undefined),
+    formatField("Git branch", isGitSnapshot ? getString(payload.branch) : undefined),
+    formatField("Git worktree", isGitSnapshot ? getString(payload.worktree) : undefined),
+    formatField("Git common dir", isGitSnapshot ? getString(payload.gitCommonDir) : undefined),
+    formatField("Git state", isGitSnapshot ? gitSnapshotStatus(normalized) : undefined),
+    formatField("Changed paths", isGitSnapshot ? changedPathCount : undefined),
   ].filter((line): line is string => line !== undefined);
+
+  if (gitChangedFileDetails.length > 0) {
+    lines.push("", "Git changed files", ...gitChangedFileDetails.map((detail) => `- ${detail}`));
+  }
 
   lines.push("", "Payload", JSON.stringify(payload, null, 2));
   return `${lines.join("\n")}\n`;
@@ -573,7 +589,7 @@ function getNumberFromRecord(record: Record<string, unknown>, key: string): numb
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function formatGitChangedFileDetail(detail: unknown, matchingFileToolEvent: BashGuardEvent | undefined): string | undefined {
+function formatGitChangedFileDetail(detail: unknown, matchingFileToolEvent: BashGuardEvent | undefined, includeMatchingFileToolEvent = true): string | undefined {
   if (typeof detail !== "object" || detail === null) return undefined;
   const record = detail as Record<string, unknown>;
   const path = getString(record.path);
@@ -585,12 +601,14 @@ function formatGitChangedFileDetail(detail: unknown, matchingFileToolEvent: Bash
   const lineRanges = getStringArray(record.lineRanges);
   const lines = [`${status} ${path}${stats}`];
   if (lineRanges.length > 0) lines.push(`  Lines: ${lineRanges.join(", ")}`);
-  if (matchingFileToolEvent) {
-    const action = fileActionForTool(toolNameFor(matchingFileToolEvent));
-    lines.push(`  Observed matching file tool event: ${action} at event ${matchingFileToolEvent.sequence}`);
-    lines.push(`  Inspect: --event ${matchingFileToolEvent.sequence}`);
-  } else {
-    lines.push("  Observed matching file tool event: none recorded");
+  if (includeMatchingFileToolEvent) {
+    if (matchingFileToolEvent) {
+      const action = fileActionForTool(toolNameFor(matchingFileToolEvent));
+      lines.push(`  Observed matching file tool event: ${action} at event ${matchingFileToolEvent.sequence}`);
+      lines.push(`  Inspect: --event ${matchingFileToolEvent.sequence}`);
+    } else {
+      lines.push("  Observed matching file tool event: none recorded");
+    }
   }
   return lines.join("\n");
 }

@@ -115,7 +115,7 @@ To try BashGuard from GitHub without installing it permanently:
 pi -e git:github.com/acheltenham/BashGuard
 ```
 
-You can pin a branch, tag, or commit:
+You can pin a branch, tag, or commit. Use `@main` for the latest pre-release code, or a version tag after it exists:
 
 ```bash
 pi -e git:github.com/acheltenham/BashGuard@main
@@ -144,11 +144,17 @@ cd your-project
 pi install -l git:github.com/acheltenham/BashGuard
 ```
 
-For repeatable installs, prefer a tagged release when available:
+For repeatable installs, prefer a tagged release after the tag exists:
 
 ```bash
 pi install git:github.com/acheltenham/BashGuard@v0.1.0
 pi install -l git:github.com/acheltenham/BashGuard@v0.1.0
+```
+
+Until a release tag exists, use `@main` for the current pre-release branch:
+
+```bash
+pi install git:github.com/acheltenham/BashGuard@main
 ```
 
 Or install from your local BashGuard checkout:
@@ -332,6 +338,7 @@ See [Milestone 0 Smoke Checklist](docs/testing/milestone-0-smoke-checklist.md) a
 - [Product Requirements](docs/product/requirements.md)
 - [Architecture](docs/architecture/overview.md)
 - [Roadmap](docs/product/roadmap.md)
+- [Release Checklist](docs/release/checklist.md)
 - [Competitive Analysis](docs/research/competitive-analysis.md)
 - [MVP Scope](docs/vision/mvp.md)
 - [Product Principles](docs/vision/principles.md)

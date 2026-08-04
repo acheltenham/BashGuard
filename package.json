@@ -1,6 +1,6 @@
 {
   "name": "bashguard",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "private": true,
   "description": "Local-first observability and safeguards for Pi coding sessions.",
   "type": "module",

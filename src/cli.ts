@@ -11,6 +11,9 @@ export type SessionMetadata = {
   sessionId: string;
   cwd?: string;
   repository?: string;
+  name?: string;
+  title?: string;
+  sessionName?: string;
   startedAt?: string;
   processId?: number;
   piMode?: string;
@@ -81,12 +84,13 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard attach [session-id]\n  bashguard attach --session <session-id>\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard attach [session-id]\n  bashguard attach --session <session-id>\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
 export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
-  const [command, ...args] = argv;
+  const [rawCommand, ...args] = argv;
+  const command = rawCommand === "session" && args[0] === "list" ? "sessions" : rawCommand;
   let sessionId: string | undefined;
   let eventId: string | undefined;
 
@@ -100,6 +104,8 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       eventId = args[++index];
       continue;
     }
+    if (command === "sessions" && arg.toLowerCase() === "list") continue;
+    if (command === "inspect" && ["list", "events"].includes(arg.toLowerCase())) continue;
     if (!sessionId) sessionId = arg;
   }
 
@@ -222,14 +228,19 @@ function formatAge(timestamp: number): string {
   return `${hours}h ago`;
 }
 
+function sessionDisplayName(metadata: SessionMetadata): string {
+  return metadata.name ?? metadata.title ?? metadata.sessionName ?? "-";
+}
+
 export function formatSessionList(sessions: SessionSummary[]): string {
   const sessionIds = sessions.map((session) => session.metadata.sessionId);
-  const lines = ["#  STATE     SESSION              REPOSITORY           UPDATED"];
+  const lines = ["#  STATE     SESSION              NAME                  REPOSITORY           UPDATED"];
   for (const [index, session] of sessions.entries()) {
     const state = session.active ? "active" : "complete";
     const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
+    const name = sessionDisplayName(session.metadata);
     const selector = String(index + 1).padEnd(2);
-    lines.push(`${selector} ${state.padEnd(9)} ${sessionPrefix(session.metadata.sessionId, sessionIds).padEnd(20)} ${repo.slice(0, 20).padEnd(20)} ${formatAge(session.modifiedAt)}`);
+    lines.push(`${selector} ${state.padEnd(9)} ${sessionPrefix(session.metadata.sessionId, sessionIds).padEnd(20)} ${name.slice(0, 20).padEnd(20)} ${repo.slice(0, 20).padEnd(20)} ${formatAge(session.modifiedAt)}`);
   }
 
   lines.push("", "Use a # or SESSION prefix, for example:", "  bashguard attach 1", "  bashguard inspect 1 --event <event-id-or-sequence>", "  bashguard debrief 1");
@@ -386,15 +397,18 @@ export function formatInspectableEvents(sessionSelector: string, events: BashGua
     .map(formatTimelineEvent)
     .filter((line): line is string => line !== undefined);
   const visibleEvents = renderedEvents.slice(-50);
-  const firstEventId = events.find((event) => renderEvent(event))?.id.slice(0, 8);
+  const firstInspectableEvent = events.find((event) => renderEvent(event));
+  const firstEventId = firstInspectableEvent?.id.slice(0, 8);
+  const firstSequence = firstInspectableEvent?.sequence;
   const lines = ["Inspectable events", "", ...visibleEvents];
 
   if (renderedEvents.length > visibleEvents.length) {
     lines.splice(2, 0, `Showing last ${visibleEvents.length} of ${renderedEvents.length} rendered events.`);
   }
 
-  lines.push("", "Inspect an event with:");
-  lines.push(`  bashguard inspect ${sessionSelector} --event ${firstEventId ?? "<event-id-or-sequence>"}`);
+  lines.push("", "Inspect by sequence or event ID prefix:");
+  lines.push(`  bashguard inspect ${sessionSelector} --event ${firstSequence ?? "<sequence>"}`);
+  lines.push(`  bashguard inspect ${sessionSelector} --event ${firstEventId ?? "<event-id-prefix>"}`);
   return `${lines.join("\n")}\n`;
 }
 

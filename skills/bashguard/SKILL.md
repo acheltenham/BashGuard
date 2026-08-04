@@ -13,6 +13,8 @@ Discover recorded sessions:
 
 ```bash
 bashguard sessions
+bashguard session list
+bashguard sessions list
 ```
 
 Attach to a session timeline:
@@ -26,6 +28,7 @@ List inspectable events for a session:
 
 ```bash
 bashguard inspect <session-selector>
+bashguard inspect <session-selector> list events
 bashguard inspect --session <session-selector>
 ```
 
@@ -43,9 +46,24 @@ bashguard debrief <session-selector>
 bashguard debrief --session <session-selector>
 ```
 
+Update an installed BashGuard Pi package:
+
+```bash
+pi update --extensions
+pi update git:github.com/acheltenham/BashGuard
+```
+
+For pinned tags, branches, or commits, install the new ref explicitly:
+
+```bash
+pi install git:github.com/acheltenham/BashGuard@v0.1.1
+```
+
+Already-running Pi sessions keep the extension code they started with, so start a new Pi session after updating.
+
 BashGuard may surface non-blocking risk notices for a small explicit set of risky shell command patterns. Debriefs include a `Risk notices` count, and risk notes can include event sequence, cwd, command-result evidence, a plain-language risk explanation, and an `--event` inspect hint. Debriefs can also include a `Next inspect commands` section that collects useful follow-up `bashguard inspect` commands for recorded events. Debriefs can also include Git status before/after snapshots and `File tool activity` for observed read, edit, and write-tool events; `inspect` shows the same file-tool meanings for individual events and Git snapshot details for Git status events. Treat file activity as tool evidence only: `write tool` may create, overwrite, or leave content unchanged, and BashGuard should not claim create/overwrite/delete impact without before/after filesystem or Git evidence. Treat Git status snapshots as session-level before/after evidence. They may include branch, worktree path, changed-file status, line counts, changed line ranges, an observed matching file-tool event when a recorded edit/write-tool path matches a changed Git path, and a correlation confidence label such as `direct path match`. Debriefs may also note that risky shell commands occurred before a shutdown Git snapshot that showed changes with `Correlation confidence: temporal proximity only`. Because agent sessions may use separate Git worktrees rather than only branches, include worktree context when explaining snapshots. Do not treat a snapshot, matching file-tool event, or temporal proximity note as proof that a specific event caused a specific diff. Treat risk notices as observation-only review notes, not as evidence that BashGuard warned, approved, blocked, or interrupted execution.
 
-Prefer session `#` selectors from `bashguard sessions` when available. Unique session prefixes are also acceptable. Do not ask users to copy middle-truncated display IDs.
+Prefer session `#` selectors from `bashguard sessions` when available. Unique session prefixes are also acceptable. If `sessions` shows a `NAME` column, use it only as human context; selectors and prefixes remain the command inputs. Do not ask users to copy middle-truncated display IDs.
 
 ## Evidence Rules
 
@@ -79,7 +97,7 @@ The store is shared across projects, so sessions from different repositories can
 
 ## If the CLI Is Not Available
 
-`pi -e ...` and `pi install ...` load the BashGuard Pi extension and this skill. They do not necessarily install the `bashguard` shell command globally.
+`pi -e ...` and `pi install ...` load the BashGuard Pi extension and this skill. They do not necessarily install the `bashguard` shell command globally. Use `pi update --extensions` or `pi update git:github.com/acheltenham/BashGuard` to update an installed package; use `pi install git:github.com/acheltenham/BashGuard@new-ref` to move pinned installs.
 
 During early development, if `bashguard` is not on `PATH`, ask the user to run the CLI from a BashGuard checkout:
 

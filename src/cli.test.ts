@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, findEvent, formatDebrief, formatEventInspection, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, renderEvent } from "./cli.ts";
+import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, findEvent, formatDebrief, formatDoctorReport, formatEventInspection, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, renderEvent } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -103,6 +103,54 @@ test("parseCommandArgs accepts positional and --session selectors", () => {
   assert.deepEqual(parseCommandArgs(["debrief", "--session", "1"]), { command: "debrief", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["setup", "cli", "--global"]), { command: "setup", setupSubject: "cli", setupScope: "global" });
   assert.deepEqual(parseCommandArgs(["setup", "cli", "--local"]), { command: "setup", setupSubject: "cli", setupScope: "local" });
+  assert.deepEqual(parseCommandArgs(["doctor"]), { command: "doctor" });
+});
+
+test("formatDoctorReport summarizes CLI, session store, Pi package, and next steps", () => {
+  const output = formatDoctorReport({
+    cliCommand: "/tmp/bashguard/bin/bashguard",
+    packageRoot: "/tmp/bashguard",
+    dataRoot: "/tmp/bashguard-data",
+    globalCommandPath: "/usr/local/bin/bashguard",
+    sessions: [
+      {
+        metadata: { sessionId: "session-a", repository: "Demo", name: "Doctor smoke" },
+        directory: "/tmp/bashguard-data/session-a",
+        eventsFile: "/tmp/bashguard-data/session-a/events.jsonl",
+        modifiedAt: Date.now(),
+        active: true,
+      },
+    ],
+    piListAvailable: true,
+    piPackages: ["git:github.com/acheltenham/BashGuard", "git:github.com/coctostan/pi-superpowers"],
+  });
+
+  assert.match(output, /BashGuard doctor/);
+  assert.match(output, /Command\s+\/tmp\/bashguard\/bin\/bashguard/);
+  assert.match(output, /Global command\s+\/usr\/local\/bin\/bashguard/);
+  assert.match(output, /Data dir\s+\/tmp\/bashguard-data/);
+  assert.match(output, /Sessions found\s+1/);
+  assert.match(output, /Latest session\s+1 · active · Doctor smoke · Demo/);
+  assert.match(output, /Installed\s+yes/);
+  assert.match(output, /Source\s+git:github\.com\/acheltenham\/BashGuard/);
+  assert.match(output, /Update\s+pi update git:github\.com\/acheltenham\/BashGuard/);
+  assert.match(output, /- bashguard sessions/);
+});
+
+test("formatDoctorReport explains missing Pi package and CLI setup", () => {
+  const output = formatDoctorReport({
+    cliCommand: "/tmp/bashguard/bin/bashguard",
+    packageRoot: "/tmp/bashguard",
+    dataRoot: "/tmp/bashguard-data",
+    sessions: [],
+    piListAvailable: true,
+    piPackages: ["git:github.com/coctostan/pi-superpowers"],
+  });
+
+  assert.match(output, /Global command\s+not found/);
+  assert.match(output, /Installed\s+no/);
+  assert.match(output, /- pi install git:github\.com\/acheltenham\/BashGuard/);
+  assert.match(output, /- \/tmp\/bashguard\/bin\/bashguard setup cli --global/);
 });
 
 test("installLocalCliShim creates a project-local bashguard wrapper", async () => {

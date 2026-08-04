@@ -15,6 +15,7 @@ Discover recorded sessions:
 bashguard sessions
 bashguard session list
 bashguard sessions list
+bashguard doctor
 bashguard setup cli --global
 bashguard setup cli --local
 ```
@@ -87,6 +88,8 @@ Install BashGuard project-locally in `.pi/settings.json` for the current project
 ```bash
 pi install -l git:github.com/acheltenham/BashGuard
 ```
+
+`bashguard doctor` is read-only. Use it to troubleshoot CLI availability, session storage, installed Pi package source, update commands, and next steps before suggesting install/update changes.
 
 BashGuard may surface non-blocking risk notices for a small explicit set of risky shell command patterns. Debriefs include a `Risk notices` count, and risk notes can include event sequence, cwd, command-result evidence, a plain-language risk explanation, and an `--event` inspect hint. Debriefs can also include a `Next inspect commands` section that collects useful follow-up `bashguard inspect` commands for recorded events. Debriefs can also include Git status before/after snapshots and `File tool activity` for observed read, edit, and write-tool events; `inspect` shows the same file-tool meanings for individual events and Git snapshot details for Git status events. Treat file activity as tool evidence only: `write tool` may create, overwrite, or leave content unchanged, and BashGuard should not claim create/overwrite/delete impact without before/after filesystem or Git evidence. Treat Git status snapshots as session-level before/after evidence. They may include branch, worktree path, changed-file status, line counts, changed line ranges, an observed matching file-tool event when a recorded edit/write-tool path matches a changed Git path, and a correlation confidence label such as `direct path match`. Debriefs may also note that risky shell commands occurred before a shutdown Git snapshot that showed changes with `Correlation confidence: temporal proximity only`. Because agent sessions may use separate Git worktrees rather than only branches, include worktree context when explaining snapshots. Do not treat a snapshot, matching file-tool event, or temporal proximity note as proof that a specific event caused a specific diff. Treat risk notices as observation-only review notes, not as evidence that BashGuard warned, approved, blocked, or interrupted execution.
 

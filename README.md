@@ -194,17 +194,25 @@ Check installed Pi packages with:
 pi list
 ```
 
-Update installed Pi packages, including BashGuard:
+Update installed Pi packages:
 
 ```bash
 pi update --extensions
 ```
 
-Update only BashGuard when installed from GitHub:
+This only updates packages shown by `pi list`. If BashGuard is not listed, install it first:
+
+```bash
+pi install git:github.com/acheltenham/BashGuard
+```
+
+To update only BashGuard, use the exact source shown by `pi list`. For a GitHub install this is usually:
 
 ```bash
 pi update git:github.com/acheltenham/BashGuard
 ```
+
+If that reports `No matching package found`, BashGuard was not installed under that source. It may have been loaded temporarily with `pi -e ...`, installed from a local path, or not installed yet.
 
 If you installed a pinned tag, branch, or commit, Pi will reconcile that pinned ref but will not move it to a newer ref automatically. Install the new ref explicitly:
 

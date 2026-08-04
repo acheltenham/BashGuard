@@ -26,11 +26,20 @@ If BashGuard is already installed as a Pi package, update installed Pi packages 
 pi update --extensions
 ```
 
-Update only BashGuard when installed from GitHub:
+This only updates packages shown by `pi list`. If BashGuard is not listed, install it first:
+
+```bash
+pi list
+pi install git:github.com/acheltenham/BashGuard
+```
+
+Update only BashGuard with the exact source shown by `pi list`. For a GitHub install this is usually:
 
 ```bash
 pi update git:github.com/acheltenham/BashGuard
 ```
+
+If that reports `No matching package found`, BashGuard was not installed under that source. It may have been loaded temporarily with `pi -e ...`, installed from a local path, or not installed yet.
 
 If the install is pinned to a tag, branch, or commit, move to a new ref explicitly:
 

@@ -73,6 +73,7 @@ Goal: make a Pi session understandable after it happens.
 - session start/shutdown Git status snapshots with branch, worktree path, changed-file status, available line counts, changed line ranges, observed matching file-tool events, and direct-path-match correlation confidence for before/after working-tree comparison;
 - temporal-only risk/Git correlation notes when risky shell commands occur before a shutdown Git snapshot that shows changed paths;
 - evidence completeness summaries covering capture gaps, redaction, truncation, missing fields, Git snapshots, and command-result evidence;
+- next-inspect-command summaries that point users from debriefs to relevant recorded events;
 - richer session debrief;
 - items-worth-reviewing summary;
 - completed-session browsing.

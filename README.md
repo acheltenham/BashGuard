@@ -129,16 +129,24 @@ pi -e .
 
 ### Install BashGuard as a default Pi extension
 
-Install from GitHub so future Pi sessions load BashGuard automatically:
+Install BashGuard globally in your Pi user settings so future Pi sessions in any project load BashGuard automatically:
 
 ```bash
 pi install git:github.com/acheltenham/BashGuard
+```
+
+Install BashGuard only for the current project by writing to `.pi/settings.json`:
+
+```bash
+cd your-project
+pi install -l git:github.com/acheltenham/BashGuard
 ```
 
 For repeatable installs, prefer a tagged release when available:
 
 ```bash
 pi install git:github.com/acheltenham/BashGuard@v0.1.0
+pi install -l git:github.com/acheltenham/BashGuard@v0.1.0
 ```
 
 Or install from your local BashGuard checkout:
@@ -146,9 +154,13 @@ Or install from your local BashGuard checkout:
 ```bash
 cd bashguard
 pi install .
+
+# or project-local from the project you want to record
+cd your-project
+pi install -l /absolute/path/to/your/bashguard-checkout
 ```
 
-These commands install the BashGuard Pi package into Pi settings. The package includes both the BashGuard session-recording extension and a complementary `bashguard` skill that helps Pi use the recorded evidence. Future Pi sessions started from any project should load both automatically.
+These commands install the BashGuard Pi package into Pi settings. The package includes both the BashGuard session-recording extension and a complementary `bashguard` skill that helps Pi use the recorded evidence. Global installs apply to future Pi sessions in any project. Project-local installs apply when Pi is started from that trusted project.
 
 Start Pi normally from the project you want to record:
 
@@ -169,7 +181,40 @@ bashguard inspect 1 --event <event-id-prefix-or-sequence>
 bashguard debrief 1
 ```
 
-During local development, run the CLI from your BashGuard checkout instead:
+If `bashguard` is not on your `PATH`, run the CLI from the installed Pi package checkout:
+
+```bash
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard sessions
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard attach 1
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard inspect 1
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard debrief 1
+```
+
+Or link the CLI globally from a BashGuard checkout:
+
+```bash
+cd ~/.pi/agent/git/github.com/acheltenham/BashGuard
+npm link
+bashguard sessions
+```
+
+For project-local CLI convenience, add a script in your project that points at the installed package checkout:
+
+```json
+{
+  "scripts": {
+    "bashguard": "~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard"
+  }
+}
+```
+
+Then run:
+
+```bash
+npm run bashguard -- sessions
+```
+
+During local development, you can also run the CLI from your BashGuard checkout without linking:
 
 ```bash
 cd bashguard
@@ -247,7 +292,7 @@ BashGuard can only attach to sessions recorded while the BashGuard extension was
 
 ### CLI availability
 
-`pi -e ...` and `pi install ...` load the BashGuard Pi extension and bundled `bashguard` skill. They do not necessarily install the `bashguard` shell command globally. During early development, run the CLI from a local checkout with `npm exec -- node --experimental-strip-types src/cli.ts ...` unless you have separately installed a packaged CLI.
+`pi -e ...` and `pi install ...` load the BashGuard Pi extension and bundled `bashguard` skill. They do not install the `bashguard` shell command globally. Use the package checkout wrapper at `~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard`, or run `npm link` from that checkout to put `bashguard` on your `PATH`.
 
 ## Local Development
 

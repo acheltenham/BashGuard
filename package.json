@@ -5,7 +5,7 @@
   "description": "Local-first observability and safeguards for Pi coding sessions.",
   "type": "module",
   "bin": {
-    "bashguard": "./src/cli.ts"
+    "bashguard": "./bin/bashguard"
   },
   "keywords": [
     "pi-package",

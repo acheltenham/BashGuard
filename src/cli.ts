@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
+import { spawnSync } from "node:child_process";
 import { createReadStream, existsSync } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type SessionMetadata = {
@@ -75,6 +76,8 @@ export type ParsedCommandArgs = {
   command?: string;
   sessionId?: string;
   eventId?: string;
+  setupSubject?: string;
+  setupScope?: "global" | "local";
 };
 
 const POLL_MS = 250;
@@ -84,7 +87,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard attach [session-id]\n  bashguard attach --session <session-id>\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id]\n  bashguard attach --session <session-id>\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -96,6 +99,17 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
+    if (command === "setup" && arg === "cli") {
+      continue;
+    }
+    if (command === "setup" && arg === "--global") {
+      const parsed: ParsedCommandArgs = { command: "setup", setupSubject: "cli", setupScope: "global" };
+      return parsed;
+    }
+    if (command === "setup" && arg === "--local") {
+      const parsed: ParsedCommandArgs = { command: "setup", setupSubject: "cli", setupScope: "local" };
+      return parsed;
+    }
     if (arg === "--session") {
       sessionId = args[++index];
       continue;
@@ -410,6 +424,40 @@ export function formatInspectableEvents(sessionSelector: string, events: BashGua
   lines.push(`  bashguard inspect ${sessionSelector} --event ${firstSequence ?? "<sequence>"}`);
   lines.push(`  bashguard inspect ${sessionSelector} --event ${firstEventId ?? "<event-id-prefix>"}`);
   return `${lines.join("\n")}\n`;
+}
+
+function packageRoot(): string {
+  return dirname(dirname(fileURLToPath(import.meta.url)));
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export async function installLocalCliShim(projectRoot: string, bashguardBin = join(packageRoot(), "bin", "bashguard")): Promise<string> {
+  const shim = join(projectRoot, ".bashguard", "bin", "bashguard");
+  await mkdir(dirname(shim), { recursive: true });
+  await writeFile(shim, `#!/usr/bin/env bash\nexec ${shellQuote(bashguardBin)} "$@"\n`, "utf8");
+  await chmod(shim, 0o755);
+  return shim;
+}
+
+async function setupCli(scope: "global" | "local" | undefined): Promise<void> {
+  if (scope === "global") {
+    const result = spawnSync("npm", ["link"], { cwd: packageRoot(), stdio: "inherit", env: process.env });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`npm link failed with exit ${result.status}`);
+    process.stdout.write("\nBashGuard CLI linked globally. Try:\n  bashguard sessions\n");
+    return;
+  }
+
+  if (scope === "local") {
+    const shim = await installLocalCliShim(process.cwd());
+    process.stdout.write(`BashGuard CLI linked locally at ${shim}\n\nRun:\n  ${shim} sessions\n`);
+    return;
+  }
+
+  throw new Error("Usage: bashguard setup cli --global|--local");
 }
 
 export function findEvent(events: BashGuardEvent[], eventIdOrSequence: string): BashGuardEvent | undefined {
@@ -1077,9 +1125,10 @@ async function attach(requestedId?: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const { command, sessionId, eventId } = parseCommandArgs(process.argv.slice(2));
+  const { command, sessionId, eventId, setupSubject, setupScope } = parseCommandArgs(process.argv.slice(2));
   try {
     if (command === "sessions") return await listSessions();
+    if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);
     if (command === "attach") return await attach(sessionId);
     if (command === "inspect") return await inspect(sessionId, eventId);
     if (command === "debrief") return await debrief(sessionId);

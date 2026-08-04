@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, findEvent, formatDebrief, formatEventInspection, formatInspectableEvents, formatSessionList, formatTimelineEvent, normalizeEvent, parseCommandArgs, parseJsonlEvents, renderEvent } from "./cli.ts";
+import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, findEvent, formatDebrief, formatEventInspection, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, renderEvent } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -101,6 +101,20 @@ test("parseCommandArgs accepts positional and --session selectors", () => {
   assert.deepEqual(parseCommandArgs(["inspect", "--session", "1", "--event", "evt-1"]), { command: "inspect", sessionId: "1", eventId: "evt-1" });
   assert.deepEqual(parseCommandArgs(["inspect", "1", "list", "events"]), { command: "inspect", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["debrief", "--session", "1"]), { command: "debrief", sessionId: "1" });
+  assert.deepEqual(parseCommandArgs(["setup", "cli", "--global"]), { command: "setup", setupSubject: "cli", setupScope: "global" });
+  assert.deepEqual(parseCommandArgs(["setup", "cli", "--local"]), { command: "setup", setupSubject: "cli", setupScope: "local" });
+});
+
+test("installLocalCliShim creates a project-local bashguard wrapper", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-local-shim-test-"));
+  const shim = await installLocalCliShim(root, "/opt/bashguard/bin/bashguard");
+  const content = await readFile(shim, "utf8");
+  const mode = (await stat(shim)).mode;
+
+  assert.equal(shim, join(root, ".bashguard", "bin", "bashguard"));
+  assert.match(content, /^#!\/usr\/bin\/env bash/);
+  assert.match(content, /\/opt\/bashguard\/bin\/bashguard/);
+  assert.ok(mode & 0o100);
 });
 
 test("renderEvent narrates user bash, agent bash, edits, and capture gaps", () => {

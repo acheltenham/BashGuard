@@ -102,12 +102,21 @@ If `bashguard` is not on your `PATH`, run from the installed package checkout:
 ~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard sessions
 ```
 
-Or link it globally:
+Or set up the CLI explicitly.
+
+Global shell command:
 
 ```bash
-cd ~/.pi/agent/git/github.com/acheltenham/BashGuard
-npm link
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard setup cli --global
 bashguard sessions
+```
+
+Project-local shim in the current project:
+
+```bash
+cd your-project
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard setup cli --local
+./.bashguard/bin/bashguard sessions
 ```
 
 During local development, run the CLI from the BashGuard checkout:
@@ -188,7 +197,7 @@ Confirm debrief includes applicable sections:
 ## 7. Caveats to verify
 
 - BashGuard cannot attach to older Pi sessions that were not recorded while the BashGuard extension was loaded.
-- `pi -e ...` and `pi install ...` load the Pi extension and bundled skill, but do not necessarily install a global `bashguard` shell command.
+- `pi -e ...` and `pi install ...` load the Pi extension and bundled skill, but do not install a global `bashguard` shell command. Use `bashguard setup cli --global` or `bashguard setup cli --local` through the package checkout wrapper to install an explicit shell shortcut.
 - `BASHGUARD_DATA_DIR` can isolate smoke-test data:
 
 ```bash

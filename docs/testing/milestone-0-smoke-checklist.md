@@ -90,6 +90,7 @@ If the `bashguard` CLI is available:
 bashguard sessions
 bashguard session list
 bashguard sessions list
+bashguard doctor
 bashguard attach 1
 bashguard inspect 1
 bashguard inspect 1 --event 1
@@ -99,6 +100,7 @@ bashguard debrief 1
 If `bashguard` is not on your `PATH`, run from the installed package checkout:
 
 ```bash
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard doctor
 ~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard sessions
 ```
 
@@ -139,6 +141,16 @@ bashguard inspect 1 list events
 ```
 
 ## 6. Expected output checks
+
+### `bashguard doctor`
+
+Confirm:
+
+- it reports the CLI command and package root;
+- it reports the BashGuard data directory;
+- it reports session count and latest session when present;
+- it reports whether BashGuard appears in `pi list`;
+- it suggests install/update/setup next steps without mutating anything.
 
 ### `bashguard sessions`
 

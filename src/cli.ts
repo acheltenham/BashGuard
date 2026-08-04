@@ -80,6 +80,16 @@ export type ParsedCommandArgs = {
   setupScope?: "global" | "local";
 };
 
+export type DoctorReportInput = {
+  cliCommand: string;
+  packageRoot: string;
+  dataRoot: string;
+  globalCommandPath?: string;
+  sessions: SessionSummary[];
+  piListAvailable: boolean;
+  piPackages: string[];
+};
+
 const POLL_MS = 250;
 
 function getDataRoot(): string {
@@ -87,7 +97,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id]\n  bashguard attach --session <session-id>\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id]\n  bashguard attach --session <session-id>\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -99,6 +109,7 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
+    if (command === "doctor") continue;
     if (command === "setup" && arg === "cli") {
       continue;
     }
@@ -477,6 +488,81 @@ export function findEvent(events: BashGuardEvent[], eventIdOrSequence: string): 
 function formatField(label: string, value: unknown): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   return `${label.padEnd(18)} ${String(value)}`;
+}
+
+function latestSessionLine(sessions: SessionSummary[]): string | undefined {
+  const latest = sessions[0];
+  if (!latest) return undefined;
+  const name = sessionDisplayName(latest.metadata);
+  const repo = latest.metadata.repository ?? basename(latest.metadata.cwd ?? "unknown");
+  return `1 · ${latest.active ? "active" : "complete"} · ${name} · ${repo} · ${formatAge(latest.modifiedAt)}`;
+}
+
+function bashGuardPackageSource(packages: string[]): string | undefined {
+  return packages.find((source) => source.includes("github.com/acheltenham/BashGuard") || source === "bashguard" || source.endsWith("/BashGuard"));
+}
+
+export function formatDoctorReport(input: DoctorReportInput): string {
+  const bashGuardSource = bashGuardPackageSource(input.piPackages);
+  const lines = [
+    "BashGuard doctor",
+    "",
+    "CLI",
+    formatField("Command", input.cliCommand),
+    formatField("Package root", input.packageRoot),
+    formatField("Global command", input.globalCommandPath ?? "not found"),
+    "",
+    "Session store",
+    formatField("Data dir", input.dataRoot),
+    formatField("Sessions found", input.sessions.length),
+    formatField("Latest session", latestSessionLine(input.sessions)),
+    "",
+    "Pi package",
+    formatField("pi list", input.piListAvailable ? "available" : "unavailable"),
+    formatField("Installed", bashGuardSource ? "yes" : "no"),
+    formatField("Source", bashGuardSource),
+    formatField("Update", bashGuardSource ? `pi update ${bashGuardSource}` : undefined),
+    "",
+    "Next steps",
+    ...(bashGuardSource
+      ? [input.globalCommandPath ? "- bashguard sessions" : `- ${join(input.packageRoot, "bin", "bashguard")} setup cli --global`, input.sessions.length > 0 ? "- bashguard debrief 1" : undefined]
+      : ["- pi install git:github.com/acheltenham/BashGuard", `- ${join(input.packageRoot, "bin", "bashguard")} setup cli --global`]),
+  ].filter((line): line is string => line !== undefined);
+
+  return `${lines.join("\n")}\n`;
+}
+
+function parsePiListPackages(stdout: string): string[] {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("/") && !line.endsWith("packages:"));
+}
+
+function readPiPackages(): { available: boolean; packages: string[] } {
+  const result = spawnSync("pi", ["list"], { encoding: "utf8" });
+  if (result.error || result.status !== 0) return { available: false, packages: [] };
+  return { available: true, packages: parsePiListPackages(result.stdout) };
+}
+
+function readGlobalCommandPath(): string | undefined {
+  const result = spawnSync("sh", ["-lc", "command -v bashguard"], { encoding: "utf8" });
+  if (result.error || result.status !== 0) return undefined;
+  return result.stdout.trim() || undefined;
+}
+
+async function doctor(): Promise<void> {
+  const piPackages = readPiPackages();
+  const sessions = await discoverSessions();
+  process.stdout.write(formatDoctorReport({
+    cliCommand: process.env.BASHGUARD_CLI_COMMAND ?? process.argv[1] ?? join(packageRoot(), "bin", "bashguard"),
+    packageRoot: packageRoot(),
+    dataRoot: getDataRoot(),
+    globalCommandPath: readGlobalCommandPath(),
+    sessions,
+    piListAvailable: piPackages.available,
+    piPackages: piPackages.packages,
+  }));
 }
 
 function fileActionForTool(tool: string | undefined): string | undefined {
@@ -1128,6 +1214,7 @@ async function main(): Promise<void> {
   const { command, sessionId, eventId, setupSubject, setupScope } = parseCommandArgs(process.argv.slice(2));
   try {
     if (command === "sessions") return await listSessions();
+    if (command === "doctor") return await doctor();
     if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);
     if (command === "attach") return await attach(sessionId);
     if (command === "inspect") return await inspect(sessionId, eventId);

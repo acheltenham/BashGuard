@@ -34,6 +34,7 @@ Implemented in the Milestone 0 vertical slice:
 bashguard sessions
 bashguard session list
 bashguard sessions list
+bashguard doctor
 bashguard attach 1
 bashguard attach --session 1
 bashguard inspect 1
@@ -42,6 +43,7 @@ bashguard debrief 1
 ```
 
 - `sessions`, `session list`, and `sessions list` list recent and active recorded sessions with a `#` selector, copyable session prefix, and a session name when Pi exposes one.
+- `doctor` prints a read-only troubleshooting report for CLI path, session storage, installed Pi package source, update command, and next steps.
 - `attach` follows an active session or renders a completed session timeline. It accepts a session number, full session ID, unique session prefix, or `--session`. Risk notices in the timeline are explicitly non-blocking.
 - `inspect` without `--event` lists inspectable events for a session and shows sequence/event-prefix examples. `inspect <session> list events` is accepted as an explicit list intent. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or sequence, including file-tool meaning for read/edit/write-tool events and Git snapshot details for Git status events.
 - `debrief` summarizes a completed session with evidence-based review notes, including evidence completeness, Git status before/after, a risk-notice count, non-blocking risky-command notes, correlation confidence for direct path matches, temporal-only risk/Git correlation notes, next inspect commands, and a `File tool activity` section for observed read/edit/write-tool events.
@@ -175,6 +177,7 @@ In another terminal, list and inspect recorded BashGuard sessions. If the `bashg
 bashguard sessions
 bashguard session list
 bashguard sessions list
+bashguard doctor
 bashguard attach 1
 bashguard inspect 1
 bashguard inspect 1 --event <event-id-prefix-or-sequence>
@@ -191,6 +194,12 @@ If `bashguard` is not on your `PATH`, run the CLI from the installed Pi package 
 ```
 
 Or set up the CLI explicitly.
+
+Check setup and next steps:
+
+```bash
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard doctor
+```
 
 Global shell command:
 

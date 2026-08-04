@@ -15,6 +15,8 @@ Discover recorded sessions:
 bashguard sessions
 bashguard session list
 bashguard sessions list
+bashguard setup cli --global
+bashguard setup cli --local
 ```
 
 Attach to a session timeline:
@@ -130,12 +132,21 @@ If `bashguard` is not on `PATH`, ask the user to run the CLI from the installed 
 ~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard sessions
 ```
 
-Or link it globally from that checkout:
+Or set up an explicit shell shortcut.
+
+Global shell command:
 
 ```bash
-cd ~/.pi/agent/git/github.com/acheltenham/BashGuard
-npm link
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard setup cli --global
 bashguard sessions
+```
+
+Project-local shim:
+
+```bash
+cd your-project
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard setup cli --local
+./.bashguard/bin/bashguard sessions
 ```
 
 During local development, they can also run from a BashGuard checkout:

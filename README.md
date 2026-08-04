@@ -190,29 +190,24 @@ If `bashguard` is not on your `PATH`, run the CLI from the installed Pi package 
 ~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard debrief 1
 ```
 
-Or link the CLI globally from a BashGuard checkout:
+Or set up the CLI explicitly.
+
+Global shell command:
 
 ```bash
-cd ~/.pi/agent/git/github.com/acheltenham/BashGuard
-npm link
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard setup cli --global
 bashguard sessions
 ```
 
-For project-local CLI convenience, add a script in your project that points at the installed package checkout:
-
-```json
-{
-  "scripts": {
-    "bashguard": "~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard"
-  }
-}
-```
-
-Then run:
+Project-local shim in the current project:
 
 ```bash
-npm run bashguard -- sessions
+cd your-project
+~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard setup cli --local
+./.bashguard/bin/bashguard sessions
 ```
+
+The global setup runs `npm link` from the BashGuard package checkout. The local setup creates `./.bashguard/bin/bashguard` in the current project.
 
 During local development, you can also run the CLI from your BashGuard checkout without linking:
 
@@ -292,7 +287,7 @@ BashGuard can only attach to sessions recorded while the BashGuard extension was
 
 ### CLI availability
 
-`pi -e ...` and `pi install ...` load the BashGuard Pi extension and bundled `bashguard` skill. They do not install the `bashguard` shell command globally. Use the package checkout wrapper at `~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard`, or run `npm link` from that checkout to put `bashguard` on your `PATH`.
+`pi -e ...` and `pi install ...` load the BashGuard Pi extension and bundled `bashguard` skill. They do not install the `bashguard` shell command globally. Use the package checkout wrapper at `~/.pi/agent/git/github.com/acheltenham/BashGuard/bin/bashguard`, then run `bashguard setup cli --global` or `bashguard setup cli --local` through that wrapper to install an explicit shell shortcut.
 
 ## Local Development
 

@@ -49,7 +49,7 @@ test("discoverSessions marks sessions with shutdown events complete even if the 
 test("formatSessionList shows copyable selectors and prefixes without middle ellipsis", () => {
   const output = formatSessionList([
     {
-      metadata: { sessionId: "019fc93a-1111-2222-3333-abcdefaaaaaa", repository: "BashGuard" },
+      metadata: { sessionId: "019fc93a-1111-2222-3333-abcdefaaaaaa", repository: "BashGuard", name: "Milestone 0 smoke" },
       directory: "/tmp/one",
       eventsFile: "/tmp/one/events.jsonl",
       modifiedAt: Date.now(),
@@ -64,9 +64,9 @@ test("formatSessionList shows copyable selectors and prefixes without middle ell
     },
   ]);
 
-  assert.match(output, /#\s+STATE\s+SESSION/);
-  assert.match(output, /1\s+active\s+019fc93a/);
-  assert.match(output, /2\s+complete\s+019fc909/);
+  assert.match(output, /#\s+STATE\s+SESSION\s+NAME\s+REPO/);
+  assert.match(output, /1\s+active\s+019fc93a\s+Milestone 0 smoke\s+BashGuard/);
+  assert.match(output, /2\s+complete\s+019fc909\s+-\s+Evidence/);
   assert.doesNotMatch(output, /…/);
   assert.match(output, /bashguard attach 1/);
 });
@@ -93,9 +93,13 @@ test("chooseSession not-found errors explain BashGuard recorded-session scope", 
 });
 
 test("parseCommandArgs accepts positional and --session selectors", () => {
+  assert.deepEqual(parseCommandArgs(["sessions"]), { command: "sessions" });
+  assert.deepEqual(parseCommandArgs(["sessions", "list"]), { command: "sessions" });
+  assert.deepEqual(parseCommandArgs(["session", "list"]), { command: "sessions" });
   assert.deepEqual(parseCommandArgs(["attach", "1"]), { command: "attach", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["attach", "--session", "1"]), { command: "attach", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["inspect", "--session", "1", "--event", "evt-1"]), { command: "inspect", sessionId: "1", eventId: "evt-1" });
+  assert.deepEqual(parseCommandArgs(["inspect", "1", "list", "events"]), { command: "inspect", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["debrief", "--session", "1"]), { command: "debrief", sessionId: "1" });
 });
 
@@ -200,6 +204,8 @@ test("formatInspectableEvents lists events and next inspect command when no even
   assert.match(output, /Inspectable events/);
   assert.match(output, /1\s+evt-star\s+08:00:00\s+Pi session started/);
   assert.match(output, /2\s+evt-tool\s+08:00:01\s+Running · npm test/);
+  assert.match(output, /Inspect by sequence or event ID prefix:/);
+  assert.match(output, /bashguard inspect 1 --event 1/);
   assert.match(output, /bashguard inspect 1 --event evt-star/);
 });
 

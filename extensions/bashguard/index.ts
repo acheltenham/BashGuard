@@ -125,6 +125,15 @@ function getDataRoot(): string {
   return process.env.BASHGUARD_DATA_DIR ?? join(homedir(), ".bashguard", "sessions");
 }
 
+function resolveSessionName(ctx: ExtensionContext): string | undefined {
+  const manager = ctx.sessionManager as unknown as Record<string, unknown>;
+  for (const candidate of ["name", "title", "sessionName"]) {
+    const value = manager[candidate];
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  return undefined;
+}
+
 type GitChangedFileDetail = {
   path: string;
   status: string;
@@ -291,6 +300,7 @@ async function createSessionState(ctx: ExtensionContext): Promise<SessionState> 
   const metadata = {
     schemaVersion: 1,
     sessionId,
+    name: resolveSessionName(ctx),
     cwd: ctx.cwd,
     repository: basename(ctx.cwd),
     startedAt: new Date().toISOString(),

@@ -32,6 +32,8 @@ Implemented in the Milestone 0 vertical slice:
 
 ```bash
 bashguard sessions
+bashguard session list
+bashguard sessions list
 bashguard attach 1
 bashguard attach --session 1
 bashguard inspect 1
@@ -39,9 +41,9 @@ bashguard inspect 1 --event <event-id-prefix-or-sequence>
 bashguard debrief 1
 ```
 
-- `sessions` lists recent and active recorded sessions with a `#` selector and copyable session prefix.
+- `sessions`, `session list`, and `sessions list` list recent and active recorded sessions with a `#` selector, copyable session prefix, and a session name when Pi exposes one.
 - `attach` follows an active session or renders a completed session timeline. It accepts a session number, full session ID, unique session prefix, or `--session`. Risk notices in the timeline are explicitly non-blocking.
-- `inspect` without `--event` lists inspectable events for a session. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or sequence, including file-tool meaning for read/edit/write-tool events and Git snapshot details for Git status events.
+- `inspect` without `--event` lists inspectable events for a session and shows sequence/event-prefix examples. `inspect <session> list events` is accepted as an explicit list intent. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or sequence, including file-tool meaning for read/edit/write-tool events and Git snapshot details for Git status events.
 - `debrief` summarizes a completed session with evidence-based review notes, including evidence completeness, Git status before/after, a risk-notice count, non-blocking risky-command notes, correlation confidence for direct path matches, temporal-only risk/Git correlation notes, next inspect commands, and a `File tool activity` section for observed read/edit/write-tool events.
 
 Planned later commands include richer `open`/TUI and `replay` experiences.
@@ -159,6 +161,8 @@ In another terminal, list and inspect recorded BashGuard sessions. If the `bashg
 
 ```bash
 bashguard sessions
+bashguard session list
+bashguard sessions list
 bashguard attach 1
 bashguard inspect 1
 bashguard inspect 1 --event <event-id-prefix-or-sequence>
@@ -188,6 +192,24 @@ Check installed Pi packages with:
 
 ```bash
 pi list
+```
+
+Update installed Pi packages, including BashGuard:
+
+```bash
+pi update --extensions
+```
+
+Update only BashGuard when installed from GitHub:
+
+```bash
+pi update git:github.com/acheltenham/BashGuard
+```
+
+If you installed a pinned tag, branch, or commit, Pi will reconcile that pinned ref but will not move it to a newer ref automatically. Install the new ref explicitly:
+
+```bash
+pi install git:github.com/acheltenham/BashGuard@v0.1.1
 ```
 
 Remove the package using the same source you installed:
@@ -242,7 +264,7 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.t
 BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts debrief 1
 ```
 
-See [Separate-Terminal Attach Test](docs/testing/separate-terminal-attach.md).
+See [Milestone 0 Smoke Checklist](docs/testing/milestone-0-smoke-checklist.md) and [Separate-Terminal Attach Test](docs/testing/separate-terminal-attach.md).
 
 ## Documents
 

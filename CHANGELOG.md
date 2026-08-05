@@ -4,7 +4,9 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
-- Nothing yet.
+### Fixed
+
+- `bashguard debrief` now labels active sessions as `Session active` instead of always saying `Session complete`.
 
 ## 0.1.0 - 2026-08-04
 

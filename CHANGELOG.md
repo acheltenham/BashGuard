@@ -7,6 +7,7 @@ All notable project changes will be recorded here.
 ### Added
 
 - `bashguard debrief` now includes an evidence-based `GitHub activity` section for observed `git push`, `gh pr create`, `gh pr merge`, and `gh run watch/view` commands recorded in the session.
+- `bashguard debrief` now includes an evidence-based `Deployment activity` section for observed Vercel production deploys and production URL verification commands recorded in the session.
 
 ### Fixed
 

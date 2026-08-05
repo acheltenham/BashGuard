@@ -483,6 +483,24 @@ test("buildDebrief reports combined git push and GitHub PR creation commands sep
   ]);
 });
 
+test("buildDebrief summarizes observed deployment activity without live deployment queries", () => {
+  const summary = buildDebrief([
+    event(1, "tool.requested", { toolName: "bash", toolCallId: "deploy", payload: { toolCallId: "deploy", input: { command: "npx vercel deploy --prod --yes" } } }),
+    event(2, "tool.completed", { toolName: "bash", toolCallId: "deploy", payload: { toolCallId: "deploy", isError: false, content: [{ type: "text", text: "Production      https://example.vercel.app\nAliased         https://example.com\n✓ Ready in 34s\n" }] } }),
+    event(3, "tool.requested", { toolName: "bash", toolCallId: "verify", payload: { toolCallId: "verify", input: { command: "curl -L -s https://example.com | grep Ready\npython3 verify.py" } } }),
+    event(4, "tool.completed", { toolName: "bash", toolCallId: "verify", payload: { toolCallId: "verify", isError: false, content: [{ type: "text", text: "external_hashnode: False\nlegacy_assets: False\nHTTP/2 200\n" }] } }),
+  ]);
+
+  assert.deepEqual(summary.deploymentActivity, [
+    "Vercel production deploy observed at event 1\n  Command: npx vercel deploy --prod --yes\n  Reported: Aliased https://example.com; ✓ Ready in 34s\n  Evidence: recorded shell command/output\n  Inspect: --event 1",
+    "Production URL verification observed at event 3\n  Command: curl -L -s https://example.com | grep Ready ...\n  Reported: external_hashnode: False; legacy_assets: False; HTTP/2 200\n  Evidence: recorded shell command/output\n  Inspect: --event 3",
+  ]);
+  assert.deepEqual(summary.nextInspectCommands, [
+    "bashguard inspect <session> --event 1  # deployment activity: Vercel deploy",
+    "bashguard inspect <session> --event 3  # deployment activity: production verification",
+  ]);
+});
+
 test("buildDebrief summarizes prompts, tools, shell commands, files, failures, and capture gaps", () => {
   const summary = buildDebrief([
     event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
@@ -582,6 +600,7 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
       "A src/cli.ts (+40 -0)\n  Lines: 1-40\n  Observed matching file tool event: write tool at event 7\n  Correlation confidence: direct path match\n  Inspect: --event 7",
     ],
     githubActivity: ["git push observed at event 9\n  Command: git push origin main\n  Evidence: recorded shell command/output\n  Inspect: --event 9"],
+    deploymentActivity: ["Vercel production deploy observed at event 10\n  Command: npx vercel deploy --prod --yes\n  Evidence: recorded shell command/output\n  Inspect: --event 10"],
     captureState: "Partial",
     worthReviewing: ["one shell command failed"],
     nextInspectCommands: [
@@ -620,6 +639,8 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /- one shell command failed/);
   assert.match(output, /GitHub activity/);
   assert.match(output, /- git push observed at event 9\n  Command: git push origin main\n  Evidence: recorded shell command\/output\n  Inspect: --event 9/);
+  assert.match(output, /Deployment activity/);
+  assert.match(output, /- Vercel production deploy observed at event 10\n  Command: npx vercel deploy --prod --yes\n  Evidence: recorded shell command\/output\n  Inspect: --event 10/);
   assert.match(output, /Next inspect commands/);
   assert.match(output, /- bashguard inspect <session> --event 3  # risky shell command/);
   assert.match(output, /- bashguard inspect <session> --event 7  # matching file tool event for src\/cli\.ts/);
@@ -634,6 +655,7 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
     riskyCommands: 0,
     gitChangedFiles: [],
     githubActivity: [],
+    deploymentActivity: [],
     captureState: "Complete" as const,
     worthReviewing: [],
     nextInspectCommands: ["bashguard inspect <session> --event 3  # risky shell command"],

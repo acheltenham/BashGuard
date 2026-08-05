@@ -66,6 +66,7 @@ export type DebriefSummary = {
   gitChangedPaths?: string;
   gitChangedFiles: string[];
   githubActivity: string[];
+  deploymentActivity: string[];
   captureState: "Complete" | "Partial";
   worthReviewing: string[];
   nextInspectCommands: string[];
@@ -854,6 +855,52 @@ function formatGithubActivities(event: BashGuardEvent, command: string, output: 
   return activities;
 }
 
+function deploymentReportedLines(output: string, matchers: Array<(line: string) => boolean>): string[] {
+  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const reported: string[] = [];
+  for (const matcher of matchers) {
+    const line = lines.find(matcher)?.replace(/\s+/g, " ");
+    if (line && !reported.includes(line)) reported.push(line);
+  }
+  return reported;
+}
+
+function deploymentCommandSummary(command: string): string {
+  const firstLine = command.split(/\r?\n/)[0]?.trim() ?? command;
+  return command.includes("\n") ? `${firstLine} ...` : command;
+}
+
+function formatDeploymentActivities(event: BashGuardEvent, command: string, output: string): Array<{ detail: string; inspectLabel: string }> {
+  const activities: Array<{ detail: string; inspectLabel: string }> = [];
+  const commandSummary = deploymentCommandSummary(command);
+  if (/\b(?:npx\s+)?vercel\s+deploy\b/.test(command) && /(?:^|\s)--prod(?:\s|$)/.test(command)) {
+    const reported = deploymentReportedLines(output, [
+      (line) => /Aliased\s+https?:\/\//.test(line),
+      (line) => /✓\s+Ready\b/.test(line),
+    ]);
+    const details = [`Command: ${commandSummary}`];
+    if (reported.length > 0) details.push(`Reported: ${reported.join("; ")}`);
+    details.push("Evidence: recorded shell command/output", `Inspect: --event ${event.sequence}`);
+    activities.push({ detail: [`Vercel production deploy observed at event ${event.sequence}`, ...details.map((line) => `  ${line}`)].join("\n"), inspectLabel: "deployment activity: Vercel deploy" });
+  }
+
+  if (/\bcurl\b/.test(command) && /https?:\/\//.test(command)) {
+    const reported = deploymentReportedLines(output, [
+      (line) => /^external_hashnode:\s+/i.test(line),
+      (line) => /^legacy_assets:\s+/i.test(line),
+      (line) => /^HTTP\/\d(?:\.\d)?\s+2\d\d\b/i.test(line),
+    ]);
+    if (reported.length > 0) {
+      const details = [`Command: ${commandSummary}`];
+      details.push(`Reported: ${reported.join("; ")}`);
+      details.push("Evidence: recorded shell command/output", `Inspect: --event ${event.sequence}`);
+      activities.push({ detail: [`Production URL verification observed at event ${event.sequence}`, ...details.map((line) => `  ${line}`)].join("\n"), inspectLabel: "deployment activity: production verification" });
+    }
+  }
+
+  return activities;
+}
+
 function formatCommandReview(count: number, message: string, commands: string[]): string {
   const uniqueCommands = Array.from(new Set(commands.filter(Boolean)));
   if (count === 1 && uniqueCommands.length === 1) return `shell command ${message}: \`${uniqueCommands[0]}\``;
@@ -985,6 +1032,13 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     return command ? formatGithubActivities(event, command, textContentFor(completion)).map((activity) => ({ event, ...activity })) : [];
   });
   const githubActivity = githubActivityRecords.map((record) => record.detail);
+  const deploymentActivityRecords = shellRequests.flatMap((event) => {
+    const command = commandFor(event);
+    const toolCallId = toolCallIdFor(event);
+    const completion = toolCallId ? completionByToolCallId.get(toolCallId) : undefined;
+    return command ? formatDeploymentActivities(event, command, textContentFor(completion)).map((activity) => ({ event, ...activity })) : [];
+  });
+  const deploymentActivity = deploymentActivityRecords.map((record) => record.detail);
   const startGitCount = gitSnapshotCount(gitStartSnapshot);
   const endGitCount = gitSnapshotCount(gitEndSnapshot);
   const gitReviewItem = startGitCount !== undefined && endGitCount !== undefined && startGitCount !== endGitCount
@@ -1048,6 +1102,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   }
   for (const event of captureGapEventList) addInspectCommand(nextInspectCommands, event.sequence, "capture gap");
   for (const record of githubActivityRecords) addInspectCommand(nextInspectCommands, record.event.sequence, record.inspectLabel);
+  for (const record of deploymentActivityRecords) addInspectCommand(nextInspectCommands, record.event.sequence, record.inspectLabel);
 
   const worthReviewing = [
     ...riskyCommandReviews,
@@ -1087,6 +1142,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     gitChangedPaths,
     gitChangedFiles,
     githubActivity,
+    deploymentActivity,
     captureState: captureReviewItems.length > 0 ? "Partial" : "Complete",
     worthReviewing,
     nextInspectCommands,
@@ -1136,6 +1192,10 @@ export function formatDebrief(summary: DebriefSummary, options: DebriefFormatOpt
 
   if (summary.githubActivity.length > 0) {
     lines.push("", "GitHub activity", ...summary.githubActivity.map((item) => `- ${item}`));
+  }
+
+  if (summary.deploymentActivity.length > 0) {
+    lines.push("", "Deployment activity", ...summary.deploymentActivity.map((item) => `- ${item}`));
   }
 
   if (summary.nextInspectCommands.length > 0) {

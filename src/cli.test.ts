@@ -445,6 +445,44 @@ test("buildDebrief does not add temporal risk/Git correlation when Git did not c
   ]);
 });
 
+test("buildDebrief summarizes observed GitHub activity without live GitHub queries", () => {
+  const summary = buildDebrief([
+    event(1, "tool.requested", { toolName: "bash", toolCallId: "push", payload: { toolCallId: "push", input: { command: "git push origin main" } } }),
+    event(2, "tool.completed", { toolName: "bash", toolCallId: "push", payload: { toolCallId: "push", isError: false, content: [{ type: "text", text: "To https://github.com/example/repo.git\n   abc123..def456  main -> main\n" }] } }),
+    event(3, "tool.requested", { toolName: "bash", toolCallId: "create", payload: { toolCallId: "create", input: { command: "gh pr create --title \"Demo\" --body \"Body\"" } } }),
+    event(4, "tool.completed", { toolName: "bash", toolCallId: "create", payload: { toolCallId: "create", isError: false, content: [{ type: "text", text: "https://github.com/example/repo/pull/11\n" }] } }),
+    event(5, "tool.requested", { toolName: "bash", toolCallId: "merge", payload: { toolCallId: "merge", input: { command: "gh pr merge 11 --squash --delete-branch" } } }),
+    event(6, "tool.completed", { toolName: "bash", toolCallId: "merge", payload: { toolCallId: "merge", isError: false, content: [{ type: "text", text: "✓ Merged pull request #11\n" }] } }),
+    event(7, "tool.requested", { toolName: "bash", toolCallId: "run", payload: { toolCallId: "run", input: { command: "gh run watch 123 --exit-status" } } }),
+    event(8, "tool.completed", { toolName: "bash", toolCallId: "run", payload: { toolCallId: "run", isError: false, content: [{ type: "text", text: "✓ main Seed published articles · 123\n" }] } }),
+  ]);
+
+  assert.deepEqual(summary.githubActivity, [
+    "git push observed at event 1\n  Command: git push origin main\n  Reported: main -> main\n  Evidence: recorded shell command/output\n  Inspect: --event 1",
+    "GitHub PR creation observed at event 3\n  Title: Demo\n  Command: gh pr create --title \"Demo\" ...\n  Reported: https://github.com/example/repo/pull/11\n  Evidence: recorded shell command/output\n  Inspect: --event 3",
+    "GitHub PR merge observed at event 5\n  PR: 11\n  Command: gh pr merge 11 --squash --delete-branch\n  Reported: ✓ Merged pull request #11\n  Evidence: recorded shell command/output\n  Inspect: --event 5",
+    "GitHub Actions run observed at event 7\n  Run: 123\n  Command: gh run watch 123 --exit-status\n  Reported: ✓ main Seed published articles · 123\n  Evidence: recorded shell command/output\n  Inspect: --event 7",
+  ]);
+  assert.deepEqual(summary.nextInspectCommands, [
+    "bashguard inspect <session> --event 1  # GitHub activity: git push",
+    "bashguard inspect <session> --event 3  # GitHub activity: PR creation",
+    "bashguard inspect <session> --event 5  # GitHub activity: PR merge",
+    "bashguard inspect <session> --event 7  # GitHub activity: Actions run",
+  ]);
+});
+
+test("buildDebrief reports combined git push and GitHub PR creation commands separately", () => {
+  const summary = buildDebrief([
+    event(1, "tool.requested", { toolName: "bash", toolCallId: "combo", payload: { toolCallId: "combo", input: { command: "git push -u origin feature && gh pr create --title \"Feature title\" --body \"Long body\"" } } }),
+    event(2, "tool.completed", { toolName: "bash", toolCallId: "combo", payload: { toolCallId: "combo", isError: false, content: [{ type: "text", text: "feature -> feature\nhttps://github.com/example/repo/pull/12\n" }] } }),
+  ]);
+
+  assert.deepEqual(summary.githubActivity, [
+    "git push observed at event 1\n  Command: git push -u origin feature\n  Reported: feature -> feature\n  Evidence: recorded shell command/output\n  Inspect: --event 1",
+    "GitHub PR creation observed at event 1\n  Title: Feature title\n  Command: gh pr create --title \"Feature title\" ...\n  Reported: https://github.com/example/repo/pull/12\n  Evidence: recorded shell command/output\n  Inspect: --event 1",
+  ]);
+});
+
 test("buildDebrief summarizes prompts, tools, shell commands, files, failures, and capture gaps", () => {
   const summary = buildDebrief([
     event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
@@ -543,6 +581,7 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
       "M README.md (+12 -3)\n  Lines: 14-18, 42\n  Observed matching file tool event: edit at event 3\n  Correlation confidence: direct path match\n  Inspect: --event 3",
       "A src/cli.ts (+40 -0)\n  Lines: 1-40\n  Observed matching file tool event: write tool at event 7\n  Correlation confidence: direct path match\n  Inspect: --event 7",
     ],
+    githubActivity: ["git push observed at event 9\n  Command: git push origin main\n  Evidence: recorded shell command/output\n  Inspect: --event 9"],
     captureState: "Partial",
     worthReviewing: ["one shell command failed"],
     nextInspectCommands: [
@@ -579,6 +618,8 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /Capture state\s{2,}Partial/);
   assert.match(output, /Worth reviewing/);
   assert.match(output, /- one shell command failed/);
+  assert.match(output, /GitHub activity/);
+  assert.match(output, /- git push observed at event 9\n  Command: git push origin main\n  Evidence: recorded shell command\/output\n  Inspect: --event 9/);
   assert.match(output, /Next inspect commands/);
   assert.match(output, /- bashguard inspect <session> --event 3  # risky shell command/);
   assert.match(output, /- bashguard inspect <session> --event 7  # matching file tool event for src\/cli\.ts/);
@@ -592,6 +633,7 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
     failedCommands: 0,
     riskyCommands: 0,
     gitChangedFiles: [],
+    githubActivity: [],
     captureState: "Complete" as const,
     worthReviewing: [],
     nextInspectCommands: ["bashguard inspect <session> --event 3  # risky shell command"],

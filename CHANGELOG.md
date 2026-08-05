@@ -4,6 +4,10 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
+### Added
+
+- `bashguard debrief` now includes an evidence-based `GitHub activity` section for observed `git push`, `gh pr create`, `gh pr merge`, and `gh run watch/view` commands recorded in the session.
+
 ### Fixed
 
 - `bashguard debrief` now labels active sessions as `Session active` instead of always saying `Session complete`.

@@ -65,6 +65,7 @@ export type DebriefSummary = {
   gitWorktree?: string;
   gitChangedPaths?: string;
   gitChangedFiles: string[];
+  githubActivity: string[];
   captureState: "Complete" | "Partial";
   worthReviewing: string[];
   nextInspectCommands: string[];
@@ -659,6 +660,18 @@ function toolCallIdFor(event: BashGuardEvent): string | undefined {
   return event.toolCallId ?? getString(event.payload?.toolCallId);
 }
 
+function textContentFor(event: BashGuardEvent | undefined): string {
+  const content = event?.payload?.content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((item) => {
+      if (typeof item !== "object" || item === null) return undefined;
+      return getString((item as Record<string, unknown>).text);
+    })
+    .filter((text): text is string => text !== undefined)
+    .join("\n");
+}
+
 function bashExitCodeFor(event: BashGuardEvent): number | undefined {
   const detailsExitCode = getNumber((event.payload?.details as Record<string, unknown> | undefined)?.exitCode);
   if (detailsExitCode !== undefined) return detailsExitCode;
@@ -774,6 +787,71 @@ function gitChangedFileDetails(event: BashGuardEvent | undefined, matchingFileTo
       return formatGitChangedFileDetail(detail, path ? matchingFileToolEvents.get(path) : undefined);
     })
     .filter((detail): detail is string => detail !== undefined);
+}
+
+function firstReportedLine(output: string, matcher?: (line: string) => boolean): string | undefined {
+  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return matcher ? lines.find(matcher) : lines[0];
+}
+
+function githubCommandSegment(command: string, pattern: RegExp): string | undefined {
+  return command
+    .split(/\s+&&\s+|\n/)
+    .map((segment) => segment.trim())
+    .find((segment) => pattern.test(segment));
+}
+
+function githubPrTitle(command: string): string | undefined {
+  return command.match(/--title\s+"([^"]+)"/)?.[1] ?? command.match(/--title\s+([^\s]+)/)?.[1];
+}
+
+function formatGithubActivities(event: BashGuardEvent, command: string, output: string): Array<{ detail: string; inspectLabel: string }> {
+  const activities: Array<{ detail: string; inspectLabel: string }> = [];
+  const pushCommand = githubCommandSegment(command, /^git\s+push\b/);
+  if (pushCommand) {
+    const details: string[] = [];
+    const reported = firstReportedLine(output, (line) => /\S+\s+->\s+\S+/.test(line));
+    details.push(`Command: ${pushCommand}`);
+    if (reported) details.push(`Reported: ${reported.replace(/^.*?([\w./-]+\s+->\s+[\w./-]+).*$/, "$1")}`);
+    details.push("Evidence: recorded shell command/output", `Inspect: --event ${event.sequence}`);
+    activities.push({ detail: [`git push observed at event ${event.sequence}`, ...details.map((line) => `  ${line}`)].join("\n"), inspectLabel: "GitHub activity: git push" });
+  }
+
+  const prCreateCommand = githubCommandSegment(command, /^gh\s+pr\s+create\b/);
+  if (prCreateCommand) {
+    const details: string[] = [];
+    const reported = firstReportedLine(output, (line) => /https:\/\/github\.com\/[^\s]+\/pull\/\d+/.test(line));
+    const title = githubPrTitle(prCreateCommand);
+    if (title) details.push(`Title: ${title}`);
+    details.push(`Command: ${title ? `gh pr create --title "${title}" ...` : "gh pr create"}`);
+    if (reported) details.push(`Reported: ${reported}`);
+    details.push("Evidence: recorded shell command/output", `Inspect: --event ${event.sequence}`);
+    activities.push({ detail: [`GitHub PR creation observed at event ${event.sequence}`, ...details.map((line) => `  ${line}`)].join("\n"), inspectLabel: "GitHub activity: PR creation" });
+  }
+
+  const mergeMatch = command.match(/gh\s+pr\s+merge\s+(\d+)\b/);
+  if (mergeMatch?.[1]) {
+    const details: string[] = [];
+    const mergeCommand = githubCommandSegment(command, /^gh\s+pr\s+merge\s+\d+\b/) ?? `gh pr merge ${mergeMatch[1]}`;
+    const reported = firstReportedLine(output, (line) => /merged pull request/i.test(line));
+    details.push(`PR: ${mergeMatch[1]}`, `Command: ${mergeCommand}`);
+    if (reported) details.push(`Reported: ${reported}`);
+    details.push("Evidence: recorded shell command/output", `Inspect: --event ${event.sequence}`);
+    activities.push({ detail: [`GitHub PR merge observed at event ${event.sequence}`, ...details.map((line) => `  ${line}`)].join("\n"), inspectLabel: "GitHub activity: PR merge" });
+  }
+
+  const runMatch = command.match(/gh\s+run\s+(?:watch|view)\s+(\d+)\b/);
+  if (runMatch?.[1]) {
+    const details: string[] = [];
+    const runCommand = githubCommandSegment(command, /^gh\s+run\s+(?:watch|view)\s+\d+\b/) ?? `gh run ${runMatch[1]}`;
+    const reported = firstReportedLine(output, (line) => line.startsWith("✓") || /success/i.test(line));
+    details.push(`Run: ${runMatch[1]}`, `Command: ${runCommand}`);
+    if (reported) details.push(`Reported: ${reported}`);
+    details.push("Evidence: recorded shell command/output", `Inspect: --event ${event.sequence}`);
+    activities.push({ detail: [`GitHub Actions run observed at event ${event.sequence}`, ...details.map((line) => `  ${line}`)].join("\n"), inspectLabel: "GitHub activity: Actions run" });
+  }
+
+  return activities;
 }
 
 function formatCommandReview(count: number, message: string, commands: string[]): string {
@@ -900,6 +978,13 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const gitWorktree = formatGitSnapshotValue("worktree", gitStartSnapshot, gitEndSnapshot);
   const gitChangedPaths = formatGitChangedPaths(gitStartSnapshot, gitEndSnapshot);
   const gitChangedFiles = gitChangedFileDetails(gitEndSnapshot, matchingFileToolEvents);
+  const githubActivityRecords = shellRequests.flatMap((event) => {
+    const command = commandFor(event);
+    const toolCallId = toolCallIdFor(event);
+    const completion = toolCallId ? completionByToolCallId.get(toolCallId) : undefined;
+    return command ? formatGithubActivities(event, command, textContentFor(completion)).map((activity) => ({ event, ...activity })) : [];
+  });
+  const githubActivity = githubActivityRecords.map((record) => record.detail);
   const startGitCount = gitSnapshotCount(gitStartSnapshot);
   const endGitCount = gitSnapshotCount(gitEndSnapshot);
   const gitReviewItem = startGitCount !== undefined && endGitCount !== undefined && startGitCount !== endGitCount
@@ -962,6 +1047,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     if (path && matchingEvent) addInspectCommand(nextInspectCommands, matchingEvent.sequence, `matching file tool event for ${path}`);
   }
   for (const event of captureGapEventList) addInspectCommand(nextInspectCommands, event.sequence, "capture gap");
+  for (const record of githubActivityRecords) addInspectCommand(nextInspectCommands, record.event.sequence, record.inspectLabel);
 
   const worthReviewing = [
     ...riskyCommandReviews,
@@ -1000,6 +1086,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     gitWorktree,
     gitChangedPaths,
     gitChangedFiles,
+    githubActivity,
     captureState: captureReviewItems.length > 0 ? "Partial" : "Complete",
     worthReviewing,
     nextInspectCommands,
@@ -1045,6 +1132,10 @@ export function formatDebrief(summary: DebriefSummary, options: DebriefFormatOpt
 
   if (summary.worthReviewing.length > 0) {
     lines.push("", "Worth reviewing", ...summary.worthReviewing.map((item) => `- ${item}`));
+  }
+
+  if (summary.githubActivity.length > 0) {
+    lines.push("", "GitHub activity", ...summary.githubActivity.map((item) => `- ${item}`));
   }
 
   if (summary.nextInspectCommands.length > 0) {

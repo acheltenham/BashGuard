@@ -582,7 +582,7 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /Next inspect commands/);
   assert.match(output, /- bashguard inspect <session> --event 3  # risky shell command/);
   assert.match(output, /- bashguard inspect <session> --event 7  # matching file tool event for src\/cli\.ts/);
-  assert.match(formatDebrief({
+  const minimalSummary = {
     durationMs: 0,
     prompts: 0,
     toolCalls: 0,
@@ -592,12 +592,15 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
     failedCommands: 0,
     riskyCommands: 0,
     gitChangedFiles: [],
-    captureState: "Complete",
+    captureState: "Complete" as const,
     worthReviewing: [],
     nextInspectCommands: ["bashguard inspect <session> --event 3  # risky shell command"],
     evidenceCompleteness: [],
     fileActivity: [],
-  }, { sessionSelector: "1" }), /- bashguard inspect 1 --event 3  # risky shell command/);
+  };
+  assert.match(formatDebrief(minimalSummary, { sessionSelector: "1" }), /- bashguard inspect 1 --event 3  # risky shell command/);
+  assert.match(formatDebrief(minimalSummary, { sessionState: "active" }), /Session active/);
+  assert.doesNotMatch(formatDebrief(minimalSummary, { sessionState: "active" }), /Session complete/);
   assert.match(output, /Git changed files/);
   assert.match(output, /Evidence completeness/);
   assert.match(output, /- Git snapshots: start \+ shutdown present/);

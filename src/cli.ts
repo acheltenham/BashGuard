@@ -1017,6 +1017,7 @@ function formatCaptureState(summary: DebriefSummary): string {
 
 type DebriefFormatOptions = {
   sessionSelector?: string;
+  sessionState?: "active" | "complete";
 };
 
 function formatNextInspectCommand(command: string, options: DebriefFormatOptions): string {
@@ -1025,7 +1026,7 @@ function formatNextInspectCommand(command: string, options: DebriefFormatOptions
 
 export function formatDebrief(summary: DebriefSummary, options: DebriefFormatOptions = {}): string {
   const lines = [
-    "Session complete",
+    options.sessionState === "active" ? "Session active" : "Session complete",
     "",
     formatField("Duration", formatDuration(summary.durationMs)),
     formatField("Prompts", summary.prompts),
@@ -1126,7 +1127,7 @@ async function debrief(sessionId: string | undefined): Promise<void> {
 
   const session = await chooseSession(sessionId);
   const events = await readExistingEvents(session.eventsFile);
-  process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: sessionId }));
+  process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: sessionId, sessionState: session.active ? "active" : "complete" }));
 }
 
 async function attach(requestedId?: string): Promise<void> {

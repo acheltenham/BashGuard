@@ -66,6 +66,7 @@ export type DebriefSummary = {
   gitChangedPaths?: string;
   gitChangedFiles: string[];
   githubActivity: string[];
+  externalActivity: string[];
   captureState: "Complete" | "Partial";
   worthReviewing: string[];
   nextInspectCommands: string[];
@@ -854,6 +855,23 @@ function formatGithubActivities(event: BashGuardEvent, command: string, output: 
   return activities;
 }
 
+function commandSummary(command: string): string {
+  const firstLine = command.split(/\r?\n/)[0]?.trim() ?? command;
+  return command.includes("\n") ? `${firstLine} ...` : command;
+}
+
+function firstOutputLine(output: string): string | undefined {
+  return output.split(/\r?\n/).map((line) => line.trim()).find(Boolean)?.replace(/\s+/g, " ");
+}
+
+function formatExternalActivities(event: BashGuardEvent, command: string, output: string): string {
+  const details = [`Command: ${commandSummary(command)}`];
+  const reported = firstOutputLine(output);
+  if (reported) details.push(`Reported: ${reported}`);
+  details.push("Evidence: recorded shell command/output", `Inspect: --event ${event.sequence}`);
+  return [`Recorded shell command observed at event ${event.sequence}`, ...details.map((line) => `  ${line}`)].join("\n");
+}
+
 function formatCommandReview(count: number, message: string, commands: string[]): string {
   const uniqueCommands = Array.from(new Set(commands.filter(Boolean)));
   if (count === 1 && uniqueCommands.length === 1) return `shell command ${message}: \`${uniqueCommands[0]}\``;
@@ -985,6 +1003,12 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     return command ? formatGithubActivities(event, command, textContentFor(completion)).map((activity) => ({ event, ...activity })) : [];
   });
   const githubActivity = githubActivityRecords.map((record) => record.detail);
+  const externalActivity = shellRequests.flatMap((event) => {
+    const command = commandFor(event);
+    const toolCallId = toolCallIdFor(event);
+    const completion = toolCallId ? completionByToolCallId.get(toolCallId) : undefined;
+    return command ? formatExternalActivities(event, command, textContentFor(completion)) : [];
+  });
   const startGitCount = gitSnapshotCount(gitStartSnapshot);
   const endGitCount = gitSnapshotCount(gitEndSnapshot);
   const gitReviewItem = startGitCount !== undefined && endGitCount !== undefined && startGitCount !== endGitCount
@@ -1048,7 +1072,6 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   }
   for (const event of captureGapEventList) addInspectCommand(nextInspectCommands, event.sequence, "capture gap");
   for (const record of githubActivityRecords) addInspectCommand(nextInspectCommands, record.event.sequence, record.inspectLabel);
-
   const worthReviewing = [
     ...riskyCommandReviews,
     failedWithoutExitCodeCount > 0
@@ -1087,6 +1110,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     gitChangedPaths,
     gitChangedFiles,
     githubActivity,
+    externalActivity,
     captureState: captureReviewItems.length > 0 ? "Partial" : "Complete",
     worthReviewing,
     nextInspectCommands,
@@ -1136,6 +1160,10 @@ export function formatDebrief(summary: DebriefSummary, options: DebriefFormatOpt
 
   if (summary.githubActivity.length > 0) {
     lines.push("", "GitHub activity", ...summary.githubActivity.map((item) => `- ${item}`));
+  }
+
+  if (summary.externalActivity.length > 0) {
+    lines.push("", "Observed shell activity", ...summary.externalActivity.map((item) => `- ${item}`));
   }
 
   if (summary.nextInspectCommands.length > 0) {

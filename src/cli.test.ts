@@ -483,6 +483,21 @@ test("buildDebrief reports combined git push and GitHub PR creation commands sep
   ]);
 });
 
+test("buildDebrief summarizes recorded shell activity without provider-specific assumptions", () => {
+  const summary = buildDebrief([
+    event(1, "tool.requested", { toolName: "bash", toolCallId: "deploy", payload: { toolCallId: "deploy", input: { command: "acme deploy --production" } } }),
+    event(2, "tool.completed", { toolName: "bash", toolCallId: "deploy", payload: { toolCallId: "deploy", isError: false, content: [{ type: "text", text: "release-42 ready at https://example.invalid\n" }] } }),
+    event(3, "tool.requested", { toolName: "bash", toolCallId: "verify", payload: { toolCallId: "verify", input: { command: "custom-platform verify --target production\npython3 verify.py" } } }),
+    event(4, "tool.completed", { toolName: "bash", toolCallId: "verify", payload: { toolCallId: "verify", isError: false, content: [{ type: "text", text: "status: healthy\n" }] } }),
+  ]);
+
+  assert.deepEqual(summary.externalActivity, [
+    "Recorded shell command observed at event 1\n  Command: acme deploy --production\n  Reported: release-42 ready at https://example.invalid\n  Evidence: recorded shell command/output\n  Inspect: --event 1",
+    "Recorded shell command observed at event 3\n  Command: custom-platform verify --target production ...\n  Reported: status: healthy\n  Evidence: recorded shell command/output\n  Inspect: --event 3",
+  ]);
+  assert.deepEqual(summary.nextInspectCommands, []);
+});
+
 test("buildDebrief summarizes prompts, tools, shell commands, files, failures, and capture gaps", () => {
   const summary = buildDebrief([
     event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
@@ -582,6 +597,7 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
       "A src/cli.ts (+40 -0)\n  Lines: 1-40\n  Observed matching file tool event: write tool at event 7\n  Correlation confidence: direct path match\n  Inspect: --event 7",
     ],
     githubActivity: ["git push observed at event 9\n  Command: git push origin main\n  Evidence: recorded shell command/output\n  Inspect: --event 9"],
+    externalActivity: ["Recorded shell command observed at event 10\n  Command: acme deploy --production\n  Evidence: recorded shell command/output\n  Inspect: --event 10"],
     captureState: "Partial",
     worthReviewing: ["one shell command failed"],
     nextInspectCommands: [
@@ -620,6 +636,8 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
   assert.match(output, /- one shell command failed/);
   assert.match(output, /GitHub activity/);
   assert.match(output, /- git push observed at event 9\n  Command: git push origin main\n  Evidence: recorded shell command\/output\n  Inspect: --event 9/);
+  assert.match(output, /Observed shell activity/);
+  assert.match(output, /- Recorded shell command observed at event 10\n  Command: acme deploy --production\n  Evidence: recorded shell command\/output\n  Inspect: --event 10/);
   assert.match(output, /Next inspect commands/);
   assert.match(output, /- bashguard inspect <session> --event 3  # risky shell command/);
   assert.match(output, /- bashguard inspect <session> --event 7  # matching file tool event for src\/cli\.ts/);
@@ -634,6 +652,7 @@ test("formatDebrief renders a concise aligned completed-session summary", () => 
     riskyCommands: 0,
     gitChangedFiles: [],
     githubActivity: [],
+    externalActivity: [],
     captureState: "Complete" as const,
     worthReviewing: [],
     nextInspectCommands: ["bashguard inspect <session> --event 3  # risky shell command"],

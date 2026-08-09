@@ -186,7 +186,8 @@ export function parseJsonlEvents(text: string): BashGuardEvent[] {
       // Malformed complete lines are ignored in this first slice rather than crashing attachment.
     }
   }
-  return events.sort((a, b) => a.sequence - b.sequence);
+  // JSONL append order is the canonical timeline. Sequences can repeat after a recorder restart.
+  return events;
 }
 
 async function readExistingEvents(eventsFile: string): Promise<BashGuardEvent[]> {
@@ -427,6 +428,8 @@ export function formatInspectableEvents(sessionSelector: string, events: BashGua
   const firstInspectableEvent = events.find((event) => renderEvent(event));
   const firstEventId = firstInspectableEvent?.id.slice(0, 8);
   const firstSequence = firstInspectableEvent?.sequence;
+  const firstSequenceIsUnique = firstSequence === undefined || events.filter((event) => event.sequence === firstSequence).length === 1;
+  const firstSelector = firstSequenceIsUnique ? firstSequence : firstEventId;
   const lines = ["Inspectable events", "", ...visibleEvents];
 
   if (renderedEvents.length > visibleEvents.length) {
@@ -434,8 +437,31 @@ export function formatInspectableEvents(sessionSelector: string, events: BashGua
   }
 
   lines.push("", "Inspect by sequence or event ID prefix:");
-  lines.push(`  bashguard inspect ${sessionSelector} --event ${firstSequence ?? "<sequence>"}`);
-  lines.push(`  bashguard inspect ${sessionSelector} --event ${firstEventId ?? "<event-id-prefix>"}`);
+  lines.push(`  bashguard inspect ${sessionSelector} --event ${firstSelector ?? "<sequence-or-event-id-prefix>"}`);
+  if (firstSelector !== firstEventId) lines.push(`  bashguard inspect ${sessionSelector} --event ${firstEventId ?? "<event-id-prefix>"}`);
+  return `${lines.join("\n")}\n`;
+}
+
+export function formatAttachGuidance(sessionSelector: string, events: BashGuardEvent[], active: boolean): string {
+  const renderedCount = events.map(formatTimelineEvent).filter((line): line is string => line !== undefined).length;
+  const lines = [
+    "",
+    "Timeline status",
+    `- ${renderedCount} narrated event${renderedCount === 1 ? "" : "s"} currently recorded; attach shows all narrated events available at startup.`,
+  ];
+  if (events.length > renderedCount) {
+    lines.push(`- ${events.length - renderedCount} recorded event${events.length - renderedCount === 1 ? " has" : "s have"} no default timeline narration; use inspect for raw event evidence.`);
+  }
+  lines.push(
+    "",
+    "Next options",
+    `  bashguard inspect ${sessionSelector} list events` + "  # list recent inspectable events",
+    `  bashguard inspect ${sessionSelector} --event <sequence-or-event-id-prefix>` + "  # inspect one event",
+    `  bashguard debrief ${sessionSelector}` + "  # summarize the session",
+  );
+  if (active) {
+    lines.push("", "Following live events. Ctrl-C to detach.");
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -476,8 +502,9 @@ async function setupCli(scope: "global" | "local" | undefined): Promise<void> {
 export function findEvent(events: BashGuardEvent[], eventIdOrSequence: string): BashGuardEvent | undefined {
   const sequence = Number(eventIdOrSequence);
   if (Number.isInteger(sequence) && sequence > 0) {
-    const bySequence = events.find((event) => event.sequence === sequence);
-    if (bySequence) return bySequence;
+    const bySequence = events.filter((event) => event.sequence === sequence);
+    if (bySequence.length === 1) return bySequence[0];
+    if (bySequence.length > 1) return undefined;
   }
 
   const exact = events.find((event) => event.id === eventIdOrSequence);
@@ -485,6 +512,11 @@ export function findEvent(events: BashGuardEvent[], eventIdOrSequence: string): 
 
   const prefixMatches = events.filter((event) => event.id.startsWith(eventIdOrSequence));
   return prefixMatches.length === 1 ? prefixMatches[0] : undefined;
+}
+
+function sequenceMatches(events: BashGuardEvent[], selector: string): BashGuardEvent[] {
+  const sequence = Number(selector);
+  return Number.isInteger(sequence) && sequence > 0 ? events.filter((event) => event.sequence === sequence) : [];
 }
 
 function formatField(label: string, value: unknown): string | undefined {
@@ -1236,7 +1268,13 @@ async function inspect(sessionId: string | undefined, eventIdOrSequence: string 
   }
 
   const event = findEvent(events, eventIdOrSequence);
-  if (!event) throw new Error(`Event ${eventIdOrSequence} was not found in session ${session.metadata.sessionId}`);
+  if (!event) {
+    const matches = sequenceMatches(events, eventIdOrSequence);
+    if (matches.length > 1) {
+      throw new Error(`Event sequence ${eventIdOrSequence} is ambiguous (${matches.length} matches). Use an event ID prefix from \`bashguard inspect ${sessionId}\`.`);
+    }
+    throw new Error(`Event ${eventIdOrSequence} was not found in session ${session.metadata.sessionId}`);
+  }
 
   process.stdout.write(formatEventInspection(event));
 }
@@ -1259,13 +1297,13 @@ async function attach(requestedId?: string): Promise<void> {
   if (session.metadata.cwd) process.stdout.write(`Cwd     ${session.metadata.cwd}\n`);
   process.stdout.write("─".repeat(60) + "\n");
 
-  let lastSequence = 0;
   let offset = 0;
   let remainder = "";
+  const seenEventIds = new Set<string>();
 
   const existing = await readExistingEvents(session.eventsFile);
   for (const event of existing) {
-    lastSequence = Math.max(lastSequence, event.sequence);
+    seenEventIds.add(event.id);
     const rendered = formatTimelineEvent(event);
     if (rendered) process.stdout.write(`${rendered}\n`);
   }
@@ -1276,9 +1314,14 @@ async function attach(requestedId?: string): Promise<void> {
     offset = 0;
   }
 
-  if (!session.active) return;
+  const sessionSelector = requestedId ?? session.metadata.sessionId.slice(0, 8);
+  process.stdout.write("─".repeat(60) + "\n");
+  if (!session.active) {
+    process.stdout.write(formatAttachGuidance(sessionSelector, existing, false));
+    return;
+  }
 
-  process.stdout.write("─".repeat(60) + "\nFollowing live events. Ctrl-C to detach.\n");
+  process.stdout.write(formatAttachGuidance(sessionSelector, existing, true));
 
   while (true) {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
@@ -1316,8 +1359,8 @@ async function attach(requestedId?: string): Promise<void> {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as BashGuardEvent;
-        if (event.sequence <= lastSequence) continue;
-        lastSequence = event.sequence;
+        if (seenEventIds.has(event.id)) continue;
+        seenEventIds.add(event.id);
         if (event.type === "session.shutdown") shutdownSeen = true;
         const rendered = formatTimelineEvent(event);
         if (rendered) process.stdout.write(`${rendered}\n`);
@@ -1348,5 +1391,11 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") {
+      process.exit(0);
+    }
+    throw error;
+  });
   void main();
 }

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, findEvent, formatDebrief, formatDoctorReport, formatEventInspection, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, renderEvent } from "./cli.ts";
+import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, findEvent, formatAttachGuidance, formatDebrief, formatDoctorReport, formatEventInspection, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, renderEvent } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -241,6 +241,16 @@ test("buildDebrief calls out missing completion evidence for risky commands", ()
   ]);
 });
 
+test("findEvent refuses ambiguous sequence selectors and preserves event ID lookup", () => {
+  const events = [
+    event(1, "session.started", { id: "evt-first" }),
+    event(1, "session.started", { id: "evt-second" }),
+  ];
+
+  assert.equal(findEvent(events, "1"), undefined);
+  assert.equal(findEvent(events, "evt-second")?.id, "evt-second");
+});
+
 test("findEvent resolves events by id, unique id prefix, or sequence string", () => {
   const events = [event(1, "session.started"), event(2, "tool.requested", { id: "evt-tool-abcdef" })];
 
@@ -257,6 +267,31 @@ test("formatTimelineEvent prefixes rendered events with sequence and event-id pr
   );
 });
 
+test("formatAttachGuidance explains attach output and next CLI actions", () => {
+  const output = formatAttachGuidance("2", [
+    event(1, "session.started"),
+    event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } }),
+    event(3, "message.created"),
+  ], true);
+
+  assert.match(output, /2 narrated events currently recorded/);
+  assert.match(output, /1 recorded event has no default timeline narration/);
+  assert.match(output, /bashguard inspect 2 list events/);
+  assert.match(output, /bashguard inspect 2 --event <sequence-or-event-id-prefix>/);
+  assert.match(output, /bashguard debrief 2/);
+  assert.match(output, /Following live events/);
+});
+
+test("formatInspectableEvents prefers an event ID when the first sequence is ambiguous", () => {
+  const output = formatInspectableEvents("1", [
+    event(1, "session.started", { id: "evt-first-abcdef" }),
+    event(1, "agent.ended", { id: "evt-second-abcdef" }),
+  ]);
+
+  assert.match(output, /bashguard inspect 1 --event evt-firs/);
+  assert.doesNotMatch(output, /bashguard inspect 1 --event 1\n/);
+});
+
 test("formatInspectableEvents lists events and next inspect command when no event is selected", () => {
   const output = formatInspectableEvents("1", [
     event(1, "session.started", { id: "evt-start-abcdef", timestamp: "2026-08-03T12:00:00.000Z" }),
@@ -269,6 +304,12 @@ test("formatInspectableEvents lists events and next inspect command when no even
   assert.match(output, /Inspect by sequence or event ID prefix:/);
   assert.match(output, /bashguard inspect 1 --event 1/);
   assert.match(output, /bashguard inspect 1 --event evt-star/);
+});
+
+test("parseJsonlEvents preserves append order when recorder sequences repeat", () => {
+  const parsed = parseJsonlEvents(`${JSON.stringify(event(1, "session.started", { id: "first" }))}\n${JSON.stringify(event(1, "session.started", { id: "second" }))}\n`);
+
+  assert.deepEqual(parsed.map((item) => item.id), ["first", "second"]);
 });
 
 test("normalizeEvent defaults missing capture metadata for older events", () => {

@@ -11,6 +11,9 @@ All notable project changes will be recorded here.
 
 ### Fixed
 
+- CLI output now exits quietly when a downstream pipe closes instead of printing an `EPIPE` stack trace.
+- Repeated event sequences now preserve JSONL append order; ambiguous sequence selectors explain how to use an event ID prefix.
+- `attach` now explains whether it shows narrated events or raw events requiring `inspect`, and points to the next CLI commands.
 - `bashguard debrief` now labels active sessions as `Session active` instead of always saying `Session complete`.
 
 ## 0.1.0 - 2026-08-04

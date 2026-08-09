@@ -185,6 +185,20 @@ cd your-project
 pi
 ```
 
+### Use BashGuard inside Pi
+
+The package also includes a complementary `bashguard` skill. From the Pi session, you can ask Pi to use BashGuard against the recorded evidence, for example:
+
+```text
+Use BashGuard to tell me what happened in this session.
+Use BashGuard to inspect the failed shell command and explain what evidence is available.
+Use BashGuard to debrief session 1 and list anything worth reviewing.
+```
+
+Pi can use the same local CLI and recorded session store to answer those questions. The answers remain limited to evidence BashGuard recorded; they do not recover older unrecorded sessions or query GitHub/deployment providers live.
+
+### Use BashGuard from a second terminal
+
 In another terminal, list and inspect recorded BashGuard sessions. If the `bashguard` CLI is on your `PATH`, use:
 
 ```bash
@@ -231,6 +245,8 @@ cd your-project
 ```
 
 The global setup runs `npm link` from the BashGuard package checkout. The local setup creates `./.bashguard/bin/bashguard` in the current project.
+
+Start a new Pi session after installing or updating BashGuard; an already-running Pi process keeps the extension and skill version it started with. BashGuard can only record and attach to sessions where the extension was loaded before the session began and is writing to the same `BASHGUARD_DATA_DIR`.
 
 During local development, you can also run the CLI from your BashGuard checkout without linking:
 

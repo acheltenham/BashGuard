@@ -15,6 +15,7 @@ When the BashGuard Pi extension is loaded before a session starts:
 - inspects individual events by sequence or event ID prefix;
 - reports missing, redacted, truncated, and capture-gap evidence;
 - produces active or completed-session debriefs;
+- provides a complementary Pi skill so users can ask Pi to list, inspect, and debrief the recorded evidence from inside a Pi session;
 - shows observation-only risky-command notices;
 - reports observed file-tool activity without inferring create, overwrite, or delete impact;
 - compares session-start and shutdown Git snapshots;
@@ -25,7 +26,7 @@ All narrative output is grounded in recorded local events. BashGuard does not li
 
 ## Important limitations
 
-- BashGuard cannot attach retroactively to older Pi sessions that were not recorded by the extension.
+- BashGuard cannot attach retroactively to older Pi sessions that were not recorded by the extension; the extension and skill must be loaded before the Pi session starts.
 - Capture can be partial because Pi hooks, event fields, output, or storage writes may be unavailable.
 - Git and file correlations are session-level or path-overlap evidence, not proof of causality.
 - Risk notices are non-blocking review notes. BashGuard does not currently approve, block, interrupt, or sandbox commands.

@@ -2,7 +2,7 @@
 
 > The terminal flight recorder for Pi coding sessions.
 
-BashGuard is an open-source, local-first companion for Pi that helps developers understand what their coding agent is doing while it happens, investigate what happened afterward, and recover when something goes wrong.
+BashGuard is an open-source, local-first companion for Pi that helps developers understand what their coding agent is doing while it happens and investigate what happened afterward. It currently provides recovery context from recorded Git evidence; restore workflows are not implemented.
 
 Pi remains the place where the developer talks to the agent. BashGuard becomes the place where the developer understands the execution.
 
@@ -22,11 +22,11 @@ A developer runs Pi in one terminal and BashGuard in another:
 │                              │ 09:42 Running npm test       │
 │                              │ 09:43 Tests failed           │
 │                              │ 09:44 Editing src/auth.ts    │
-│                              │ 09:45 Checkpoint created     │
+│                              │ 09:45 Inspect event 42       │
 └──────────────────────────────┴──────────────────────────────┘
 ```
 
-BashGuard should narrate the session rather than dump raw logs. Safe work stays quiet. Risky actions surface the resolved command, relevant context, reason for interruption, and safer alternatives.
+BashGuard is intended to narrate the session rather than dump raw logs. The current slice records and reports observed activity; risk notices are non-blocking and do not interrupt execution. Resolved-command previews, approval decisions, and safer alternatives remain planned.
 
 ## Current Commands
 
@@ -58,7 +58,7 @@ For the complete current capability list, limitations, recommended wording, and 
 
 Pi already provides an extensible coding harness, local sessions, lifecycle hooks, tool interception, and custom terminal UI. BashGuard builds on those capabilities instead of replacing them.
 
-The missing experience is a clear answer to questions such as:
+The product direction is aimed at answering questions such as:
 
 - What is Pi doing right now?
 - What exact command will execute?
@@ -75,7 +75,7 @@ BashGuard begins as two cooperating TypeScript surfaces:
 1. a Pi extension that captures and evaluates supported execution events;
 2. a local terminal companion that attaches to a Pi session and presents the event stream.
 
-The MVP focuses on:
+The planned MVP direction includes:
 
 - live session narration in a separate terminal
 - session discovery and attachment by Pi session ID
@@ -87,7 +87,7 @@ The MVP focuses on:
 - investigation, replay, and session debriefs
 - honest capture-completeness indicators
 
-The MVP does not require a cloud service, account, hosted dashboard, support for other coding harnesses, or an operating-system sandbox.
+The MVP direction does not require a cloud service, account, hosted dashboard, support for other coding harnesses, or an operating-system sandbox; these are product constraints, not claims that every planned MVP capability is already implemented.
 
 ## Design Principles
 

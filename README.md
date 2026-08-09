@@ -52,7 +52,7 @@ bashguard debrief 1
 
 Planned later commands include richer `open`/TUI and `replay` experiences.
 
-For the complete current capability list, limitations, recommended wording, and bug-reporting guidance, see [`docs/current-state.md`](docs/current-state.md).
+For the complete current capability list, limitations, recommended wording, and bug-reporting guidance, see [`docs/current-state.md`](docs/current-state.md). For license and security boundaries, see [`LICENSE`](LICENSE) and [`SECURITY.md`](SECURITY.md).
 
 ## Why BashGuard
 
@@ -369,6 +369,12 @@ See [Milestone 0 Smoke Checklist](docs/testing/milestone-0-smoke-checklist.md) a
 - [Decision Log](docs/adr/decision-log.md)
 - [Changelog](CHANGELOG.md)
 
+## License and security
+
+BashGuard is available under the [MIT License](LICENSE).
+
+For security limitations and private vulnerability reporting guidance, see [SECURITY.md](SECURITY.md). BashGuard is currently an observation and investigation companion, not an execution guard or security boundary.
+
 ## Working Positioning
 
-> BashGuard is the local terminal companion, flight recorder, and explainable command guard for Pi.
+> BashGuard is the local terminal companion and flight recorder for Pi. An explainable command guard remains planned.

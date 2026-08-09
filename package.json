@@ -2,7 +2,7 @@
   "name": "bashguard",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first observability and safeguards for Pi coding sessions.",
+  "description": "Local-first recording and investigation for Pi coding sessions.",
   "type": "module",
   "bin": {
     "bashguard": "./bin/bashguard"

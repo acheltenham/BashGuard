@@ -6,6 +6,7 @@ All notable project changes will be recorded here.
 
 ### Added
 
+- Added the MIT `LICENSE`, public security boundaries in `SECURITY.md`, and README links for public-repository readiness.
 - README now documents using the bundled BashGuard skill from inside Pi as well as using the CLI from a second terminal.
 - `bashguard debrief` now includes an evidence-based `GitHub activity` section for observed `git push`, `gh pr create`, `gh pr merge`, and `gh run watch/view` commands recorded in the session.
 - `bashguard debrief` now includes provider-neutral `Observed shell activity` entries for recorded BashGuard command/output pairs, without assuming a deployment provider or technology stack.

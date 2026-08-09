@@ -1,9 +1,11 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.4  
-**Last updated:** July 23, 2026
+**Status:** Draft v0.4; Milestone 0 foundation implemented, final validation and Phase 1/2 usability work remain
+**Last updated:** August 9, 2026
 
 ## Milestone 0: Observe a Real Pi Session
+
+The recording, attach, inspect, debrief, capture-completeness, risk-notice, file-activity, Git-snapshot, and provider-neutral shell-activity foundation is implemented. Final manual validation and an explicit decision about the first TUI enhancement remain before calling the milestone complete. See [`docs/current-state.md`](../current-state.md) for public capability and limitation wording.
 
 Goal: build the smallest end-to-end BashGuard experience that can observe a real Pi session from a second terminal.
 
@@ -35,6 +37,8 @@ Exit criteria:
 Implementation reference: [`Milestone 0 plan`](../plans/milestone-0-observe-a-real-pi-session.md).
 
 ## Phase 1: Live Terminal Companion
+
+**Recommended next focus:** improve evidence navigation and live-session usability before adding enforcement or provider-specific interpretation.
 
 Goal: make a running Pi session understandable at a glance.
 

@@ -6,6 +6,8 @@ BashGuard is an open-source, local-first companion for Pi that helps developers 
 
 Pi remains the place where the developer talks to the agent. BashGuard becomes the place where the developer understands the execution.
 
+> **Work in progress:** BashGuard currently provides Milestone 0 session recording and investigation. It is not yet a complete command guard, approval system, sandbox, or recovery tool. See [`docs/current-state.md`](docs/current-state.md) for the authoritative capability and limitation summary.
+
 ## The Experience
 
 A developer runs Pi in one terminal and BashGuard in another:
@@ -49,6 +51,8 @@ bashguard debrief 1
 - `debrief` summarizes an active or completed session with evidence-based review notes, including evidence completeness, Git status before/after when available, observed GitHub activity, observed shell activity, a risk-notice count, non-blocking risky-command notes, correlation confidence for direct path matches, temporal-only risk/Git correlation notes, next inspect commands, and a `File tool activity` section for observed read/edit/write-tool events.
 
 Planned later commands include richer `open`/TUI and `replay` experiences.
+
+For the complete current capability list, limitations, recommended wording, and bug-reporting guidance, see [`docs/current-state.md`](docs/current-state.md).
 
 ## Why BashGuard
 
@@ -104,6 +108,10 @@ The MVP does not require a cloud service, account, hosted dashboard, support for
 BashGuard has a working Milestone 0 foundation: a Pi extension records real sessions into local append-only JSONL, and a separate `bashguard` CLI can discover, attach to, inspect, and debrief those sessions without terminal scraping or a background daemon.
 
 The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, file read/write/edit, shell command, capture-completeness, truncation/redaction, capture-gap evidence, non-blocking risk notices for a small explicit set of risky shell command patterns, file tool activity, and Git status snapshots at session start/shutdown. Risk review notes include event, cwd, command-result evidence, and plain-language risk explanations when available. Debriefs can summarize observed GitHub activity from recorded shell commands, such as `git push`, `gh pr create`, `gh pr merge`, and `gh run watch/view`, without querying GitHub live. They can also show provider-neutral observed shell activity from recorded BashGuard command/output pairs, including commands from arbitrary platforms and technology stacks. The output is evidence, not a claim that a command changed remote state. File activity is reported as observed Pi tool activity rather than inferred create/overwrite/delete impact. Git status snapshots report branch, worktree path, working-tree state, and changed-file details before/after the session, including status, line counts, changed line ranges, and any observed matching file-tool event by path. Direct path matches include a correlation confidence label. When risky shell commands occur before the shutdown Git snapshot that shows changed paths, debriefs can add a temporal-only correlation note. Debriefs also collect follow-up `bashguard inspect` commands for the most relevant recorded events. These notes do not claim causality or attribute exact Git diffs to individual events. Remaining work is focused on final manual validation, richer terminal UX, pre-execution command-resolution/risk previews, and deeper file/Git impact correlation.
+
+## Reporting bugs
+
+Please [open a bug report](https://github.com/acheltenham/BashGuard/issues/new?template=bug_report.md) with BashGuard/Pi versions, reproduction steps, expected and actual output, and sanitized `bashguard doctor` or `bashguard inspect` evidence. Do not attach raw session JSONL containing secrets or private content. BashGuard is work in progress, so reports about missing capture, incorrect narration, unclear limitations, and documentation inaccuracies are welcome.
 
 ## Installation and Usage
 

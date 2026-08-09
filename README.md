@@ -2,9 +2,11 @@
 
 > The terminal flight recorder for Pi coding sessions.
 
-BashGuard is an open-source, local-first companion for Pi that helps developers understand what their coding agent is doing while it happens, investigate what happened afterward, and recover when something goes wrong.
+BashGuard is an open-source, local-first companion for Pi that helps developers understand what their coding agent is doing while it happens and investigate what happened afterward. It currently provides recovery context from recorded Git evidence; restore workflows are not implemented.
 
 Pi remains the place where the developer talks to the agent. BashGuard becomes the place where the developer understands the execution.
+
+> **Work in progress:** BashGuard currently provides Milestone 0 session recording and investigation. It is not yet a complete command guard, approval system, sandbox, or recovery tool. See [`docs/current-state.md`](docs/current-state.md) for the authoritative capability and limitation summary.
 
 ## The Experience
 
@@ -20,11 +22,11 @@ A developer runs Pi in one terminal and BashGuard in another:
 │                              │ 09:42 Running npm test       │
 │                              │ 09:43 Tests failed           │
 │                              │ 09:44 Editing src/auth.ts    │
-│                              │ 09:45 Checkpoint created     │
+│                              │ 09:45 Inspect event 42       │
 └──────────────────────────────┴──────────────────────────────┘
 ```
 
-BashGuard should narrate the session rather than dump raw logs. Safe work stays quiet. Risky actions surface the resolved command, relevant context, reason for interruption, and safer alternatives.
+BashGuard is intended to narrate the session rather than dump raw logs. The current slice records and reports observed activity; risk notices are non-blocking and do not interrupt execution. Resolved-command previews, approval decisions, and safer alternatives remain planned.
 
 ## Current Commands
 
@@ -50,11 +52,13 @@ bashguard debrief 1
 
 Planned later commands include richer `open`/TUI and `replay` experiences.
 
+For the complete current capability list, limitations, recommended wording, and bug-reporting guidance, see [`docs/current-state.md`](docs/current-state.md).
+
 ## Why BashGuard
 
 Pi already provides an extensible coding harness, local sessions, lifecycle hooks, tool interception, and custom terminal UI. BashGuard builds on those capabilities instead of replacing them.
 
-The missing experience is a clear answer to questions such as:
+The product direction is aimed at answering questions such as:
 
 - What is Pi doing right now?
 - What exact command will execute?
@@ -71,7 +75,7 @@ BashGuard begins as two cooperating TypeScript surfaces:
 1. a Pi extension that captures and evaluates supported execution events;
 2. a local terminal companion that attaches to a Pi session and presents the event stream.
 
-The MVP focuses on:
+The planned MVP direction includes:
 
 - live session narration in a separate terminal
 - session discovery and attachment by Pi session ID
@@ -83,7 +87,7 @@ The MVP focuses on:
 - investigation, replay, and session debriefs
 - honest capture-completeness indicators
 
-The MVP does not require a cloud service, account, hosted dashboard, support for other coding harnesses, or an operating-system sandbox.
+The MVP direction does not require a cloud service, account, hosted dashboard, support for other coding harnesses, or an operating-system sandbox; these are product constraints, not claims that every planned MVP capability is already implemented.
 
 ## Design Principles
 
@@ -104,6 +108,10 @@ The MVP does not require a cloud service, account, hosted dashboard, support for
 BashGuard has a working Milestone 0 foundation: a Pi extension records real sessions into local append-only JSONL, and a separate `bashguard` CLI can discover, attach to, inspect, and debrief those sessions without terminal scraping or a background daemon.
 
 The current slice records Pi lifecycle, prompt, message, turn, tool, user-bash, file read/write/edit, shell command, capture-completeness, truncation/redaction, capture-gap evidence, non-blocking risk notices for a small explicit set of risky shell command patterns, file tool activity, and Git status snapshots at session start/shutdown. Risk review notes include event, cwd, command-result evidence, and plain-language risk explanations when available. Debriefs can summarize observed GitHub activity from recorded shell commands, such as `git push`, `gh pr create`, `gh pr merge`, and `gh run watch/view`, without querying GitHub live. They can also show provider-neutral observed shell activity from recorded BashGuard command/output pairs, including commands from arbitrary platforms and technology stacks. The output is evidence, not a claim that a command changed remote state. File activity is reported as observed Pi tool activity rather than inferred create/overwrite/delete impact. Git status snapshots report branch, worktree path, working-tree state, and changed-file details before/after the session, including status, line counts, changed line ranges, and any observed matching file-tool event by path. Direct path matches include a correlation confidence label. When risky shell commands occur before the shutdown Git snapshot that shows changed paths, debriefs can add a temporal-only correlation note. Debriefs also collect follow-up `bashguard inspect` commands for the most relevant recorded events. These notes do not claim causality or attribute exact Git diffs to individual events. Remaining work is focused on final manual validation, richer terminal UX, pre-execution command-resolution/risk previews, and deeper file/Git impact correlation.
+
+## Reporting bugs
+
+Please [open a bug report](https://github.com/acheltenham/BashGuard/issues/new?template=bug_report.md) with BashGuard/Pi versions, reproduction steps, expected and actual output, and sanitized `bashguard doctor` or `bashguard inspect` evidence. Do not attach raw session JSONL containing secrets or private content. BashGuard is work in progress, so reports about missing capture, incorrect narration, unclear limitations, and documentation inaccuracies are welcome.
 
 ## Installation and Usage
 

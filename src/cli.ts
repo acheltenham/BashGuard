@@ -281,12 +281,13 @@ async function readExistingEvents(eventsFile: string): Promise<BashGuardEvent[]>
 async function readAttachSnapshot(eventsFile: string): Promise<{ events: BashGuardEvent[]; offset: number; remainder: string }> {
   try {
     const bytes = await readFile(eventsFile);
-    const text = bytes.toString("utf8");
-    const finalNewline = text.lastIndexOf("\n");
+    const finalNewline = bytes.lastIndexOf(0x0a);
+    const completeByteLength = finalNewline + 1;
+    const completeText = bytes.subarray(0, completeByteLength).toString("utf8");
     return {
-      events: parseJsonlEvents(text),
-      offset: bytes.length,
-      remainder: text.endsWith("\n") ? "" : text.slice(finalNewline + 1),
+      events: parseJsonlEvents(completeText),
+      offset: completeByteLength,
+      remainder: "",
     };
   } catch {
     return { events: [], offset: 0, remainder: "" };

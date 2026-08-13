@@ -28,10 +28,11 @@ test("attach completes an event whose JSONL line was partial at the startup boun
   const eventsFile = join(directory, "events.jsonl");
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "session.json"), `${JSON.stringify({ schemaVersion: 1, sessionId, processId: process.pid })}\n`);
-  const complete = `${JSON.stringify(event(1, "start001", "session.started"))}\n`;
-  const liveLine = JSON.stringify(event(2, "livepart", "bash.user_requested", { command: "echo boundary-event" }));
-  const splitAt = Math.floor(liveLine.length / 2);
-  await writeFile(eventsFile, complete + liveLine.slice(0, splitAt));
+  const complete = Buffer.from(`${JSON.stringify(event(1, "start001", "session.started"))}\n`);
+  const liveLine = Buffer.from(JSON.stringify(event(2, "livepart", "bash.user_requested", { command: "echo café-boundary" })));
+  const multibyteStart = liveLine.indexOf(Buffer.from("é"));
+  const splitAt = multibyteStart + 1;
+  await writeFile(eventsFile, Buffer.concat([complete, liveLine.subarray(0, splitAt)]));
 
   const child = spawn(process.execPath, ["--experimental-strip-types", "src/cli.ts", "attach", sessionId, "--history", "0"], {
     cwd: process.cwd(),
@@ -48,9 +49,13 @@ test("attach completes an event whose JSONL line was partial at the startup boun
   }
   assert.match(stdout, /Following live events/);
 
-  await appendFile(eventsFile, `${liveLine.slice(splitAt)}\n${JSON.stringify(event(3, "shutdown", "session.shutdown"))}\n`);
+  await appendFile(eventsFile, Buffer.concat([
+    liveLine.subarray(splitAt),
+    Buffer.from(`\n${JSON.stringify(event(3, "shutdown", "session.shutdown"))}\n`),
+  ]));
   await new Promise<void>((resolve, reject) => child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`attach exited ${code}: ${stderr}`))));
-  assert.match(stdout, /boundary-event/);
+  assert.match(stdout, /café-boundary/);
+  assert.doesNotMatch(stdout, /�/);
   assert.match(stdout, /Pi session ended/);
 });
 

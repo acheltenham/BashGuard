@@ -4,6 +4,10 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
+### Fixed
+
+- Git package dependency reconciliation no longer requires Pi `0.84.1`; BashGuard develops and type-checks against the compatible `0.84.0` baseline while retaining a `*` runtime peer dependency.
+
 ### Added
 
 - `bashguard attach` now starts with an evidence-grounded session/activity/capture/freshness snapshot.

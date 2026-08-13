@@ -164,38 +164,48 @@ test("piped selector-less commands fail without prompting and print stable copya
   assert.notEqual(attach.status, 0);
   assert.doesNotMatch(output, /Select a session|completed-middle/);
   assert.match(output, /^1\s+active\s+/m);
-  assert.match(output, /^3\s+active\s+/m);
+  assert.match(output, /^2\s+active\s+/m);
   assert.match(output, /bashguard attach 1/);
-  assert.match(output, /bashguard attach 3/);
-  assert.doesNotMatch(output, /^2\s+active\s+/m);
+  assert.match(output, /bashguard attach 2/);
+  assert.doesNotMatch(output, /^3\s+active\s+/m);
 });
 
-test("global session order and numeric command selectors stay newest-first across active states", async (t) => {
+test("global session order is active-first and newest-first within each state", async (t) => {
   const now = Date.now();
+  const orderedSessions = [
+    { selector: 1, id: "newer-active-019fc921", command: "echo newer-active" },
+    { selector: 2, id: "older-active-019fc922", command: "echo older-active" },
+    { selector: 3, id: "newer-completed-019fc920", command: "echo newer-completed" },
+    { selector: 4, id: "older-completed-019fc923", command: "echo older-completed" },
+  ] as const;
   const root = await store(t, [
-    { id: "newest-completed-019fc920", modifiedAt: now, command: "echo newest-completed" },
-    { id: "middle-active-019fc921", active: true, modifiedAt: now - 1_000, command: "echo middle-active" },
-    { id: "oldest-completed-019fc922", modifiedAt: now - 2_000, command: "echo oldest-completed" },
+    { id: orderedSessions[2].id, modifiedAt: now, command: orderedSessions[2].command },
+    { id: orderedSessions[0].id, active: true, modifiedAt: now - 1_000, command: orderedSessions[0].command },
+    { id: orderedSessions[1].id, active: true, modifiedAt: now - 2_000, command: orderedSessions[1].command },
+    { id: orderedSessions[3].id, modifiedAt: now - 3_000, command: orderedSessions[3].command },
   ]);
 
   const sessions = run(root, ["sessions"]);
   assert.equal(sessions.status, 0, sessions.stderr);
-  assert.match(sessions.stdout, /^1\s+complete\s+newest-c/m);
-  assert.match(sessions.stdout, /^2\s+active\s+middle-a/m);
-  assert.match(sessions.stdout, /^3\s+complete\s+oldest-c/m);
+  assert.match(sessions.stdout, /^1\s+active\s+newer-ac/m);
+  assert.match(sessions.stdout, /^2\s+active\s+older-ac/m);
+  assert.match(sessions.stdout, /^3\s+complete\s+newer-co/m);
+  assert.match(sessions.stdout, /^4\s+complete\s+older-co/m);
 
-  const inspect = run(root, ["inspect", "1"]);
-  assert.equal(inspect.status, 0, inspect.stderr);
-  assert.match(inspect.stdout, /newest-completed/);
+  for (const expected of orderedSessions) {
+    const inspect = run(root, ["inspect", String(expected.selector)]);
+    assert.equal(inspect.status, 0, inspect.stderr);
+    assert.match(inspect.stdout, new RegExp(expected.command));
+  }
 
-  const debrief = run(root, ["debrief", "1"]);
-  assert.equal(debrief.status, 0, debrief.stderr);
-  assert.match(debrief.stdout, /bashguard inspect 1 --event/);
-
-  const attach = run(root, ["attach", "1", "--history", "0"]);
-  assert.equal(attach.status, 0, attach.stderr);
-  assert.match(attach.stdout, /Session newest-completed-019fc920/);
-  assert.match(attach.stdout, /bashguard inspect 1 --event/);
+  const attach = run(root, ["attach"]);
+  const output = combined(attach);
+  assert.notEqual(attach.status, 0);
+  assert.match(output, /^1\s+active\s+newer-ac/m);
+  assert.match(output, /^2\s+active\s+older-ac/m);
+  assert.match(output, /bashguard attach 1/);
+  assert.match(output, /bashguard attach 2/);
+  assert.doesNotMatch(output, /^3\s+|^4\s+|newer-completed|older-completed/m);
 });
 
 test("explicit numeric selectors bypass selection for attach, inspect, and debrief", async (t) => {

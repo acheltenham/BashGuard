@@ -371,7 +371,7 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
 
   return sessions
     .filter((session): session is SessionSummary => Boolean(session))
-    .sort((a, b) => b.modifiedAt - a.modifiedAt);
+    .sort((a, b) => Number(b.active) - Number(a.active) || b.modifiedAt - a.modifiedAt);
 }
 
 export function indexSessionChoices(sessions: SessionSummary[]): SessionChoice[] {

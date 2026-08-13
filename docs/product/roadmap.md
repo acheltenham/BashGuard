@@ -1,6 +1,6 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.4; Milestone 0 complete, Phase 1 live-companion work next
+**Status:** Draft v0.4; Milestone 0 complete, Phase 1 live-companion work in progress
 **Last updated:** August 13, 2026
 
 ## Milestone 0: Observe a Real Pi Session

@@ -73,12 +73,15 @@ cd your-project
 pi -e git:github.com/acheltenham/BashGuard@main
 ```
 
-Global/user install:
+Global/user install and reconciliation:
 
 ```bash
 pi install git:github.com/acheltenham/BashGuard@main
 pi list
+pi update git:github.com/acheltenham/BashGuard
 ```
+
+For a release tag, also verify an existing isolated install can be moved with `pi install git:github.com/acheltenham/BashGuard@<tag>` and that a clean `npm ci` does not require an unpublished Pi development dependency.
 
 Project-local install:
 

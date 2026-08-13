@@ -32,7 +32,7 @@ Capture is summarized from recorded `capture.gap` events and event-level missing
 
 Long or multiline activity is compacted to one bounded status line; inspect/JSONL retains the fuller recorded evidence subject to original capture limits.
 
-The snapshot is calculated when attach starts. This first Phase 1 slice does not redraw the block while new events arrive; the timeline remains the live-updating surface.
+The snapshot is calculated when attach starts. This first Phase 1 slice does not redraw the block while new events arrive; the timeline remains the live-updating surface. Attach drains final recorded appends and follows a replacement recorder when replacement evidence is visible during shutdown confirmation. An authoritative shutdown otherwise ends attach; a later restart requires running attach again.
 
 ## History options
 

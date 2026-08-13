@@ -66,6 +66,12 @@ test("attach bounds startup history but streams every new narrated event", async
   };
 
   await waitFor("Following live events");
+  assert.match(stdout, /Live status/);
+  assert.match(stdout, /State\s+active/);
+  assert.match(stdout, /Last activity\s+You ran · echo historical-four/);
+  assert.match(stdout, /Evidence\s+recorded event/);
+  assert.match(stdout, /Capture\s+No recorded capture limitations/);
+  assert.match(stdout, /Events\s+6/);
   assert.doesNotMatch(stdout, /historical-one|historical-two/);
   assert.match(stdout, /historical-three/);
   assert.match(stdout, /historical-four/);

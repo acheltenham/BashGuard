@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, selectAttachHistory } from "./cli.ts";
+import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, selectAttachHistory } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -34,6 +34,19 @@ test("parseJsonlEvents skips malformed complete lines and incomplete final lines
 
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0]?.sequence, 2);
+});
+
+test("discoverSessions treats a restart after an older shutdown as active when the current pid is alive", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "session-a", [
+    event(1, "session.started", { id: "old-start" }),
+    event(2, "session.shutdown", { id: "old-shutdown" }),
+    event(1, "session.started", { id: "new-start" }),
+  ], process.pid);
+
+  const sessions = await discoverSessions(root);
+
+  assert.equal(sessions[0]?.active, true);
 });
 
 test("discoverSessions marks sessions with shutdown events complete even if the pid appears alive", async () => {
@@ -389,6 +402,109 @@ test("formatTimelineEvent prefixes rendered events with sequence and event-id pr
     formatTimelineEvent(event(17, "tool.requested", { id: "msdmhl3r-7cifg5sy", timestamp: "2026-08-03T12:00:00.000Z", toolName: "edit", payload: { input: { path: "sample.txt" } } })),
     "17  msdmhl3r  08:00:00  Editing · sample.txt",
   );
+});
+
+test("buildAttachStatus ignores unmatched requests from before the latest recorded restart", () => {
+  const status = buildAttachStatus([
+    event(1, "session.started", { id: "old-start" }),
+    event(2, "tool.requested", { id: "old-request", toolName: "bash", toolCallId: "old-call", payload: { toolCallId: "old-call", input: { command: "old command" } } }),
+    event(3, "session.shutdown", { id: "old-shutdown" }),
+    event(1, "session.started", { id: "new-start" }),
+  ], true);
+
+  assert.equal(status.activityLabel, "Last activity");
+  assert.equal(status.activity, "Pi session started");
+  assert.equal(status.eventCount, 4);
+});
+
+test("buildAttachStatus reports only correlated unmatched tool requests as current", () => {
+  const now = Date.parse("2026-08-13T12:00:10.000Z");
+  const status = buildAttachStatus([
+    event(1, "session.started", { timestamp: "2026-08-13T12:00:00.000Z" }),
+    event(2, "tool.requested", { id: "request-1", timestamp: "2026-08-13T12:00:02.000Z", toolName: "bash", toolCallId: "call-1", payload: { toolCallId: "call-1", input: { command: "npm test" } } }),
+  ], true, now);
+
+  assert.deepEqual(status, {
+    state: "active",
+    activityLabel: "Current activity",
+    activity: "Running · npm test",
+    evidence: "request recorded; completion not recorded yet",
+    capture: "No recorded capture limitations",
+    eventCount: 2,
+    lastObserved: "8s ago",
+  });
+});
+
+test("buildAttachStatus uses append-order completion correlation and falls back to last activity", () => {
+  const now = Date.parse("2026-08-13T12:00:10.000Z");
+  const status = buildAttachStatus([
+    event(1, "tool.completed", { timestamp: "2026-08-13T12:00:01.000Z", toolName: "read", toolCallId: "reused", payload: { toolCallId: "reused" } }),
+    event(2, "tool.requested", { timestamp: "2026-08-13T12:00:02.000Z", toolName: "read", toolCallId: "reused", payload: { toolCallId: "reused", input: { path: "README.md" } } }),
+    event(3, "tool.completed", { timestamp: "2026-08-13T12:00:03.000Z", toolName: "read", toolCallId: "reused", payload: { toolCallId: "reused" } }),
+  ], true, now);
+
+  assert.equal(status.activityLabel, "Last activity");
+  assert.equal(status.activity, "read complete");
+  assert.equal(status.evidence, "recorded event");
+  assert.equal(status.lastObserved, "7s ago");
+});
+
+test("buildAttachStatus ignores narrated events appended after completed-session shutdown", () => {
+  const status = buildAttachStatus([
+    event(1, "session.started"),
+    event(2, "session.shutdown"),
+    event(3, "tool.requested", { toolName: "bash", toolCallId: "late-call", payload: { toolCallId: "late-call", input: { command: "late command" } } }),
+  ], false);
+
+  assert.equal(status.activityLabel, "Last activity");
+  assert.equal(status.activity, "Pi session ended");
+  assert.equal(status.eventCount, 3);
+});
+
+test("buildAttachStatus summarizes partial capture and does not claim current activity for completed sessions", () => {
+  const status = buildAttachStatus([
+    event(1, "tool.requested", { timestamp: "invalid", toolName: "edit", toolCallId: "call-edit", payload: { toolCallId: "call-edit", input: { path: "README.md" } } }),
+    event(2, "capture.gap", { capture: { missing: ["event:tool.completed"], redacted: [], truncated: [] } }),
+    event(3, "message.ended", { capture: { missing: ["turnId"], redacted: ["payload.token"], truncated: ["payload.content"] } }),
+    event(4, "session.shutdown", { timestamp: "invalid" }),
+  ], false, Date.parse("2026-08-13T12:00:10.000Z"));
+
+  assert.equal(status.state, "complete");
+  assert.equal(status.activityLabel, "Last activity");
+  assert.equal(status.activity, "Pi session ended");
+  assert.equal(status.capture, "Partial · 1 capture gap · 1 event with missing fields · 1 redacted event · 1 truncated event");
+  assert.equal(status.lastObserved, "unknown");
+});
+
+test("formatAttachStatus renders an aligned status block for empty sessions", () => {
+  const output = formatAttachStatus(buildAttachStatus([], true, Date.now()));
+  assert.match(output, /^Live status/m);
+  assert.match(output, /State\s+active/);
+  assert.match(output, /Last activity\s+No narrated activity recorded/);
+  assert.match(output, /Evidence\s+no narrated event evidence/);
+  assert.match(output, /Capture\s+No capture metadata recorded/);
+  assert.match(output, /Events\s+0/);
+  assert.match(output, /Last observed\s+unknown/);
+});
+
+test("formatAttachStatus compacts multiline activity", () => {
+  const output = formatAttachStatus({
+    state: "active",
+    activityLabel: "Current activity",
+    activity: `Running · npm test\necho done\n${"x".repeat(300)}`,
+    evidence: "request recorded; completion not recorded yet",
+    capture: "No recorded capture limitations",
+    eventCount: 2,
+    lastObserved: "1s ago",
+  });
+  assert.doesNotMatch(output, /\necho done/);
+  assert.match(output, /Current activity\s+Running · npm test echo done x+…/);
+});
+
+test("formatAttachStatus labels completed sessions as session status", () => {
+  const output = formatAttachStatus(buildAttachStatus([event(1, "session.shutdown")], false));
+  assert.match(output, /^Session status/m);
+  assert.doesNotMatch(output, /^Live status/m);
 });
 
 test("selectAttachHistory bounds only narrated startup events and preserves all event IDs", () => {

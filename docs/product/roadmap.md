@@ -38,11 +38,12 @@ Implementation reference: [`Milestone 0 plan`](../plans/milestone-0-observe-a-re
 
 ## Phase 1: Live Terminal Companion
 
-**Current focus:** improve live-session usability and terminal presentation before adding enforcement or provider-specific interpretation. Deterministic evidence filtering and JSONL export shipped during Milestone 0; bounded startup history with unlimited live follow is the first Phase 1 slice.
+**Current focus:** improve live-session usability and terminal presentation before adding enforcement or provider-specific interpretation. Deterministic evidence filtering and JSONL export shipped during Milestone 0; bounded startup history and a grounded attach status snapshot are the first Phase 1 slices.
 
 Goal: make a running Pi session understandable at a glance.
 
 - bound attach startup history while preserving complete live follow and inspect/JSONL evidence;
+- show an evidence-grounded startup snapshot for session state, correlated current/last activity, capture state, event count, and freshness;
 - refine the CLI and TUI architecture from Milestone 0 usage;
 - improve active-session selection;
 - add split-pane timeline and event detail views;

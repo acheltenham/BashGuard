@@ -36,6 +36,11 @@ Default layout:
 Header
   Session · repository · branch · elapsed time · connection state
 
+Status snapshot
+  current activity only from an unmatched correlated tool request
+  otherwise latest narrated activity
+  evidence wording · capture state · event count · freshness
+
 Narrative stream
   grouped meaningful events in chronological order
 
@@ -45,6 +50,8 @@ Current activity
 Footer
   commands · files · warnings · checkpoints · capture completeness
 ```
+
+The initial status snapshot is deterministic and evidence-grounded. It must not infer execution from recency alone: current activity requires a recorded tool request without a later matching completion, and the UI must say completion is not recorded yet. The first slice is a startup snapshot; continuous status redraw remains later Phase 1 work.
 
 Live Mode should avoid raw payloads, noisy lifecycle events, full-history terminal floods, and continuously scrolling command output. Users can request a custom startup history, no startup history, or explicit full history; complete evidence remains available through inspect and JSONL export.
 

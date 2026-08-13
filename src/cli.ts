@@ -278,8 +278,9 @@ async function readExistingEvents(eventsFile: string): Promise<BashGuardEvent[]>
   }
 }
 
-function sessionHasShutdown(events: BashGuardEvent[]): boolean {
-  return events.some((event) => event.type === "session.shutdown");
+function latestSessionLifecycleIsShutdown(events: BashGuardEvent[]): boolean {
+  const latestLifecycle = [...events].reverse().find((event) => event.type === "session.started" || event.type === "session.shutdown");
+  return latestLifecycle?.type === "session.shutdown";
 }
 
 export async function discoverSessions(root = getDataRoot()): Promise<SessionSummary[]> {
@@ -300,7 +301,7 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
     try {
       const info = await stat(eventsFile);
       const events = await readExistingEvents(eventsFile);
-      const shutdownRecorded = sessionHasShutdown(events);
+      const shutdownRecorded = latestSessionLifecycleIsShutdown(events);
       return {
         metadata,
         directory,
@@ -584,6 +585,88 @@ export function formatInspectableEvents(sessionSelector: string, events: BashGua
   lines.push(`  bashguard inspect ${sessionSelector} --event ${firstSelector ?? "<sequence-or-event-id-prefix>"}`);
   if (firstSelector !== firstEventId) lines.push(`  bashguard inspect ${sessionSelector} --event ${firstEventId ?? "<event-id-prefix>"}`);
   return `${lines.join("\n")}\n`;
+}
+
+export type AttachStatus = {
+  state: "active" | "complete";
+  activityLabel: "Current activity" | "Last activity";
+  activity: string;
+  evidence: string;
+  capture: string;
+  eventCount: number;
+  lastObserved: string;
+};
+
+function relativeEventAge(timestamp: string | undefined, now: number): string {
+  if (!timestamp) return "unknown";
+  const observedAt = Date.parse(timestamp);
+  if (!Number.isFinite(observedAt)) return "unknown";
+  const seconds = Math.max(0, Math.round((now - observedAt) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.round(minutes / 60)}h ago`;
+}
+
+function formatCaptureIssue(count: number, singular: string, plural = `${singular}s`): string | undefined {
+  return count > 0 ? `${count} ${count === 1 ? singular : plural}` : undefined;
+}
+
+export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now = Date.now()): AttachStatus {
+  const normalized = events.map(normalizeEvent);
+  const latestStartIndex = normalized.findLastIndex((event) => event.type === "session.started");
+  const currentSessionTail = latestStartIndex >= 0 ? normalized.slice(latestStartIndex) : normalized;
+  const latestShutdownIndex = currentSessionTail.findLastIndex((event) => event.type === "session.shutdown");
+  const currentSessionEvents = !active && latestShutdownIndex >= 0 ? currentSessionTail.slice(0, latestShutdownIndex + 1) : currentSessionTail;
+  const outstanding = new Map<string, BashGuardEvent>();
+  for (const event of currentSessionEvents) {
+    const toolCallId = toolCallIdFor(event);
+    if (!toolCallId) continue;
+    if (event.type === "tool.requested") outstanding.set(toolCallId, event);
+    if (event.type === "tool.completed") outstanding.delete(toolCallId);
+  }
+
+  const currentRequest = active ? Array.from(outstanding.values()).at(-1) : undefined;
+  const lastNarrated = [...currentSessionEvents].reverse().find((event) => renderEvent(event) !== undefined);
+  const activityEvent = currentRequest ?? lastNarrated;
+  const captureGaps = normalized.filter((event) => event.type === "capture.gap").length;
+  const nonGapEvents = normalized.filter((event) => event.type !== "capture.gap");
+  const missingEvents = nonGapEvents.filter((event) => (event.capture?.missing.length ?? 0) > 0).length;
+  const redactedEvents = nonGapEvents.filter((event) => (event.capture?.redacted.length ?? 0) > 0).length;
+  const truncatedEvents = nonGapEvents.filter((event) => (event.capture?.truncated.length ?? 0) > 0).length;
+  const captureIssues = [
+    formatCaptureIssue(captureGaps, "capture gap"),
+    formatCaptureIssue(missingEvents, "event with missing fields", "events with missing fields"),
+    formatCaptureIssue(redactedEvents, "redacted event"),
+    formatCaptureIssue(truncatedEvents, "truncated event"),
+  ].filter((item): item is string => Boolean(item));
+
+  return {
+    state: active ? "active" : "complete",
+    activityLabel: currentRequest ? "Current activity" : "Last activity",
+    activity: activityEvent ? renderEvent(activityEvent) ?? activityEvent.type : "No narrated activity recorded",
+    evidence: currentRequest ? "request recorded; completion not recorded yet" : activityEvent ? "recorded event" : "no narrated event evidence",
+    capture: normalized.length === 0 ? "No capture metadata recorded" : captureIssues.length > 0 ? `Partial · ${captureIssues.join(" · ")}` : "No recorded capture limitations",
+    eventCount: normalized.length,
+    lastObserved: relativeEventAge(normalized.at(-1)?.timestamp, now),
+  };
+}
+
+function compactStatusValue(value: string): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > 180 ? `${compact.slice(0, 179)}…` : compact;
+}
+
+export function formatAttachStatus(status: AttachStatus): string {
+  return `${[
+    status.state === "active" ? "Live status" : "Session status",
+    formatField("State", status.state),
+    formatField(status.activityLabel, compactStatusValue(status.activity)),
+    formatField("Evidence", status.evidence),
+    formatField("Capture", status.capture),
+    formatField("Events", status.eventCount),
+    formatField("Last observed", status.lastObserved),
+  ].filter((line): line is string => Boolean(line)).join("\n")}\n`;
 }
 
 export type AttachHistorySelection = {
@@ -1500,6 +1583,8 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
   const existing = await readExistingEvents(session.eventsFile);
   const historySelection = selectAttachHistory(existing, history, options.allHistory ?? false);
   const seenEventIds = historySelection.seenEventIds;
+  process.stdout.write(formatAttachStatus(buildAttachStatus(existing, session.active)));
+  process.stdout.write("─".repeat(60) + "\n");
   for (const event of historySelection.visible) {
     const rendered = formatTimelineEvent(event);
     if (rendered) process.stdout.write(`${rendered}\n`);

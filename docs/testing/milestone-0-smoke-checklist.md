@@ -174,6 +174,9 @@ Confirm:
 
 Confirm:
 
+- the startup status snapshot shows active/complete state, current or last activity, evidence wording, capture summary, event count, and freshness;
+- `Current activity` appears only for a correlated tool request without a later matching completion and explicitly says completion is not recorded yet;
+- completed sessions use `Last activity` and do not claim current execution;
 - default startup output shows at most the latest 50 narrated historical events and reports the total;
 - `--history N` changes only the startup window;
 - `--history 0` skips historical narration and still follows new events;

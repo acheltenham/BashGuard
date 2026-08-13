@@ -166,8 +166,8 @@ From an actual terminal, run `bashguard attach` without a selector and confirm:
 - invalid numbers retry, while EOF and `Ctrl+C` cancel with concise output and no stack trace;
 - choosing a non-first displayed number attaches to that session;
 - picker numbers match their global positions within the displayed `bashguard sessions` snapshot and are not locally renumbered; eligible active selectors are currently contiguous because discovery orders active sessions first;
-- numbers are stable only within that snapshot and may change after metadata or ordering changes; explicit numeric selection resolves against the current discovery order;
-- prefixes remain globally unique against the full discovery snapshot, including hidden completed sessions, and remain durable when ordering changes;
+- numbers are stable only within that snapshot and may change after metadata or ordering changes; exact IDs take precedence over numeric row numbers, which otherwise resolve against the current discovery order;
+- prefixes remain globally unique against the full discovery snapshot, including hidden completed sessions, and a globally unique prefix or full ID remains durable when ordering changes;
 - this is a structured-text prompt rather than a full-screen TUI.
 
 Exercise non-TTY behavior with multiple eligible sessions:
@@ -178,7 +178,7 @@ bashguard inspect </dev/null >inspect.out 2>&1; test $? -ne 0
 bashguard debrief </dev/null >debrief.out 2>&1; test $? -ne 0
 ```
 
-Confirm none prints `Select a session`; each nonzero error lists only eligible snapshot-local numbers and copyable unique-prefix commands. Change one session's metadata or append a newer event so discovery order changes, then run a previously emitted prefix command and confirm it still selects the originally displayed session. Run explicit numeric, exact-ID, and unique-prefix forms and confirm each bypasses the picker, including through a pipe or redirection; numeric selection uses current discovery order. Automation that allocates a PTY is interactive by contract, so confirm it passes an explicit selector rather than expecting non-TTY behavior or a prompt timeout. Use explicit selectors for all automation. Also confirm `bashguard inspect --activity not-real`, `bashguard inspect --event`, `bashguard inspect --event --all`, and a missing `--session` value fail before any selection prompt.
+Confirm none prints `Select a session`; each nonzero error lists only eligible snapshot-local numbers and copyable globally unique prefix/full-ID commands. Change one session's metadata or append a newer event so discovery order changes, then run a previously emitted command and confirm it still selects the originally displayed session. Also create a second-row session whose full ID is `1`; confirm its emitted `bashguard inspect 1` remediation selects that session rather than row 1. Run explicit numeric, exact-ID, and unique-prefix forms and confirm each bypasses the picker, including through a pipe or redirection; exact IDs win, then valid numeric indexes, then unique prefixes. Automation that allocates a PTY is interactive by contract, so confirm it passes an explicit selector rather than expecting non-TTY behavior or a prompt timeout. Use explicit selectors for all automation. Also confirm `bashguard inspect --activity not-real`, `bashguard inspect --event`, `bashguard inspect --event --all`, and a missing `--session` value fail before any selection prompt.
 
 ### `bashguard doctor`
 

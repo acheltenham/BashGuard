@@ -164,13 +164,28 @@ test("resolveSessionChoice supports global indexes, exact IDs, and unique prefix
   assert.equal(resolveSessionChoice("missing", choices), undefined);
 });
 
+test("resolveSessionChoice prefers an exact numeric ID before a row index", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("other-session", false),
+    sessionSummary("1", false),
+    sessionSummary("2-prefix-target", false),
+    sessionSummary("1-prefix-target", false),
+  ]);
+
+  assert.equal(resolveSessionChoice("1", choices)?.session.metadata.sessionId, "1");
+  assert.equal(resolveSessionChoice("2", choices)?.session.metadata.sessionId, "1");
+});
+
 test("resolveSessionChoice rejects ambiguous prefixes", () => {
   const choices = indexSessionChoices([
     sessionSummary("active-alpha", true),
     sessionSummary("active-beta", true),
+    sessionSummary("99-alpha", false),
+    sessionSummary("99-beta", false),
   ]);
 
   assert.throws(() => resolveSessionChoice("active-", choices), /Session prefix active- is ambiguous/);
+  assert.throws(() => resolveSessionChoice("99", choices), /Session prefix 99 is ambiguous/);
 });
 
 test("resolveSessionChoice handles invalid numeric indexes and numeric-looking IDs", () => {

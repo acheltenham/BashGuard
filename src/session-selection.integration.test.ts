@@ -265,6 +265,25 @@ test("explicit ID prefixes still resolve without interaction", async (t) => {
   }
 });
 
+test("non-TTY remediation for a numeric session ID selects that displayed session", async (t) => {
+  const now = Date.now();
+  const root = await store(t, [
+    { id: "other-session", modifiedAt: now, command: "echo wrong-index-session" },
+    { id: "1", modifiedAt: now - 1_000, command: "echo numeric-id-target" },
+  ]);
+
+  const ambiguity = run(root, ["inspect"]);
+  const output = combined(ambiguity);
+  assert.notEqual(ambiguity.status, 0);
+  assert.match(output, /^2\s+complete\s+1\s+/m);
+  assert.match(output, /bashguard inspect 1(?:\s|$)/);
+
+  const remediated = run(root, ["inspect", "1"]);
+  assert.equal(remediated.status, 0, remediated.stderr);
+  assert.match(remediated.stdout, /numeric-id-target/);
+  assert.doesNotMatch(remediated.stdout, /wrong-index-session/);
+});
+
 test("non-TTY remediation prefix survives discovery reordering", async (t) => {
   const now = Date.now();
   const targetId = "durable-target-session";

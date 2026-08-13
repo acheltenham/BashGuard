@@ -63,8 +63,8 @@ Confirm:
 - `doctor` reports CLI path, package root, data dir, Pi package status, and next steps;
 - `sessions` output includes `#`, `SESSION`, `NAME`, `REPOSITORY`, and `UPDATED`;
 - with two simultaneous active sessions in an actual TTY, selector-less attach shows an active-only structured-text picker and accepts a non-first displayed global number; selector-less inspect/debrief show all discovered recorded sessions;
-- selector-less commands auto-select a sole eligible session, while explicit numeric, exact-ID, and unique-prefix selectors bypass the picker; numeric selectors resolve against current discovery order;
-- piped or redirected ambiguous commands never prompt, exit nonzero, and list eligible snapshot-local numbers with durable unique-prefix commands; prefixes remain unique against the full discovery snapshot even when completed rows are hidden, and a copied prefix still selects the displayed session after reordering;
+- selector-less commands auto-select a sole eligible session, while explicit numeric, exact-ID, and unique-prefix selectors bypass the picker; exact IDs take precedence over numeric row numbers, which otherwise resolve against current discovery order;
+- piped or redirected ambiguous commands never prompt, exit nonzero, and list eligible snapshot-local numbers with durable globally unique prefix/full-ID commands; a copied command still selects the displayed session after reordering or when a numeric ID collides with another row number;
 - PTY-allocating automation is treated as interactive and uses an explicit selector to avoid prompting; explicit selectors are used for all automation;
 - Enter has no default, invalid input retries, and EOF/`Ctrl+C` cancels concisely, with no prompt timeout;
 - unknown inspect activity and missing `--session` or `--event` values fail before session selection;

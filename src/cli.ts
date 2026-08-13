@@ -391,14 +391,15 @@ export function eligibleSessionChoices(command: SessionCommand, choices: Session
 }
 
 export function resolveSessionChoice(requestedId: string, choices: SessionChoice[]): SessionChoice | undefined {
+  const exact = choices.find((choice) => choice.session.metadata.sessionId === requestedId);
+  if (exact) return exact;
+
   const index = Number(requestedId);
   if (Number.isInteger(index) && index >= 1) {
     const indexed = choices.find((choice) => choice.selector === index);
     if (indexed) return indexed;
   }
 
-  const exact = choices.find((choice) => choice.session.metadata.sessionId === requestedId);
-  if (exact) return exact;
   const prefixMatches = choices.filter((choice) => choice.session.metadata.sessionId.startsWith(requestedId));
   if (prefixMatches.length === 1) return prefixMatches[0];
   if (prefixMatches.length > 1) throw new Error(`Session prefix ${requestedId} is ambiguous`);

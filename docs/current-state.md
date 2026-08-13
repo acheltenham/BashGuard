@@ -1,6 +1,6 @@
 # BashGuard current state
 
-**Status:** Work in progress / Milestone 0 validated foundation
+**Status:** Work in progress / Milestone 0 complete; Phase 1 next
 
 BashGuard is an early-stage, local-first Pi companion. It is useful for observing and investigating recorded Pi sessions, but it is not yet a complete command guard, approval system, sandbox, recovery system, or security control.
 

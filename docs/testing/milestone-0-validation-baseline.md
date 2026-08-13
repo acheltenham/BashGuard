@@ -222,4 +222,4 @@ The split-pane TUI is **not required for Milestone 0 correctness**. The structur
 
 The split-pane timeline/detail interface, narrow-terminal optimization, richer current-activity footer, and interactive navigation move to **Phase 1: Live Terminal Companion**.
 
-Milestone 0 can be closed after this validation work is merged and the umbrella issue checklist is updated.
+Milestone 0 is complete. Phase 1 live-companion work is tracked separately from this validated foundation.

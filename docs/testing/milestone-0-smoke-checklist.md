@@ -94,6 +94,8 @@ bashguard session list
 bashguard sessions list
 bashguard doctor
 bashguard attach 1
+bashguard attach 1 --history 0
+bashguard attach 1 --all-history
 bashguard inspect 1
 bashguard inspect 1 --event 1
 bashguard inspect 1 --activity shell
@@ -172,9 +174,15 @@ Confirm:
 
 Confirm:
 
+- default startup output shows at most the latest 50 narrated historical events and reports the total;
+- `--history N` changes only the startup window;
+- `--history 0` skips historical narration and still follows new events;
+- `--all-history` shows every narrated historical event;
+- every newly appended narrated event appears regardless of startup limit;
 - the timeline renders meaningful events;
 - sequence numbers and event ID prefixes are visible;
 - shell commands are shown with cwd/session context in the header;
+- complete raw events remain available through inspect/JSONL;
 - non-blocking risk notices are labelled `Non-blocking risk notice` when applicable.
 
 ### `bashguard inspect 1`

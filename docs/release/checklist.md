@@ -49,6 +49,8 @@ If there is at least one recorded session:
 
 ```bash
 ./bin/bashguard attach 1
+./bin/bashguard attach 1 --history 0
+./bin/bashguard attach 1 --all-history
 ./bin/bashguard inspect 1
 ./bin/bashguard debrief 1
 ```
@@ -57,6 +59,7 @@ Confirm:
 
 - `doctor` reports CLI path, package root, data dir, Pi package status, and next steps;
 - `sessions` output includes `#`, `SESSION`, `NAME`, `REPOSITORY`, and `UPDATED`;
+- default `attach 1` bounds narrated startup history, `--history 0` skips it, and `--all-history` restores it;
 - `inspect 1` lists events with sequence and event ID prefix examples;
 - `debrief 1` renders evidence completeness and next inspect commands when applicable.
 

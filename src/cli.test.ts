@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, eligibleSessionChoices, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, indexSessionChoices, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, resolveSessionChoice, selectAttachHistory, selectSessionForCommand, type SessionChoice, type SessionSummary } from "./cli.ts";
+import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, eligibleSessionChoices, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, indexSessionChoices, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, resolveSessionChoice, selectAttachHistory, selectSessionForCommand, selectSessionForCommandResult, type SessionChoice, type SessionSummary } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -406,6 +406,41 @@ test("selectSessionForCommand discovers once and prompts from that snapshot", as
   assert.equal(discoveryCalls, 1);
   assert.deepEqual(promptedIds, ["first-alpha", "first-beta"]);
   assert.equal(selected, firstSnapshot[1]);
+});
+
+for (const command of ["inspect", "debrief", "attach"] as const) {
+  test(`selector-less ${command} derives its shortest unique session prefix from one snapshot`, async () => {
+    const snapshot = [
+      sessionSummary("019fc93a-1111-aaaa", command === "attach"),
+      sessionSummary("019fc93a-2222-bbbb", command === "attach"),
+    ];
+    let discoveryCalls = 0;
+
+    const result = await selectSessionForCommandResult(command, undefined, {
+      ...selectionStreams(true, true),
+      discoverSessions: async () => {
+        discoveryCalls += 1;
+        return snapshot;
+      },
+      prompt: async (choices) => choices[0]!,
+    });
+
+    assert.equal(discoveryCalls, 1);
+    assert.equal(result.session, snapshot[0]);
+    assert.equal(result.selector, "019fc93a-1");
+    assert.notEqual(result.selector, result.session.metadata.sessionId);
+  });
+}
+
+test("explicit session selection preserves the requested selector", async () => {
+  const snapshot = [sessionSummary("019fc93a-1111-aaaa", false), sessionSummary("019fc93a-2222-bbbb", false)];
+
+  const result = await selectSessionForCommandResult("debrief", "019fc93a-2", {
+    discoverSessions: async () => snapshot,
+  });
+
+  assert.equal(result.session, snapshot[1]);
+  assert.equal(result.selector, "019fc93a-2");
 });
 
 test("chooseSession accepts session list index selectors", async () => {

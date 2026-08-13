@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import type { SessionChoice } from "./cli.ts";
-import { sessionIdPrefixes } from "./session-format.ts";
+import { uniqueSessionIdPrefixes } from "./session-format.ts";
 
 export type SessionPromptStreams = {
   input: NodeJS.ReadableStream;
@@ -39,7 +39,7 @@ export async function promptForSessionChoice(
   const selectors = choices.map((choice) => String(choice.selector));
   const selectorList = selectors.join(", ");
   const choicesBySelector = new Map(choices.map((choice) => [String(choice.selector), choice]));
-  const prefixes = sessionIdPrefixes(choices.map((choice) => choice.session.metadata.sessionId));
+  const prefixes = uniqueSessionIdPrefixes(choices.map((choice) => choice.session.metadata.sessionId));
 
   output.write(`${choices.map((choice, index) => renderChoice(choice, prefixes[index]!)).join("\n")}\n`);
   const readline = createInterface({ input, output });

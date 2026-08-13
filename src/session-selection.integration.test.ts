@@ -93,7 +93,8 @@ test("selector-less inspect auto-selects one session and renders its events with
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /inspect-auto-selected/);
-  assert.match(result.stdout, new RegExp(`bashguard inspect ${id} --event`));
+  assert.match(result.stdout, new RegExp(`bashguard inspect ${id.slice(0, 8)} --event`));
+  assert.doesNotMatch(result.stdout, new RegExp(`bashguard inspect ${id} --event`));
   assert.doesNotMatch(result.stdout, /undefined|Select a session/);
 });
 
@@ -105,14 +106,16 @@ test("selector-less debrief auto-selects one session and renders a usable summar
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Session complete/);
-  assert.match(result.stdout, new RegExp(`bashguard inspect ${id} --event`));
+  assert.match(result.stdout, new RegExp(`bashguard inspect ${id.slice(0, 8)} --event`));
+  assert.doesNotMatch(result.stdout, new RegExp(`bashguard inspect ${id} --event`));
   assert.doesNotMatch(result.stdout, /undefined|Select a session/);
 });
 
-test("selector-less attach auto-selects its only active session and uses its prefix in guidance", async (t) => {
-  const id = "attach-single-019fc911";
+test("selector-less attach auto-selects its only active session and uses its unique prefix in guidance", async (t) => {
+  const id = "019fc911-active-session";
+  const prefix = "019fc911-a";
   const root = await store(t, [
-    { id: "newer-completed-019fc910", modifiedAt: Date.now() },
+    { id: "019fc911-completed-session", modifiedAt: Date.now() },
     { id, active: true, modifiedAt: Date.now() - 1_000, command: "echo attach-auto-selected" },
   ]);
   const child = spawn(process.execPath, [...cliArgs, "attach", "--history", "0"], {
@@ -130,7 +133,8 @@ test("selector-less attach auto-selects its only active session and uses its pre
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   assert.match(stdout, /Following live events/);
-  assert.match(stdout, new RegExp(`bashguard inspect ${id} --event`));
+  assert.match(stdout, new RegExp(`bashguard inspect ${prefix} --event`));
+  assert.doesNotMatch(stdout, new RegExp(`bashguard inspect ${id} --event`));
   assert.doesNotMatch(stdout, /undefined|Select a session/);
   await appendFile(join(root, id, "events.jsonl"), `${JSON.stringify(event(id, 4, "session.shutdown"))}\n`);
   assert.equal(await waitForExit(child), 0, stderr);
@@ -164,6 +168,34 @@ test("piped selector-less commands fail without prompting and print stable copya
   assert.match(output, /bashguard attach 1/);
   assert.match(output, /bashguard attach 3/);
   assert.doesNotMatch(output, /^2\s+active\s+/m);
+});
+
+test("global session order and numeric command selectors stay newest-first across active states", async (t) => {
+  const now = Date.now();
+  const root = await store(t, [
+    { id: "newest-completed-019fc920", modifiedAt: now, command: "echo newest-completed" },
+    { id: "middle-active-019fc921", active: true, modifiedAt: now - 1_000, command: "echo middle-active" },
+    { id: "oldest-completed-019fc922", modifiedAt: now - 2_000, command: "echo oldest-completed" },
+  ]);
+
+  const sessions = run(root, ["sessions"]);
+  assert.equal(sessions.status, 0, sessions.stderr);
+  assert.match(sessions.stdout, /^1\s+complete\s+newest-c/m);
+  assert.match(sessions.stdout, /^2\s+active\s+middle-a/m);
+  assert.match(sessions.stdout, /^3\s+complete\s+oldest-c/m);
+
+  const inspect = run(root, ["inspect", "1"]);
+  assert.equal(inspect.status, 0, inspect.stderr);
+  assert.match(inspect.stdout, /newest-completed/);
+
+  const debrief = run(root, ["debrief", "1"]);
+  assert.equal(debrief.status, 0, debrief.stderr);
+  assert.match(debrief.stdout, /bashguard inspect 1 --event/);
+
+  const attach = run(root, ["attach", "1", "--history", "0"]);
+  assert.equal(attach.status, 0, attach.stderr);
+  assert.match(attach.stdout, /Session newest-completed-019fc920/);
+  assert.match(attach.stdout, /bashguard inspect 1 --event/);
 });
 
 test("explicit numeric selectors bypass selection for attach, inspect, and debrief", async (t) => {

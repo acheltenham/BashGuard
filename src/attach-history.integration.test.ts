@@ -20,6 +20,40 @@ function event(sequence: number, id: string, type: string, payload: Record<strin
   };
 }
 
+test("attach completes an event whose JSONL line was partial at the startup boundary", async (t) => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "bashguard-attach-boundary-"));
+  t.after(async () => rm(dataRoot, { recursive: true, force: true }));
+  const sessionId = "attach-boundary-session";
+  const directory = join(dataRoot, sessionId);
+  const eventsFile = join(directory, "events.jsonl");
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "session.json"), `${JSON.stringify({ schemaVersion: 1, sessionId, processId: process.pid })}\n`);
+  const complete = `${JSON.stringify(event(1, "start001", "session.started"))}\n`;
+  const liveLine = JSON.stringify(event(2, "livepart", "bash.user_requested", { command: "echo boundary-event" }));
+  const splitAt = Math.floor(liveLine.length / 2);
+  await writeFile(eventsFile, complete + liveLine.slice(0, splitAt));
+
+  const child = spawn(process.execPath, ["--experimental-strip-types", "src/cli.ts", "attach", sessionId, "--history", "0"], {
+    cwd: process.cwd(),
+    env: { ...process.env, BASHGUARD_DATA_DIR: dataRoot },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(() => { if (child.exitCode === null) child.kill("SIGTERM"); });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.match(stdout, /Following live events/);
+
+  await appendFile(eventsFile, `${liveLine.slice(splitAt)}\n${JSON.stringify(event(3, "shutdown", "session.shutdown"))}\n`);
+  await new Promise<void>((resolve, reject) => child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`attach exited ${code}: ${stderr}`))));
+  assert.match(stdout, /boundary-event/);
+  assert.match(stdout, /Pi session ended/);
+});
+
 test("attach bounds startup history but streams every new narrated event", async (t) => {
   const dataRoot = await mkdtemp(join(tmpdir(), "bashguard-attach-history-"));
   t.after(async () => rm(dataRoot, { recursive: true, force: true }));

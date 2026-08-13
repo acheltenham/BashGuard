@@ -278,6 +278,21 @@ async function readExistingEvents(eventsFile: string): Promise<BashGuardEvent[]>
   }
 }
 
+async function readAttachSnapshot(eventsFile: string): Promise<{ events: BashGuardEvent[]; offset: number; remainder: string }> {
+  try {
+    const bytes = await readFile(eventsFile);
+    const text = bytes.toString("utf8");
+    const finalNewline = text.lastIndexOf("\n");
+    return {
+      events: parseJsonlEvents(text),
+      offset: bytes.length,
+      remainder: text.endsWith("\n") ? "" : text.slice(finalNewline + 1),
+    };
+  } catch {
+    return { events: [], offset: 0, remainder: "" };
+  }
+}
+
 function latestSessionLifecycleIsShutdown(events: BashGuardEvent[]): boolean {
   const latestLifecycle = [...events].reverse().find((event) => event.type === "session.started" || event.type === "session.shutdown");
   return latestLifecycle?.type === "session.shutdown";
@@ -632,8 +647,8 @@ export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now
   const captureGaps = normalized.filter((event) => event.type === "capture.gap").length;
   const nonGapEvents = normalized.filter((event) => event.type !== "capture.gap");
   const missingEvents = nonGapEvents.filter((event) => (event.capture?.missing.length ?? 0) > 0).length;
-  const redactedEvents = nonGapEvents.filter((event) => (event.capture?.redacted.length ?? 0) > 0).length;
-  const truncatedEvents = nonGapEvents.filter((event) => (event.capture?.truncated.length ?? 0) > 0).length;
+  const redactedEvents = normalized.filter((event) => (event.capture?.redacted.length ?? 0) > 0).length;
+  const truncatedEvents = normalized.filter((event) => (event.capture?.truncated.length ?? 0) > 0).length;
   const captureIssues = [
     formatCaptureIssue(captureGaps, "capture gap"),
     formatCaptureIssue(missingEvents, "event with missing fields", "events with missing fields"),
@@ -1571,39 +1586,35 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
   const history = options.attachHistory ?? 50;
   const session = await chooseSession(requestedId);
   const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
+  const snapshot = await readAttachSnapshot(session.eventsFile);
+  const existing = snapshot.events;
+  const active = !latestSessionLifecycleIsShutdown(existing) && processIsAlive(session.metadata.processId);
 
-  process.stdout.write(`BashGuard · ${session.active ? "live" : "completed"}\n`);
+  process.stdout.write(`BashGuard · ${active ? "live" : "completed"}\n`);
   process.stdout.write(`Session ${session.metadata.sessionId}\n`);
   process.stdout.write(`Repo    ${repo}\n`);
   if (session.metadata.cwd) process.stdout.write(`Cwd     ${session.metadata.cwd}\n`);
   process.stdout.write("─".repeat(60) + "\n");
 
-  let offset = 0;
-  let remainder = "";
-  const existing = await readExistingEvents(session.eventsFile);
+  let offset = snapshot.offset;
+  let remainder = snapshot.remainder;
   const historySelection = selectAttachHistory(existing, history, options.allHistory ?? false);
   const seenEventIds = historySelection.seenEventIds;
-  process.stdout.write(formatAttachStatus(buildAttachStatus(existing, session.active)));
+  process.stdout.write(formatAttachStatus(buildAttachStatus(existing, active)));
   process.stdout.write("─".repeat(60) + "\n");
   for (const event of historySelection.visible) {
     const rendered = formatTimelineEvent(event);
     if (rendered) process.stdout.write(`${rendered}\n`);
   }
 
-  try {
-    offset = (await stat(session.eventsFile)).size;
-  } catch {
-    offset = 0;
-  }
-
   const sessionSelector = requestedId ?? session.metadata.sessionId.slice(0, 8);
   if (historySelection.visible.length > 0) process.stdout.write("─".repeat(60) + "\n");
-  if (!session.active) {
+  if (!active) {
     process.stdout.write(formatAttachGuidance(sessionSelector, {
       recordedTotal: existing.length,
       narratedTotal: historySelection.narratedTotal,
       narratedShown: historySelection.visible.length,
-      active: false,
+      active,
     }));
     return;
   }
@@ -1612,7 +1623,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     recordedTotal: existing.length,
     narratedTotal: historySelection.narratedTotal,
     narratedShown: historySelection.visible.length,
-    active: true,
+    active,
   }));
 
   while (true) {

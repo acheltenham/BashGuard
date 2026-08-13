@@ -417,6 +417,16 @@ test("buildAttachStatus ignores unmatched requests from before the latest record
   assert.equal(status.eventCount, 4);
 });
 
+test("buildAttachStatus does not claim uncorrelatable requests as current", () => {
+  const status = buildAttachStatus([
+    event(1, "session.started"),
+    event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } }),
+  ], true);
+
+  assert.equal(status.activityLabel, "Last activity");
+  assert.equal(status.evidence, "recorded event");
+});
+
 test("buildAttachStatus reports only correlated unmatched tool requests as current", () => {
   const now = Date.parse("2026-08-13T12:00:10.000Z");
   const status = buildAttachStatus([
@@ -464,7 +474,7 @@ test("buildAttachStatus ignores narrated events appended after completed-session
 test("buildAttachStatus summarizes partial capture and does not claim current activity for completed sessions", () => {
   const status = buildAttachStatus([
     event(1, "tool.requested", { timestamp: "invalid", toolName: "edit", toolCallId: "call-edit", payload: { toolCallId: "call-edit", input: { path: "README.md" } } }),
-    event(2, "capture.gap", { capture: { missing: ["event:tool.completed"], redacted: [], truncated: [] } }),
+    event(2, "capture.gap", { capture: { missing: ["event:tool.completed"], redacted: ["payload.secret"], truncated: ["payload.output"] } }),
     event(3, "message.ended", { capture: { missing: ["turnId"], redacted: ["payload.token"], truncated: ["payload.content"] } }),
     event(4, "session.shutdown", { timestamp: "invalid" }),
   ], false, Date.parse("2026-08-13T12:00:10.000Z"));
@@ -472,7 +482,7 @@ test("buildAttachStatus summarizes partial capture and does not claim current ac
   assert.equal(status.state, "complete");
   assert.equal(status.activityLabel, "Last activity");
   assert.equal(status.activity, "Pi session ended");
-  assert.equal(status.capture, "Partial · 1 capture gap · 1 event with missing fields · 1 redacted event · 1 truncated event");
+  assert.equal(status.capture, "Partial · 1 capture gap · 1 event with missing fields · 2 redacted events · 2 truncated events");
   assert.equal(status.lastObserved, "unknown");
 });
 

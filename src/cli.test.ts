@@ -53,6 +53,34 @@ test("discoverSessions excludes metadata session IDs containing NUL while retain
   assert.deepEqual(sessions.map((session) => session.metadata.sessionId), ["valid-neighbor"]);
 });
 
+test("discoverSessions normalizes malformed optional metadata while retaining the selectable session", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "valid-neighbor", [event(1, "session.started")]);
+  await writeSession(root, "malformed-optionals", [event(1, "session.shutdown")]);
+  await writeFile(join(root, "malformed-optionals", "session.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    sessionId: "malformed-optionals",
+    cwd: { forged: "cwd" },
+    repository: 42,
+    name: ["forged-name"],
+    title: false,
+    sessionName: {},
+    startedAt: [],
+    processId: "123",
+    piMode: 7,
+    recorderSource: { forged: true },
+  })}\n`);
+
+  const sessions = await discoverSessions(root);
+  const malformed = sessions.find((session) => session.metadata.sessionId === "malformed-optionals");
+
+  assert.equal(sessions.length, 2);
+  assert.deepEqual(malformed?.metadata, { schemaVersion: 1, sessionId: "malformed-optionals" });
+  assert.doesNotThrow(() => formatSessionList(sessions));
+  assert.match(formatSessionList(sessions), /malforme\s+-\s+unknown/);
+  assert.equal(resolveSessionChoice("malformed", indexSessionChoices(sessions))?.session, malformed);
+});
+
 test("discoverSessions excludes every session with a duplicate metadata ID while retaining valid neighbors", async () => {
   const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
   await writeSession(root, "duplicate-directory-a", [event(1, "session.started")]);
@@ -430,8 +458,8 @@ for (const [inputIsTTY, outputIsTTY] of [[false, true], [true, false], [undefine
         assert.match(error.message, /More than one eligible session exists for `bashguard debrief`\./);
         for (const choice of choices) {
           assert.match(error.message, new RegExp(`^${choice.selector}\\s+`, "m"));
-          assert.match(error.message, new RegExp(`bashguard debrief ${choice.sessionIdPrefix}`));
-          assert.doesNotMatch(error.message, new RegExp(`bashguard debrief ${choice.selector}(?:\\s|$)`));
+          assert.match(error.message, new RegExp(`bashguard debrief --session=${choice.sessionIdPrefix}`));
+          assert.doesNotMatch(error.message, new RegExp(`bashguard debrief --session=${choice.selector}(?:\\s|$)`));
         }
         assert.match(error.message, /completed-/);
         return true;
@@ -556,6 +584,11 @@ test("parseCommandArgs accepts positional and --session selectors", () => {
   assert.deepEqual(parseCommandArgs(["session", "list"]), { command: "sessions" });
   assert.deepEqual(parseCommandArgs(["attach", "1"]), { command: "attach", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["attach", "--session", "1"]), { command: "attach", sessionId: "1" });
+  for (const command of ["attach", "inspect", "debrief"]) {
+    for (const selector of ["--foo", "list", "events", " spaced\tselector\n"]) {
+      assert.deepEqual(parseCommandArgs([command, `--session=${selector}`]), { command, sessionId: selector });
+    }
+  }
   assert.deepEqual(parseCommandArgs(["attach", "1", "--history", "100"]), { command: "attach", sessionId: "1", attachHistory: 100 });
   assert.deepEqual(parseCommandArgs(["attach", "1", "--history", "0"]), { command: "attach", sessionId: "1", attachHistory: 0 });
   assert.deepEqual(parseCommandArgs(["attach", "1", "--all-history"]), { command: "attach", sessionId: "1", allHistory: true });
@@ -581,6 +614,7 @@ test("parseCommandArgs rejects missing filter values and unknown options", () =>
   for (const command of ["attach", "inspect", "debrief"]) {
     assert.throws(() => parseCommandArgs([command, "--session"]), new Error("`--session` requires a value"));
     assert.throws(() => parseCommandArgs([command, "--session", "--activity"]), new Error("`--session` requires a value"));
+    assert.throws(() => parseCommandArgs([command, "--session="]), new Error("`--session` requires a value"));
   }
   assert.throws(() => parseCommandArgs(["inspect", "--event"]), new Error("`--event` requires a value"));
   assert.throws(() => parseCommandArgs(["inspect", "--event", "--all"]), new Error("`--event` requires a value"));

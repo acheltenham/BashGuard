@@ -21,7 +21,7 @@ export function singleLineDisplay(value: string): string {
 
 /** Serializes one argument for copyable Bash/Zsh command guidance. */
 export function shellQuoteArgument(value: string): string {
-  if (/^[A-Za-z0-9._:/@+-]+$/u.test(value)) return value;
+  if (/^[A-Za-z0-9._:/@+=-]+$/u.test(value)) return value;
 
   let escaped = "";
   for (const character of value) {

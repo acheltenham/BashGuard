@@ -274,12 +274,12 @@ npm exec -- node --experimental-strip-types src/cli.ts inspect 1 --event <event-
 npm exec -- node --experimental-strip-types src/cli.ts debrief 1
 ```
 
-The `--session` form is also supported:
+Explicit positional IDs and prefixes remain supported. The `--session` forms are also available; use the single-argument `--session=<value>` form for IDs or prefixes that begin with `--` or equal the inspect aliases `list` or `events`:
 
 ```bash
 bashguard attach --session 1
-bashguard inspect --session 1 --event <event-id-prefix-or-sequence>
-bashguard debrief --session 1
+bashguard inspect --session=--example-session --event <event-id-prefix-or-sequence>
+bashguard debrief --session=events
 ```
 
 Check installed Pi packages with:

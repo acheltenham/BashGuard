@@ -22,6 +22,7 @@ export type SessionMetadata = {
   startedAt?: string;
   processId?: number;
   piMode?: string;
+  recorderSource?: string;
 };
 
 export type CaptureMetadata = {
@@ -143,7 +144,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session <session-id> [--history <n>|--all-history]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session=<session-id> [--history <n>|--all-history]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -174,6 +175,12 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
     if (command === "setup" && arg === "--local") {
       const parsed: ParsedCommandArgs = { command: "setup", setupSubject: "cli", setupScope: "local" };
       return parsed;
+    }
+    if (arg.startsWith("--session=")) {
+      const requestedSession = arg.slice("--session=".length);
+      if (requestedSession.length === 0) throw new Error("`--session` requires a value");
+      sessionId = requestedSession;
+      continue;
     }
     if (arg === "--session") {
       const requestedSession = args[++index];
@@ -348,6 +355,21 @@ function validSessionId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && !value.includes("\0");
 }
 
+export function normalizeSessionMetadata(value: unknown): SessionMetadata | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const source = value as Record<string, unknown>;
+  if (!validSessionId(source.sessionId)) return undefined;
+
+  const metadata: SessionMetadata = { sessionId: source.sessionId };
+  if (typeof source.schemaVersion === "number") metadata.schemaVersion = source.schemaVersion;
+  for (const key of ["cwd", "repository", "name", "title", "sessionName", "startedAt", "piMode", "recorderSource"] as const) {
+    const optional = source[key];
+    if (typeof optional === "string") metadata[key] = optional;
+  }
+  if (typeof source.processId === "number" && Number.isFinite(source.processId)) metadata.processId = source.processId;
+  return metadata;
+}
+
 export async function discoverSessions(root = getDataRoot()): Promise<SessionSummary[]> {
   let entries: string[] = [];
   try {
@@ -360,8 +382,8 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
     const directory = join(root, entry);
     const metadataPath = join(directory, "session.json");
     const eventsFile = join(directory, "events.jsonl");
-    const metadata = await readJsonFile<SessionMetadata>(metadataPath);
-    if (!validSessionId(metadata?.sessionId) || !existsSync(eventsFile)) return undefined;
+    const metadata = normalizeSessionMetadata(await readJsonFile<unknown>(metadataPath));
+    if (!metadata || !existsSync(eventsFile)) return undefined;
 
     try {
       const info = await stat(eventsFile);
@@ -1596,7 +1618,10 @@ function formatNonInteractiveSessionChoices(command: SessionCommand, choices: re
   }
 
   lines.push("", "Run one of:");
-  for (const choice of choices) lines.push(`  bashguard ${command} ${shellQuoteArgument(choice.sessionIdPrefix)}`);
+  for (const choice of choices) {
+    const sessionArgument = `--session=${choice.sessionIdPrefix}`;
+    lines.push(`  bashguard ${command} ${shellQuoteArgument(sessionArgument)}`);
+  }
   return lines.join("\n");
 }
 
@@ -1630,7 +1655,9 @@ export async function selectSessionForCommandResult(
     }
   }
 
-  const selector = shellQuoteArgument(requestedId ?? selected.sessionIdPrefix);
+  const rawSelector = requestedId ?? selected.sessionIdPrefix;
+  const requiresNamedSelector = rawSelector.startsWith("--") || ["list", "events"].includes(rawSelector.toLowerCase());
+  const selector = shellQuoteArgument(requiresNamedSelector ? `--session=${rawSelector}` : rawSelector);
   return { session: selected.session, selector };
 }
 

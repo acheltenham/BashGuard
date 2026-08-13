@@ -67,7 +67,7 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
 node --experimental-strip-types src/cli.ts attach
 ```
 
-Or select a session explicitly by list number, `--session`, full ID, or unique prefix:
+Or select a session explicitly by list number, `--session`, full ID, or unique prefix. Positional IDs remain supported; use the single-argument `--session=<value>` form when an ID or prefix begins with `--` or matches an inspect alias (`list` or `events`):
 
 ```bash
 BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
@@ -75,6 +75,9 @@ node --experimental-strip-types src/cli.ts attach 1
 
 BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
 node --experimental-strip-types src/cli.ts attach --session 1
+
+BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
+node --experimental-strip-types src/cli.ts attach --session=--example-session
 
 BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
 node --experimental-strip-types src/cli.ts attach <session-id-or-unique-prefix>
@@ -113,11 +116,14 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
 node --experimental-strip-types src/cli.ts inspect 1 --event <event-id-prefix-or-sequence>
 ```
 
-The `--session` form also works:
+The `--session` forms also work:
 
 ```bash
 BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
 node --experimental-strip-types src/cli.ts inspect --session 1 --event <event-id-prefix-or-sequence>
+
+BASHGUARD_DATA_DIR=/tmp/bashguard-attach-test \
+node --experimental-strip-types src/cli.ts inspect --session=events --event <event-id-prefix-or-sequence>
 ```
 
 Generate a session debrief:

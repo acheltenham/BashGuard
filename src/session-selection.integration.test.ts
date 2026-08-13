@@ -18,6 +18,7 @@ type StoredSession = {
   active?: boolean;
   modifiedAt?: number;
   command?: string;
+  metadata?: Record<string, unknown>;
 };
 
 function event(sessionId: string, sequence: number, type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
@@ -46,6 +47,7 @@ async function writeSession(root: string, session: StoredSession): Promise<void>
     cwd: session.cwd,
     name: session.name ?? session.id,
     processId: session.active ? process.pid : undefined,
+    ...session.metadata,
   })}\n`);
   const events = [
     event(session.id, 1, "session.started"),
@@ -223,8 +225,8 @@ test("piped selector-less commands fail without prompting and print stable copya
     const expected = [[1, "active-n"], [2, "active-o"], [3, "complete"]] as const;
     for (const [selector, prefix] of expected) {
       assert.match(output, new RegExp(`^${selector}\\s+`, "m"));
-      assert.match(output, new RegExp(`bashguard ${command} ${prefix}`));
-      assert.doesNotMatch(output, new RegExp(`bashguard ${command} ${selector}(?:\\s|$)`));
+      assert.match(output, new RegExp(`bashguard ${command} --session=${prefix}`));
+      assert.doesNotMatch(output, new RegExp(`bashguard ${command} --session=${selector}(?:\\s|$)`));
     }
   }
 
@@ -234,9 +236,9 @@ test("piped selector-less commands fail without prompting and print stable copya
   assert.doesNotMatch(output, /Select a session|completed-middle/);
   assert.match(output, /^1\s+active\s+/m);
   assert.match(output, /^2\s+active\s+/m);
-  assert.match(output, /bashguard attach active-n/);
-  assert.match(output, /bashguard attach active-o/);
-  assert.doesNotMatch(output, /bashguard attach [12](?:\s|$)/);
+  assert.match(output, /bashguard attach --session=active-n/);
+  assert.match(output, /bashguard attach --session=active-o/);
+  assert.doesNotMatch(output, /bashguard attach --session=[12](?:\s|$)/);
   assert.doesNotMatch(output, /^3\s+active\s+/m);
 });
 
@@ -255,8 +257,8 @@ test("attach choices render prefixes unique against hidden completed sessions", 
   assert.match(output, /^1\s+active\s+shared-prefix-a\s+/m);
   assert.doesNotMatch(output, /^1\s+active\s+shared-p\s+/m);
   assert.doesNotMatch(output, /shared-prefix-completed/);
-  assert.match(output, /bashguard attach shared-prefix-a/);
-  assert.doesNotMatch(output, /bashguard attach 1(?:\s|$)/);
+  assert.match(output, /bashguard attach --session=shared-prefix-a/);
+  assert.doesNotMatch(output, /bashguard attach --session=1(?:\s|$)/);
 
   const inspect = run(root, ["inspect", "shared-prefix-a"]);
   assert.equal(inspect.status, 0, inspect.stderr);
@@ -296,9 +298,9 @@ test("global session order is active-first and newest-first within each state", 
   assert.notEqual(attach.status, 0);
   assert.match(output, /^1\s+active\s+newer-ac/m);
   assert.match(output, /^2\s+active\s+older-ac/m);
-  assert.match(output, /bashguard attach newer-ac/);
-  assert.match(output, /bashguard attach older-ac/);
-  assert.doesNotMatch(output, /bashguard attach [12](?:\s|$)/);
+  assert.match(output, /bashguard attach --session=newer-ac/);
+  assert.match(output, /bashguard attach --session=older-ac/);
+  assert.doesNotMatch(output, /bashguard attach --session=[12](?:\s|$)/);
   assert.doesNotMatch(output, /^3\s+|^4\s+|newer-completed|older-completed/m);
 });
 
@@ -345,9 +347,9 @@ test("non-TTY remediation for a numeric session ID selects that displayed sessio
   const output = combined(ambiguity);
   assert.notEqual(ambiguity.status, 0);
   assert.match(output, /^2\s+complete\s+1\s+/m);
-  assert.match(output, /bashguard inspect 1(?:\s|$)/);
+  assert.match(output, /bashguard inspect --session=1(?:\s|$)/);
 
-  const remediated = run(root, ["inspect", "1"]);
+  const remediated = run(root, ["inspect", "--session=1"]);
   assert.equal(remediated.status, 0, remediated.stderr);
   assert.match(remediated.stdout, /numeric-id-target/);
   assert.doesNotMatch(remediated.stdout, /wrong-index-session/);
@@ -366,13 +368,36 @@ test("numeric-looking non-TTY remediation executes against its displayed session
   assert.notEqual(ambiguity.status, 0);
   assert.match(output, /^1\s+complete\s+00000002-\s+/m);
   const emittedCommand = output.split("\n").map((line) => line.trim())
-    .find((line) => line === "bashguard inspect 00000002-");
+    .find((line) => line === "bashguard inspect --session=00000002-");
   assert.ok(emittedCommand, output);
 
   const remediated = runShell(root, emittedCommand);
   assert.equal(remediated.status, 0, remediated.stderr);
   assert.match(remediated.stdout, /numeric-prefix-target/);
   assert.doesNotMatch(remediated.stdout, /wrong-row-two/);
+});
+
+test("non-TTY remediation executes durable selectors that resemble options or inspect aliases", async (t) => {
+  for (const targetId of ["--foo-target", "list", "events"]) {
+    await t.test(targetId, async (t) => {
+      const root = await store(t, [
+        { id: targetId, command: `echo selected-${targetId.replaceAll("-", "option")}` },
+        { id: `ordinary-neighbor-${targetId}`, command: "echo wrong-neighbor" },
+      ]);
+
+      const ambiguity = run(root, ["inspect"]);
+      const output = combined(ambiguity);
+      assert.notEqual(ambiguity.status, 0);
+      const emittedCommand = output.split("\n").map((line) => line.trim())
+        .find((line) => line.startsWith("bashguard inspect --session=") && line.includes(targetId.slice(0, Math.min(8, targetId.length))));
+      assert.ok(emittedCommand, output);
+
+      const remediated = runShell(root, emittedCommand);
+      assert.equal(remediated.status, 0, remediated.stderr);
+      assert.match(remediated.stdout, new RegExp(`selected-${targetId.replaceAll("-", "option")}`));
+      assert.doesNotMatch(remediated.stdout, /wrong-neighbor/);
+    });
+  }
 });
 
 test("non-TTY remediation prefix survives discovery reordering", async (t) => {
@@ -387,7 +412,7 @@ test("non-TTY remediation prefix survives discovery reordering", async (t) => {
   const ambiguity = run(root, ["inspect"]);
   const output = combined(ambiguity);
   assert.notEqual(ambiguity.status, 0);
-  const emittedPrefix = output.match(/bashguard inspect (durable-t\S*)/)?.[1];
+  const emittedPrefix = output.match(/bashguard inspect --session=(durable-t\S*)/)?.[1];
   assert.ok(emittedPrefix, output);
   assert.notEqual(emittedPrefix, "1");
 
@@ -414,11 +439,11 @@ test("shell-quoted non-TTY remediation preserves raw newline session prefixes", 
 
   const commands = output.split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.startsWith("bashguard inspect $'abcdefgh\\n"))
+    .filter((line) => line.startsWith("bashguard inspect $'--session=abcdefgh\\n"))
     .sort();
   assert.deepEqual(commands, [
-    "bashguard inspect $'abcdefgh\\no'",
-    "bashguard inspect $'abcdefgh\\nt'",
+    "bashguard inspect $'--session=abcdefgh\\no'",
+    "bashguard inspect $'--session=abcdefgh\\nt'",
   ]);
 
   for (const [command, expected, unexpected] of [
@@ -449,6 +474,42 @@ test("noninteractive rows sanitize terminal controls without forging extra candi
   assert.doesNotMatch(output, /\u001b|\u009b/);
   assert.doesNotMatch(output, /^FORGED/m);
   assert.equal(output.split("\n").filter((line) => /^\d+\s+complete\s+/.test(line)).length, 2);
+});
+
+test("malformed optional metadata degrades safely across listing, selection, inspect, and attach", async (t) => {
+  const root = await store(t, [
+    {
+      id: "malformed-optionals",
+      command: "echo malformed-session-selected",
+      metadata: {
+        cwd: 42,
+        repository: ["forged-repository"],
+        name: { forged: "name" },
+        title: false,
+        sessionName: [],
+        startedAt: {},
+        processId: "not-a-pid",
+        piMode: 7,
+        recorderSource: ["forged-source"],
+      },
+    },
+    { id: "valid-neighbor", command: "echo valid-neighbor" },
+  ]);
+
+  const listed = run(root, ["sessions"]);
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.match(listed.stdout, /malforme\s+-\s+unknown/);
+
+  const ambiguity = run(root, ["inspect"]);
+  assert.notEqual(ambiguity.status, 0);
+  assert.match(combined(ambiguity), /malforme\s+-\s+unknown/);
+
+  for (const command of ["inspect", "attach"] as const) {
+    const selected = run(root, [command, "--session=malformed", ...(command === "attach" ? ["--history", "0"] : [])]);
+    assert.equal(selected.status, 0, selected.stderr);
+    assert.match(selected.stdout, command === "inspect" ? /malformed-session-selected/ : /Repo\s+unknown/);
+    assert.doesNotMatch(combined(selected), /forged-|TypeError/);
+  }
 });
 
 test("selector-less sole-session attach sanitizes every metadata header field", async (t) => {

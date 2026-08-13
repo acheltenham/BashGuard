@@ -81,7 +81,7 @@ test("singleLineDisplay removes terminal controls and collapses whitespace while
 });
 
 test("shellQuoteArgument leaves ordinary session selectors unchanged", () => {
-  for (const selector of ["019fc93a-1111", "prefix_1.2:/@+value"]) {
+  for (const selector of ["019fc93a-1111", "prefix_1.2:/@+value", "--session=--foo"]) {
     assert.equal(shellQuoteArgument(selector), selector);
   }
 });

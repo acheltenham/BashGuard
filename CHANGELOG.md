@@ -6,7 +6,7 @@ All notable project changes will be recorded here.
 
 ### Added
 
-- Added a reproducible Milestone 0 baseline runner and documented latency, storage overhead, failure behavior, active attach, full CLI, and inside-Pi skill validation.
+- Added a reproducible Milestone 0 baseline runner and documented latency, storage overhead, failure behavior, active attach, full CLI, and inside-Pi skill validation. Milestone 0 is now complete; split-pane TUI work moves to Phase 1.
 - Added regression coverage confirming an entirely unwritable event stream notifies Pi without rejecting the tool event.
 - `bashguard inspect` now supports provider-neutral evidence filtering by activity category, exact event type, and case-insensitive search, with latest-N/all controls and clean JSONL export.
 - Added the MIT `LICENSE`, public security boundaries in `SECURITY.md`, and README links for public-repository readiness.

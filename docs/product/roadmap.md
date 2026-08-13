@@ -1,6 +1,6 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.4; Milestone 0 validation complete, Phase 1/2 usability work next
+**Status:** Draft v0.4; Milestone 0 complete, Phase 1 live-companion work next
 **Last updated:** August 13, 2026
 
 ## Milestone 0: Observe a Real Pi Session
@@ -38,7 +38,7 @@ Implementation reference: [`Milestone 0 plan`](../plans/milestone-0-observe-a-re
 
 ## Phase 1: Live Terminal Companion
 
-**Recommended next focus:** improve evidence navigation and live-session usability before adding enforcement or provider-specific interpretation.
+**Current focus:** improve live-session usability and terminal presentation before adding enforcement or provider-specific interpretation. Deterministic evidence filtering and JSONL export shipped during Milestone 0.
 
 Goal: make a running Pi session understandable at a glance.
 

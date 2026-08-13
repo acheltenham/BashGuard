@@ -1,6 +1,6 @@
 # Milestone 0: Observe a Real Pi Session
 
-**Status:** Validation complete; ready to close after baseline PR merge
+**Status:** Complete
 **Last updated:** August 13, 2026
 
 ## Objective

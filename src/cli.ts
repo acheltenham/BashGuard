@@ -52,6 +52,13 @@ export type SessionSummary = {
   active: boolean;
 };
 
+export type SessionCommand = "attach" | "inspect" | "debrief";
+
+export type SessionChoice = {
+  selector: number;
+  session: SessionSummary;
+};
+
 export type DebriefSummary = {
   durationMs: number;
   prompts: number;
@@ -349,6 +356,31 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
   return sessions
     .filter((session): session is SessionSummary => Boolean(session))
     .sort((a, b) => Number(b.active) - Number(a.active) || b.modifiedAt - a.modifiedAt);
+}
+
+export function indexSessionChoices(sessions: SessionSummary[]): SessionChoice[] {
+  return sessions.map((session, index) => ({ selector: index + 1, session }));
+}
+
+export function eligibleSessionChoices(command: SessionCommand, choices: SessionChoice[]): SessionChoice[] {
+  if (command !== "attach") return choices;
+  const active = choices.filter((choice) => choice.session.active);
+  return active.length > 0 ? active : choices;
+}
+
+export function resolveSessionChoice(requestedId: string, choices: SessionChoice[]): SessionChoice | undefined {
+  const index = Number(requestedId);
+  if (Number.isInteger(index) && index >= 1) {
+    const indexed = choices.find((choice) => choice.selector === index);
+    if (indexed) return indexed;
+  }
+
+  const exact = choices.find((choice) => choice.session.metadata.sessionId === requestedId);
+  if (exact) return exact;
+  const prefixMatches = choices.filter((choice) => choice.session.metadata.sessionId.startsWith(requestedId));
+  if (prefixMatches.length === 1) return prefixMatches[0];
+  if (prefixMatches.length > 1) throw new Error(`Session prefix ${requestedId} is ambiguous`);
+  return undefined;
 }
 
 function sessionPrefix(sessionId: string, allSessionIds: string[]): string {
@@ -1527,14 +1559,8 @@ export async function chooseSession(requestedId?: string, root = getDataRoot()):
   if (sessions.length === 0) throw new Error(`No BashGuard sessions found in ${root}`);
 
   if (requestedId) {
-    const index = Number(requestedId);
-    if (Number.isInteger(index) && index >= 1 && index <= sessions.length) return sessions[index - 1]!;
-
-    const exact = sessions.find((session) => session.metadata.sessionId === requestedId);
-    if (exact) return exact;
-    const prefixMatches = sessions.filter((session) => session.metadata.sessionId.startsWith(requestedId));
-    if (prefixMatches.length === 1) return prefixMatches[0];
-    if (prefixMatches.length > 1) throw new Error(`Session prefix ${requestedId} is ambiguous`);
+    const choice = resolveSessionChoice(requestedId, indexSessionChoices(sessions));
+    if (choice) return choice.session;
     throw new Error(formatSessionNotFound(requestedId, root, sessions));
   }
 

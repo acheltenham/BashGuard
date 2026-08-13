@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, selectAttachHistory } from "./cli.ts";
+import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, eligibleSessionChoices, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, indexSessionChoices, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, resolveSessionChoice, selectAttachHistory, type SessionSummary } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -96,6 +96,60 @@ test("formatSessionList shows copyable selectors and prefixes without middle ell
   assert.match(output, /2\s+complete\s+019fc909\s+-\s+Evidence/);
   assert.doesNotMatch(output, /…/);
   assert.match(output, /bashguard attach 1/);
+});
+
+function sessionSummary(sessionId: string, active: boolean): SessionSummary {
+  return {
+    metadata: { sessionId },
+    directory: `/tmp/${sessionId}`,
+    eventsFile: `/tmp/${sessionId}/events.jsonl`,
+    modifiedAt: 0,
+    active,
+  };
+}
+
+test("session choices retain global selectors when attach filters to active sessions", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("completed", false),
+    sessionSummary("active-a", true),
+    sessionSummary("active-b", true),
+  ]);
+
+  assert.deepEqual(choices.map((choice) => choice.selector), [1, 2, 3]);
+  assert.deepEqual(eligibleSessionChoices("attach", choices).map((choice) => choice.selector), [2, 3]);
+  assert.deepEqual(eligibleSessionChoices("inspect", choices).map((choice) => choice.selector), [1, 2, 3]);
+  assert.deepEqual(eligibleSessionChoices("debrief", choices).map((choice) => choice.selector), [1, 2, 3]);
+});
+
+test("attach session choices fall back to completed sessions when none are active", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("completed-a", false),
+    sessionSummary("completed-b", false),
+  ]);
+
+  assert.deepEqual(eligibleSessionChoices("attach", choices), choices);
+});
+
+test("resolveSessionChoice supports global indexes, exact IDs, and unique prefixes", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("completed-session", false),
+    sessionSummary("active-alpha", true),
+    sessionSummary("active-beta", true),
+  ]);
+
+  assert.equal(resolveSessionChoice("1", choices)?.session.metadata.sessionId, "completed-session");
+  assert.equal(resolveSessionChoice("active-beta", choices)?.selector, 3);
+  assert.equal(resolveSessionChoice("active-al", choices)?.selector, 2);
+  assert.equal(resolveSessionChoice("missing", choices), undefined);
+});
+
+test("resolveSessionChoice rejects ambiguous prefixes", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("active-alpha", true),
+    sessionSummary("active-beta", true),
+  ]);
+
+  assert.throws(() => resolveSessionChoice("active-", choices), /Session prefix active- is ambiguous/);
 });
 
 test("chooseSession accepts session list index selectors", async () => {

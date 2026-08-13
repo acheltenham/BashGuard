@@ -19,6 +19,32 @@ export function singleLineDisplay(value: string): string {
     .trim();
 }
 
+/** Serializes one argument for copyable Bash/Zsh command guidance. */
+export function shellQuoteArgument(value: string): string {
+  if (/^[A-Za-z0-9._:/@+-]+$/u.test(value)) return value;
+
+  let escaped = "";
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)!;
+    if (character === "\\") escaped += "\\\\";
+    else if (character === "'") escaped += "\\'";
+    else if (codePoint === 0x07) escaped += "\\a";
+    else if (codePoint === 0x08) escaped += "\\b";
+    else if (codePoint === 0x09) escaped += "\\t";
+    else if (codePoint === 0x0a) escaped += "\\n";
+    else if (codePoint === 0x0b) escaped += "\\v";
+    else if (codePoint === 0x0c) escaped += "\\f";
+    else if (codePoint === 0x0d) escaped += "\\r";
+    else if (codePoint === 0x1b) escaped += "\\e";
+    else if (codePoint <= 0x1f || codePoint === 0x7f) {
+      escaped += `\\x${codePoint.toString(16).padStart(2, "0")}`;
+    } else if ((codePoint >= 0x80 && codePoint <= 0x9f) || codePoint === 0x2028 || codePoint === 0x2029) {
+      escaped += [...Buffer.from(character)].map((byte) => `\\x${byte.toString(16).padStart(2, "0")}`).join("");
+    } else escaped += character;
+  }
+  return `$'${escaped}'`;
+}
+
 export function sessionChoiceDisplay(choice: SessionChoice): SessionChoiceDisplay {
   const { metadata } = choice.session;
   const timestamp = new Date(choice.session.modifiedAt);

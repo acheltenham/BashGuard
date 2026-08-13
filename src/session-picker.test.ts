@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import type { SessionChoice, SessionSummary } from "./cli.ts";
-import { singleLineDisplay } from "./session-format.ts";
+import { shellQuoteArgument, singleLineDisplay } from "./session-format.ts";
 import { promptForSessionChoice } from "./session-picker.ts";
 
 function choice(
@@ -78,6 +78,20 @@ test("renders globally distinguishing session ID prefixes carried by each choice
 
 test("singleLineDisplay removes terminal controls and collapses whitespace while preserving Unicode", () => {
   assert.equal(singleLineDisplay("  café\n\t\u001b[31m界\u0085  "), "café [31m界");
+});
+
+test("shellQuoteArgument leaves ordinary session selectors unchanged", () => {
+  for (const selector of ["019fc93a-1111", "prefix_1.2:/@+value"]) {
+    assert.equal(shellQuoteArgument(selector), selector);
+  }
+});
+
+test("shellQuoteArgument emits one-line Bash/Zsh ANSI-C quoting for unsafe selectors", () => {
+  const raw = "café space\nline\ttab\u001b\\quote'inject$`;\u0085";
+  const quoted = shellQuoteArgument(raw);
+
+  assert.equal(quoted, "$'café space\\nline\\ttab\\e\\\\quote\\'inject$`;\\xc2\\x85'");
+  assert.doesNotMatch(quoted, /[\u0000-\u001f\u007f-\u009f]/u);
 });
 
 test("sanitizes every untrusted picker row field without changing the selected object", async () => {

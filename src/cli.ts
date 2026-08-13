@@ -8,7 +8,7 @@ import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
-import { sessionChoiceDisplay, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
+import { sessionChoiceDisplay, shellQuoteArgument, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
 import { promptForSessionChoice } from "./session-picker.ts";
 
 export type SessionMetadata = {
@@ -402,7 +402,7 @@ export function resolveSessionChoice(requestedId: string, choices: SessionChoice
 
   const prefixMatches = choices.filter((choice) => choice.session.metadata.sessionId.startsWith(requestedId));
   if (prefixMatches.length === 1) return prefixMatches[0];
-  if (prefixMatches.length > 1) throw new Error(`Session prefix ${requestedId} is ambiguous`);
+  if (prefixMatches.length > 1) throw new Error(`Session prefix ${singleLineDisplay(requestedId)} is ambiguous`);
   return undefined;
 }
 
@@ -1558,7 +1558,7 @@ function formatSessionNotFound(
   command: SessionCommand = "attach",
 ): string {
   return [
-    `Session ${requestedId} was not found in ${root}.`,
+    `Session ${singleLineDisplay(requestedId)} was not found in ${root}.`,
     "",
     command === "attach"
       ? "BashGuard can only attach to sessions recorded while the BashGuard extension was loaded."
@@ -1585,7 +1585,7 @@ function formatNonInteractiveSessionChoices(command: SessionCommand, choices: re
   }
 
   lines.push("", "Run one of:");
-  for (const choice of choices) lines.push(`  bashguard ${command} ${singleLineDisplay(choice.sessionIdPrefix)}`);
+  for (const choice of choices) lines.push(`  bashguard ${command} ${shellQuoteArgument(choice.sessionIdPrefix)}`);
   return lines.join("\n");
 }
 
@@ -1619,7 +1619,7 @@ export async function selectSessionForCommandResult(
     }
   }
 
-  const selector = requestedId ?? selected.sessionIdPrefix;
+  const selector = shellQuoteArgument(requestedId ?? selected.sessionIdPrefix);
   return { session: selected.session, selector };
 }
 

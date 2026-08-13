@@ -83,6 +83,20 @@ function combined(result: ReturnType<typeof run>): string {
   return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 }
 
+function runShell(root: string, command: string) {
+  return spawnSync("/bin/bash", ["-c", command], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      BASHGUARD_DATA_DIR: root,
+      PATH: `${join(process.cwd(), "bin")}:${process.env.PATH ?? ""}`,
+    },
+    encoding: "utf8",
+    timeout: 5_000,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
 test("selector-less inspect auto-selects one session and renders its events with a copyable selector", async (t) => {
   const id = "inspect-single-019fc93a";
   const root = await store(t, [{ id, command: "echo inspect-auto-selected" }]);
@@ -308,6 +322,37 @@ test("non-TTY remediation prefix survives discovery reordering", async (t) => {
   assert.equal(remediated.status, 0, remediated.stderr);
   assert.match(remediated.stdout, /originally-displayed-target/);
   assert.doesNotMatch(remediated.stdout, /reordered-other/);
+});
+
+test("shell-quoted non-TTY remediation preserves raw newline session prefixes", async (t) => {
+  const root = await store(t, [
+    { id: "abcdefgh\none", command: "echo selected-newline-one" },
+    { id: "abcdefgh\ntwo", command: "echo selected-newline-two" },
+  ]);
+
+  const ambiguity = run(root, ["inspect"]);
+  const output = combined(ambiguity);
+  assert.notEqual(ambiguity.status, 0);
+  assert.doesNotMatch(output, /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/u);
+
+  const commands = output.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("bashguard inspect $'abcdefgh\\n"))
+    .sort();
+  assert.deepEqual(commands, [
+    "bashguard inspect $'abcdefgh\\no'",
+    "bashguard inspect $'abcdefgh\\nt'",
+  ]);
+
+  for (const [command, expected, unexpected] of [
+    [commands[0]!, "selected-newline-one", "selected-newline-two"],
+    [commands[1]!, "selected-newline-two", "selected-newline-one"],
+  ]) {
+    const remediated = runShell(root, command);
+    assert.equal(remediated.status, 0, remediated.stderr);
+    assert.match(remediated.stdout, new RegExp(expected));
+    assert.doesNotMatch(remediated.stdout, new RegExp(unexpected));
+  }
 });
 
 test("noninteractive rows sanitize terminal controls without forging extra candidates", async (t) => {

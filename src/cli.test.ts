@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, findEvent, formatAttachGuidance, formatDebrief, formatDoctorReport, formatEventInspection, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent } from "./cli.ts";
+import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -100,10 +100,26 @@ test("parseCommandArgs accepts positional and --session selectors", () => {
   assert.deepEqual(parseCommandArgs(["attach", "--session", "1"]), { command: "attach", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["inspect", "--session", "1", "--event", "evt-1"]), { command: "inspect", sessionId: "1", eventId: "evt-1" });
   assert.deepEqual(parseCommandArgs(["inspect", "1", "list", "events"]), { command: "inspect", sessionId: "1" });
+  assert.deepEqual(parseCommandArgs(["inspect", "1", "--activity", "shell", "--activity", "risk", "--type", "capture.gap", "--grep", "deploy", "--limit", "200", "--format", "jsonl"]), {
+    command: "inspect",
+    sessionId: "1",
+    activities: ["shell", "risk"],
+    eventTypes: ["capture.gap"],
+    grep: "deploy",
+    limit: 200,
+    format: "jsonl",
+  });
+  assert.deepEqual(parseCommandArgs(["inspect", "1", "--activity", "shell", "--all"]), { command: "inspect", sessionId: "1", activities: ["shell"], all: true });
   assert.deepEqual(parseCommandArgs(["debrief", "--session", "1"]), { command: "debrief", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["setup", "cli", "--global"]), { command: "setup", setupSubject: "cli", setupScope: "global" });
   assert.deepEqual(parseCommandArgs(["setup", "cli", "--local"]), { command: "setup", setupSubject: "cli", setupScope: "local" });
   assert.deepEqual(parseCommandArgs(["doctor"]), { command: "doctor" });
+});
+
+test("parseCommandArgs rejects missing filter values and unknown options", () => {
+  assert.throws(() => parseCommandArgs(["inspect", "1", "--activity"]), /`--activity` requires a value/);
+  assert.throws(() => parseCommandArgs(["inspect", "1", "--grep"]), /`--grep` requires a value/);
+  assert.throws(() => parseCommandArgs(["inspect", "1", "--unknown"]), /Unknown option: --unknown/);
 });
 
 test("parsePiListPackages keeps configured sources and ignores resolved checkout paths", () => {
@@ -284,6 +300,83 @@ test("findEvent resolves events by id, unique id prefix, or sequence string", ()
   assert.equal(findEvent(events, "evt-tool")?.sequence, 2);
   assert.equal(findEvent(events, "1")?.type, "session.started");
   assert.equal(findEvent(events, "missing"), undefined);
+});
+
+test("filterEvidenceEvents supports activity, type, grep, and latest-limit filtering", () => {
+  const events = [
+    event(1, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } }),
+    event(2, "tool.completed", { toolName: "bash", payload: { content: [{ type: "text", text: "tests passed" }] } }),
+    event(3, "tool.requested", { toolName: "read", payload: { input: { path: "README.md" } } }),
+    event(4, "capture.gap", { payload: { command: "deploy preview", reason: "write failed" } }),
+    event(5, "tool.requested", { toolName: "bash", payload: { input: { command: "deploy production" } } }),
+  ];
+
+  assert.deepEqual(filterEvidenceEvents(events, { activities: ["shell"] }).matches.map((item) => item.sequence), [1, 2, 5]);
+  assert.deepEqual(filterEvidenceEvents(events, { activities: ["shell"], grep: "deploy" }).matches.map((item) => item.sequence), [5]);
+  assert.deepEqual(filterEvidenceEvents(events, { eventTypes: ["capture.gap"] }).matches.map((item) => item.sequence), [4]);
+  const limited = filterEvidenceEvents(events, { activities: ["shell"], limit: 2 });
+  assert.equal(limited.totalMatches, 3);
+  assert.deepEqual(limited.matches.map((item) => item.sequence), [2, 5]);
+});
+
+test("filterEvidenceEvents supports file, git, risk, capture, prompt, tool, and lifecycle categories", () => {
+  const events = [
+    event(1, "agent.before_start", { payload: { prompt: "Do work" } }),
+    event(2, "tool.requested", { toolName: "read", payload: { input: { path: "README.md" } } }),
+    event(3, "tool.requested", { toolName: "bash", payload: { input: { command: "rm -rf build" } } }),
+    event(4, "git.status.snapshot", { payload: { phase: "start" } }),
+    event(5, "capture.gap", { payload: { reason: "failed" } }),
+    event(6, "session.shutdown"),
+  ];
+
+  assert.deepEqual(filterEvidenceEvents(events, { activities: ["file"] }).matches.map((item) => item.sequence), [2]);
+  assert.deepEqual(filterEvidenceEvents(events, { activities: ["git"] }).matches.map((item) => item.sequence), [4]);
+  assert.deepEqual(filterEvidenceEvents(events, { activities: ["risk"] }).matches.map((item) => item.sequence), [3]);
+  assert.deepEqual(filterEvidenceEvents(events, { activities: ["capture"] }).matches.map((item) => item.sequence), [5]);
+  assert.deepEqual(filterEvidenceEvents(events, { activities: ["prompt"] }).matches.map((item) => item.sequence), [1]);
+  assert.deepEqual(filterEvidenceEvents(events, { activities: ["tool"] }).matches.map((item) => item.sequence), [2, 3]);
+  assert.deepEqual(filterEvidenceEvents(events, { activities: ["lifecycle"] }).matches.map((item) => item.sequence), [6]);
+});
+
+test("filterEvidenceEvents defaults to the latest 50 matches", () => {
+  const events = Array.from({ length: 55 }, (_, index) => event(index + 1, "tool.requested", { toolName: "bash", payload: { input: { command: `echo ${index + 1}` } } }));
+  const filtered = filterEvidenceEvents(events, { activities: ["shell"] });
+
+  assert.equal(filtered.totalMatches, 55);
+  assert.equal(filtered.matches.length, 50);
+  assert.equal(filtered.matches[0]?.sequence, 6);
+  assert.equal(filtered.matches[49]?.sequence, 55);
+});
+
+test("formatFilteredEvents compacts long multiline text but preserves complete JSONL", () => {
+  const command = `deploy preview\n${"x".repeat(300)}`;
+  const events = [event(1, "tool.requested", { id: "evt-long", toolName: "bash", payload: { input: { command } } })];
+  const text = formatFilteredEvents("1", events, 1, "text");
+  const jsonl = formatFilteredEvents("1", events, 1, "jsonl");
+
+  assert.doesNotMatch(text, /\n+x{20}/);
+  assert.match(text, /deploy preview x+…/);
+  assert.equal(JSON.parse(jsonl).payload.input.command, command);
+});
+
+test("formatFilteredEvents renders text metadata and clean JSONL", () => {
+  const events = [event(1, "tool.requested", { id: "evt-shell", toolName: "bash", payload: { input: { command: "npm test" } } })];
+  const text = formatFilteredEvents("1", events, 3, "text");
+  assert.match(text, /Showing latest 1 of 3 matching events/);
+  assert.match(text, /Running · npm test/);
+  assert.match(text, /--all/);
+
+  const jsonl = formatFilteredEvents("1", events, 3, "jsonl");
+  assert.equal(jsonl.trim().split("\n").length, 1);
+  assert.equal(JSON.parse(jsonl).id, "evt-shell");
+  assert.doesNotMatch(jsonl, /matching events|Inspect/);
+});
+
+test("formatActivityList documents supported activity categories", () => {
+  const output = formatActivityList();
+  for (const activity of ["shell", "file", "git", "risk", "capture", "prompt", "tool", "lifecycle"]) {
+    assert.match(output, new RegExp(`^${activity}\\s`, "m"));
+  }
 });
 
 test("formatTimelineEvent prefixes rendered events with sequence and event-id prefix", () => {

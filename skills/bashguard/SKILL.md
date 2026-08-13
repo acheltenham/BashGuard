@@ -42,6 +42,20 @@ bashguard inspect <session-selector> --event <event-id-or-sequence>
 bashguard inspect --session <session-selector> --event <event-id-or-sequence>
 ```
 
+Filter or export recorded evidence:
+
+```bash
+bashguard inspect <session-selector> --activity list
+bashguard inspect <session-selector> --activity shell
+bashguard inspect <session-selector> --activity shell --grep deploy
+bashguard inspect <session-selector> --type capture.gap
+bashguard inspect <session-selector> --activity shell --limit 200
+bashguard inspect <session-selector> --activity shell --all
+bashguard inspect <session-selector> --all --format jsonl
+```
+
+Activity categories are `shell`, `file`, `git`, `risk`, `capture`, `prompt`, `tool`, and `lifecycle`. Repeated activity/type flags use OR semantics; different filter kinds use AND semantics. Filtering happens before the default latest-50 limit. JSONL mode emits normalized recorded event envelopes only, with no headings on stdout.
+
 Generate a session debrief:
 
 ```bash

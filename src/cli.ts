@@ -74,10 +74,27 @@ export type DebriefSummary = {
   fileActivity: string[];
 };
 
+export type EvidenceFormat = "text" | "jsonl";
+export type ActivityKind = "shell" | "file" | "git" | "risk" | "capture" | "prompt" | "tool" | "lifecycle";
+
+export type EvidenceFilterOptions = {
+  activities?: string[];
+  eventTypes?: string[];
+  grep?: string;
+  limit?: number;
+  all?: boolean;
+};
+
 export type ParsedCommandArgs = {
   command?: string;
   sessionId?: string;
   eventId?: string;
+  activities?: string[];
+  eventTypes?: string[];
+  grep?: string;
+  limit?: number;
+  all?: boolean;
+  format?: EvidenceFormat;
   setupSubject?: string;
   setupScope?: "global" | "local";
 };
@@ -99,7 +116,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id]\n  bashguard attach --session <session-id>\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id]\n  bashguard attach --session <session-id>\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect <session-id> --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect <session-id> --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect <session-id> --activity list\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -108,6 +125,12 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   const command = rawCommand === "session" && args[0] === "list" ? "sessions" : rawCommand;
   let sessionId: string | undefined;
   let eventId: string | undefined;
+  const activities: string[] = [];
+  const eventTypes: string[] = [];
+  let grep: string | undefined;
+  let limit: number | undefined;
+  let all = false;
+  let format: EvidenceFormat | undefined;
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -131,6 +154,40 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       eventId = args[++index];
       continue;
     }
+    if (arg === "--activity") {
+      const activity = args[++index];
+      if (!activity || activity.startsWith("--")) throw new Error("`--activity` requires a value");
+      activities.push(activity);
+      continue;
+    }
+    if (arg === "--type") {
+      const eventType = args[++index];
+      if (!eventType || eventType.startsWith("--")) throw new Error("`--type` requires a value");
+      eventTypes.push(eventType);
+      continue;
+    }
+    if (arg === "--grep") {
+      grep = args[++index];
+      if (grep === undefined || grep.startsWith("--")) throw new Error("`--grep` requires a value");
+      continue;
+    }
+    if (arg === "--limit") {
+      const rawLimit = args[++index];
+      if (!rawLimit || rawLimit.startsWith("--")) throw new Error("`--limit` requires a value");
+      limit = Number(rawLimit);
+      continue;
+    }
+    if (arg === "--all") {
+      all = true;
+      continue;
+    }
+    if (arg === "--format") {
+      const rawFormat = args[++index];
+      if (!rawFormat || rawFormat.startsWith("--")) throw new Error("`--format` requires a value");
+      format = rawFormat as EvidenceFormat;
+      continue;
+    }
+    if (arg.startsWith("--")) throw new Error(`Unknown option: ${arg}`);
     if (command === "sessions" && arg.toLowerCase() === "list") continue;
     if (command === "inspect" && ["list", "events"].includes(arg.toLowerCase())) continue;
     if (!sessionId) sessionId = arg;
@@ -140,6 +197,12 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   if (command !== undefined) parsed.command = command;
   if (sessionId !== undefined) parsed.sessionId = sessionId;
   if (eventId !== undefined) parsed.eventId = eventId;
+  if (activities.length > 0) parsed.activities = activities;
+  if (eventTypes.length > 0) parsed.eventTypes = eventTypes;
+  if (grep !== undefined) parsed.grep = grep;
+  if (limit !== undefined) parsed.limit = limit;
+  if (all) parsed.all = true;
+  if (format !== undefined) parsed.format = format;
   return parsed;
 }
 
@@ -418,6 +481,70 @@ export function formatTimelineEvent(event: BashGuardEvent): string | undefined {
   if (!rendered) return undefined;
   const eventSelector = event.id.slice(0, 8).padEnd(8);
   return `${String(event.sequence).padStart(2)}  ${eventSelector}  ${renderTimestamp(event.timestamp)}  ${rendered}`;
+}
+
+const ACTIVITY_DESCRIPTIONS: Record<ActivityKind, string> = {
+  shell: "Pi Bash commands, user Bash commands, and command results",
+  file: "Read, edit, and write-tool requests and results",
+  git: "Recorded Git status snapshots",
+  risk: "Shell requests matching non-blocking risk rules",
+  capture: "Capture gaps or events with missing, redacted, or truncated evidence",
+  prompt: "Recorded prompt and agent-start context",
+  tool: "All recorded tool requests and results",
+  lifecycle: "Session, agent, and turn lifecycle events",
+};
+
+export function formatActivityList(): string {
+  return `${Object.entries(ACTIVITY_DESCRIPTIONS).map(([name, description]) => `${name.padEnd(12)} ${description}`).join("\n")}\n`;
+}
+
+function eventMatchesActivity(event: BashGuardEvent, activity: ActivityKind): boolean {
+  const toolName = event.toolName ?? getString(event.payload?.toolName);
+  if (activity === "shell") return event.type === "bash.user_requested" || ((event.type === "tool.requested" || event.type === "tool.completed") && toolName === "bash");
+  if (activity === "file") return (event.type === "tool.requested" || event.type === "tool.completed") && ["read", "edit", "write"].includes(toolName ?? "");
+  if (activity === "git") return event.type === "git.status.snapshot";
+  if (activity === "risk") return event.type === "tool.requested" && toolName === "bash" && classifyCommandRisk(commandFor(event) ?? "").length > 0;
+  if (activity === "capture") return event.type === "capture.gap" || (event.capture?.missing.length ?? 0) > 0 || (event.capture?.redacted.length ?? 0) > 0 || (event.capture?.truncated.length ?? 0) > 0;
+  if (activity === "prompt") return event.type === "agent.before_start";
+  if (activity === "tool") return event.type === "tool.requested" || event.type === "tool.completed";
+  return event.type.startsWith("session.") || event.type === "agent.started" || event.type === "agent.ended" || event.type.startsWith("turn.");
+}
+
+export function filterEvidenceEvents(events: BashGuardEvent[], options: EvidenceFilterOptions): { matches: BashGuardEvent[]; totalMatches: number } {
+  const activities = options.activities ?? [];
+  const eventTypes = options.eventTypes ?? [];
+  const grep = options.grep?.toLocaleLowerCase();
+  const filtered = events.filter((event) => {
+    if (activities.length > 0 && !activities.some((activity) => eventMatchesActivity(event, activity as ActivityKind))) return false;
+    if (eventTypes.length > 0 && !eventTypes.includes(event.type)) return false;
+    if (grep && !JSON.stringify(event).toLocaleLowerCase().includes(grep)) return false;
+    return true;
+  });
+  const limit = options.all ? undefined : options.limit ?? 50;
+  return {
+    matches: limit === undefined ? filtered : filtered.slice(-limit),
+    totalMatches: filtered.length,
+  };
+}
+
+function formatFilteredTimelineEvent(event: BashGuardEvent): string {
+  const rendered = renderEvent(event)?.replace(/\s+/g, " ").trim() ?? event.type;
+  const summary = rendered.length > 220 ? `${rendered.slice(0, 219)}…` : rendered;
+  return `${String(event.sequence).padStart(2)}  ${event.id.slice(0, 8).padEnd(8)}  ${renderTimestamp(event.timestamp)}  ${summary}`;
+}
+
+export function formatFilteredEvents(sessionSelector: string, events: BashGuardEvent[], totalMatches: number, format: EvidenceFormat): string {
+  if (format === "jsonl") return events.map((event) => JSON.stringify(normalizeEvent(event))).join("\n") + (events.length > 0 ? "\n" : "");
+  const qualifier = events.length < totalMatches ? "latest " : "";
+  const lines = [
+    "Filtered events",
+    "",
+    `Showing ${qualifier}${events.length} of ${totalMatches} matching events.`,
+    ...events.map(formatFilteredTimelineEvent),
+  ];
+  if (events.length < totalMatches) lines.push("", "Re-run the same filters with `--all` to show all matches.");
+  lines.push("", "Inspect one event:", `  bashguard inspect ${sessionSelector} --event <sequence-or-event-id-prefix>`);
+  return `${lines.join("\n")}\n`;
 }
 
 export function formatInspectableEvents(sessionSelector: string, events: BashGuardEvent[]): string {
@@ -1260,13 +1387,37 @@ export async function chooseSession(requestedId?: string, root = getDataRoot()):
   return sessions[0];
 }
 
-async function inspect(sessionId: string | undefined, eventIdOrSequence: string | undefined): Promise<void> {
+async function inspect(options: ParsedCommandArgs): Promise<void> {
+  const { sessionId, eventId: eventIdOrSequence } = options;
   if (!sessionId) {
-    throw new Error("Usage: bashguard inspect <session-id> --event <event-id-or-sequence>");
+    throw new Error("Usage: bashguard inspect <session-id> [--event <selector>|--activity <kind>|--type <event-type>]");
   }
+
+  if (options.activities?.includes("list")) {
+    if (options.activities.length > 1 || options.eventTypes || options.grep || options.limit !== undefined || options.all || options.format) {
+      throw new Error("`--activity list` cannot be combined with other filters");
+    }
+    process.stdout.write(formatActivityList());
+    return;
+  }
+
+  const unknownActivities = (options.activities ?? []).filter((activity) => !Object.hasOwn(ACTIVITY_DESCRIPTIONS, activity));
+  if (unknownActivities.length > 0) throw new Error(`Unknown activity: ${unknownActivities.join(", ")}. Run \`bashguard inspect ${sessionId} --activity list\`.`);
+  if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1)) throw new Error("`--limit` must be a positive integer");
+  if (options.limit !== undefined && options.all) throw new Error("`--limit` and `--all` cannot be combined");
+  if (options.format !== undefined && !["text", "jsonl"].includes(options.format)) throw new Error("`--format` must be text or jsonl");
+
+  const hasFilters = Boolean(options.activities?.length || options.eventTypes?.length || options.grep !== undefined || options.limit !== undefined || options.all || options.format);
+  if (eventIdOrSequence && hasFilters) throw new Error("`--event` cannot be combined with activity, type, search, limit, or format options");
 
   const session = await chooseSession(sessionId);
   const events = await readExistingEvents(session.eventsFile);
+
+  if (hasFilters) {
+    const filtered = filterEvidenceEvents(events, options);
+    process.stdout.write(formatFilteredEvents(sessionId, filtered.matches, filtered.totalMatches, options.format ?? "text"));
+    return;
+  }
 
   if (!eventIdOrSequence) {
     process.stdout.write(formatInspectableEvents(sessionId, events));
@@ -1380,13 +1531,14 @@ async function attach(requestedId?: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const { command, sessionId, eventId, setupSubject, setupScope } = parseCommandArgs(process.argv.slice(2));
+  const options = parseCommandArgs(process.argv.slice(2));
+  const { command, sessionId, setupSubject, setupScope } = options;
   try {
     if (command === "sessions") return await listSessions();
     if (command === "doctor") return await doctor();
     if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);
     if (command === "attach") return await attach(sessionId);
-    if (command === "inspect") return await inspect(sessionId, eventId);
+    if (command === "inspect") return await inspect(options);
     if (command === "debrief") return await debrief(sessionId);
     usage();
   } catch (error) {

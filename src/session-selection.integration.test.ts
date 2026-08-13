@@ -14,6 +14,7 @@ type StoredSession = {
   metadataId?: string;
   name?: string;
   repository?: string;
+  cwd?: string;
   active?: boolean;
   modifiedAt?: number;
   command?: string;
@@ -42,6 +43,7 @@ async function writeSession(root: string, session: StoredSession): Promise<void>
     schemaVersion: 1,
     sessionId: session.metadataId ?? session.id,
     repository: session.repository ?? "picker-integration",
+    cwd: session.cwd,
     name: session.name ?? session.id,
     processId: session.active ? process.pid : undefined,
   })}\n`);
@@ -111,6 +113,43 @@ test("selector-less non-TTY selection ignores a NUL session ID and auto-selects 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /valid-neighbor-selected/);
   assert.doesNotMatch(output, /malformed|Select a session|Choose one explicitly/);
+});
+
+test("duplicate metadata IDs are not displayed or selectable while a valid neighbor remains", async (t) => {
+  const duplicateId = "duplicate-metadata-id";
+  const root = await store(t, [
+    { id: "duplicate-directory-a", metadataId: duplicateId, command: "echo duplicate-a" },
+    { id: "duplicate-directory-b", metadataId: duplicateId, command: "echo duplicate-b" },
+    { id: "valid-neighbor", command: "echo unique-neighbor-selected" },
+  ]);
+
+  const listed = run(root, ["sessions"]);
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.match(listed.stdout, /valid-neighbor/);
+  assert.doesNotMatch(listed.stdout, /duplicate-metadata-id|duplicate-directory/);
+
+  const selected = run(root, ["inspect"]);
+  assert.equal(selected.status, 0, selected.stderr);
+  assert.match(selected.stdout, /unique-neighbor-selected/);
+  assert.doesNotMatch(combined(selected), /duplicate/);
+
+  const explicit = run(root, ["inspect", duplicateId]);
+  assert.notEqual(explicit.status, 0);
+  assert.match(combined(explicit), /was not found/);
+  assert.doesNotMatch(combined(explicit), /duplicate-a|duplicate-b/);
+});
+
+test("all duplicate metadata IDs produce the no-sessions error", async (t) => {
+  const root = await store(t, [
+    { id: "duplicate-directory-a", metadataId: "duplicate-only-id" },
+    { id: "duplicate-directory-b", metadataId: "duplicate-only-id" },
+  ]);
+
+  const result = run(root, ["inspect"]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(combined(result), /No BashGuard sessions found/);
+  assert.doesNotMatch(combined(result), /Choose one explicitly|duplicate-only-id/);
 });
 
 test("selector-less inspect auto-selects one session and renders its events with a copyable selector", async (t) => {
@@ -314,6 +353,28 @@ test("non-TTY remediation for a numeric session ID selects that displayed sessio
   assert.doesNotMatch(remediated.stdout, /wrong-index-session/);
 });
 
+test("numeric-looking non-TTY remediation executes against its displayed session", async (t) => {
+  const now = Date.now();
+  const targetId = "00000002-target";
+  const root = await store(t, [
+    { id: targetId, modifiedAt: now, command: "echo numeric-prefix-target" },
+    { id: "other-session", modifiedAt: now - 1_000, command: "echo wrong-row-two" },
+  ]);
+
+  const ambiguity = run(root, ["inspect"]);
+  const output = combined(ambiguity);
+  assert.notEqual(ambiguity.status, 0);
+  assert.match(output, /^1\s+complete\s+00000002-\s+/m);
+  const emittedCommand = output.split("\n").map((line) => line.trim())
+    .find((line) => line === "bashguard inspect 00000002-");
+  assert.ok(emittedCommand, output);
+
+  const remediated = runShell(root, emittedCommand);
+  assert.equal(remediated.status, 0, remediated.stderr);
+  assert.match(remediated.stdout, /numeric-prefix-target/);
+  assert.doesNotMatch(remediated.stdout, /wrong-row-two/);
+});
+
 test("non-TTY remediation prefix survives discovery reordering", async (t) => {
   const now = Date.now();
   const targetId = "durable-target-session";
@@ -388,6 +449,29 @@ test("noninteractive rows sanitize terminal controls without forging extra candi
   assert.doesNotMatch(output, /\u001b|\u009b/);
   assert.doesNotMatch(output, /^FORGED/m);
   assert.equal(output.split("\n").filter((line) => /^\d+\s+complete\s+/.test(line)).length, 2);
+});
+
+test("selector-less sole-session attach sanitizes every metadata header field", async (t) => {
+  const osc = "\u001b]0;FORGED\u0007";
+  const root = await store(t, [{
+    id: "malicious-header-directory",
+    metadataId: `session-${osc}\nFORGED-ID`,
+    name: `name-${osc}\nFORGED-NAME`,
+    repository: `repo-${osc}\nFORGED-REPO`,
+    cwd: `/tmp/cwd-${osc}\tFORGED-CWD`,
+  }]);
+
+  const result = run(root, ["attach", "--history", "0"]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /\u001b|\u0007|\t/);
+  assert.doesNotMatch(result.stdout, /^FORGED/m);
+  assert.match(result.stdout, /^Session session- \]0;FORGED FORGED-ID$/m);
+  assert.match(result.stdout, /^Repo    repo- \]0;FORGED FORGED-REPO$/m);
+  assert.match(result.stdout, /^Cwd     \/tmp\/cwd- \]0;FORGED FORGED-CWD$/m);
+  for (const headerPrefix of ["Session session-", "Repo    repo-", "Cwd     /tmp/cwd-"]) {
+    assert.equal(result.stdout.split("\n").filter((line) => line.startsWith(headerPrefix)).length, 1);
+  }
 });
 
 test("bare --event and option-valued --event fail before selection", async (t) => {

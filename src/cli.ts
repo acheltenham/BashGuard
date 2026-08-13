@@ -378,8 +378,15 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
     }
   }));
 
-  return sessions
-    .filter((session): session is SessionSummary => Boolean(session))
+  const discovered = sessions.filter((session): session is SessionSummary => Boolean(session));
+  const identityCounts = new Map<string, number>();
+  for (const session of discovered) {
+    const sessionId = session.metadata.sessionId;
+    identityCounts.set(sessionId, (identityCounts.get(sessionId) ?? 0) + 1);
+  }
+
+  return discovered
+    .filter((session) => identityCounts.get(session.metadata.sessionId) === 1)
     .sort((a, b) => Number(b.active) - Number(a.active) || b.modifiedAt - a.modifiedAt);
 }
 
@@ -1721,9 +1728,9 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
   const active = sessionSnapshotIsActive(session.metadata, existing);
 
   process.stdout.write(`BashGuard · ${active ? "live" : "completed"}\n`);
-  process.stdout.write(`Session ${session.metadata.sessionId}\n`);
-  process.stdout.write(`Repo    ${repo}\n`);
-  if (session.metadata.cwd) process.stdout.write(`Cwd     ${session.metadata.cwd}\n`);
+  process.stdout.write(`Session ${singleLineDisplay(session.metadata.sessionId)}\n`);
+  process.stdout.write(`Repo    ${singleLineDisplay(repo)}\n`);
+  if (session.metadata.cwd) process.stdout.write(`Cwd     ${singleLineDisplay(session.metadata.cwd)}\n`);
   process.stdout.write("─".repeat(60) + "\n");
 
   let offset = snapshot.offset;

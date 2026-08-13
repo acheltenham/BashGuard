@@ -53,6 +53,20 @@ test("discoverSessions excludes metadata session IDs containing NUL while retain
   assert.deepEqual(sessions.map((session) => session.metadata.sessionId), ["valid-neighbor"]);
 });
 
+test("discoverSessions excludes every session with a duplicate metadata ID while retaining valid neighbors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "duplicate-directory-a", [event(1, "session.started")]);
+  await writeSession(root, "duplicate-directory-b", [event(1, "session.started")]);
+  await writeSession(root, "valid-neighbor", [event(1, "session.started")]);
+  for (const directory of ["duplicate-directory-a", "duplicate-directory-b"]) {
+    await writeFile(join(root, directory, "session.json"), `${JSON.stringify({ schemaVersion: 1, sessionId: "duplicate-metadata-id", processId: 999_999 })}\n`);
+  }
+
+  const sessions = await discoverSessions(root);
+
+  assert.deepEqual(sessions.map((session) => session.metadata.sessionId), ["valid-neighbor"]);
+});
+
 test("discoverSessions treats a restart after an older shutdown as active when the current pid is alive", async () => {
   const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
   await writeSession(root, "session-a", [
@@ -190,6 +204,16 @@ test("resolveSessionChoice prefers an exact numeric ID before a row index", () =
 
   assert.equal(resolveSessionChoice("1", choices)?.session.metadata.sessionId, "1");
   assert.equal(resolveSessionChoice("2", choices)?.session.metadata.sessionId, "1");
+});
+
+test("indexSessionChoices expands a numeric-looking unique prefix that would resolve as another row", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("00000002-target", false),
+    sessionSummary("other-session", false),
+  ]);
+
+  assert.equal(choices[0]?.sessionIdPrefix, "00000002-");
+  assert.equal(resolveSessionChoice(choices[0]!.sessionIdPrefix, choices), choices[0]);
 });
 
 test("resolveSessionChoice rejects ambiguous prefixes", () => {

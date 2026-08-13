@@ -48,10 +48,13 @@ From the repository root:
 If there is at least one recorded session:
 
 ```bash
+./bin/bashguard attach
 ./bin/bashguard attach 1
 ./bin/bashguard attach 1 --history 0
 ./bin/bashguard attach 1 --all-history
+./bin/bashguard inspect
 ./bin/bashguard inspect 1
+./bin/bashguard debrief
 ./bin/bashguard debrief 1
 ```
 
@@ -59,6 +62,13 @@ Confirm:
 
 - `doctor` reports CLI path, package root, data dir, Pi package status, and next steps;
 - `sessions` output includes `#`, `SESSION`, `NAME`, `REPOSITORY`, and `UPDATED`;
+- with two simultaneous active sessions in an actual TTY, selector-less attach shows an active-only structured-text picker and accepts a non-first displayed global number; selector-less inspect/debrief show all discovered recorded sessions;
+- selector-less commands auto-select a sole eligible session, while explicit selectors bypass the picker; positional/`--session` values resolve exact ID, canonical positive decimal row, then unique prefix against the current snapshot;
+- piped or redirected ambiguous commands never prompt, exit nonzero, and list eligible snapshot-local rows with shell-quoted exact `--session-id=<full-session-id>` commands; a copied command still selects the displayed session after reordering and future prefix collisions, but fails not-found after target removal;
+- PTY-allocating automation is treated as interactive and uses an explicit selector to avoid prompting; explicit selectors are used for all automation;
+- Enter has no default, invalid input retries, and EOF/`Ctrl+C` cancels concisely, with no prompt timeout;
+- unknown inspect activity, missing `--session`, `--session-id`, or `--event` values, and mixed exact/snapshot selectors fail before session selection;
+- rows and attach headers contain no raw C0/C1 or Unicode format controls while preserving ordinary Unicode letters and emoji;
 - `attach 1` shows an evidence-grounded state/activity/capture/freshness snapshot;
 - default `attach 1` bounds narrated startup history, `--history 0` skips it, and `--all-history` restores it;
 - `inspect 1` lists events with sequence and event ID prefix examples;
@@ -121,7 +131,7 @@ Follow the full Milestone 0 checklist:
 docs/testing/milestone-0-smoke-checklist.md
 ```
 
-Confirm debrief language remains evidence-based:
+Confirm debrief language remains evidence-based and the capture architecture remains unchanged by session selection:
 
 - no causality claims for Git/file correlations;
 - risk notices are non-blocking;

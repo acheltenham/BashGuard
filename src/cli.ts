@@ -8,6 +8,9 @@ import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
+import { sessionChoiceDisplay, shellQuoteArgument, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
+import { promptForSessionChoice } from "./session-picker.ts";
+
 export type SessionMetadata = {
   schemaVersion?: number;
   sessionId: string;
@@ -19,6 +22,7 @@ export type SessionMetadata = {
   startedAt?: string;
   processId?: number;
   piMode?: string;
+  recorderSource?: string;
 };
 
 export type CaptureMetadata = {
@@ -50,6 +54,28 @@ export type SessionSummary = {
   eventsFile: string;
   modifiedAt: number;
   active: boolean;
+};
+
+export type SessionCommand = "attach" | "inspect" | "debrief";
+
+export type SessionChoice = {
+  selector: number;
+  sessionIdPrefix: string;
+  session: SessionSummary;
+};
+
+export type SessionSelectionResult = {
+  session: SessionSummary;
+  selector: string;
+};
+
+export type SessionSelectionOptions = {
+  root?: string;
+  exactSessionId?: string;
+  input?: NodeJS.ReadableStream & { isTTY?: boolean };
+  output?: NodeJS.WritableStream & { isTTY?: boolean };
+  discoverSessions?: typeof discoverSessions;
+  prompt?: typeof promptForSessionChoice;
 };
 
 export type DebriefSummary = {
@@ -89,6 +115,7 @@ export type EvidenceFilterOptions = {
 export type ParsedCommandArgs = {
   command?: string;
   sessionId?: string;
+  exactSessionId?: string;
   eventId?: string;
   activities?: string[];
   eventTypes?: string[];
@@ -119,7 +146,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session <session-id> [--history <n>|--all-history]\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect <session-id> --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect <session-id> --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect <session-id> --activity list\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session=<session-selector> [--history <n>|--all-history]\n  bashguard attach --session-id=<exact-session-id> [--history <n>|--all-history]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-selector> --event <event-id-or-sequence>\n  bashguard inspect --session-id=<exact-session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-selector>\n  bashguard debrief --session-id=<exact-session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -127,6 +154,7 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   const [rawCommand, ...args] = argv;
   const command = rawCommand === "session" && args[0] === "list" ? "sessions" : rawCommand;
   let sessionId: string | undefined;
+  let exactSessionId: string | undefined;
   let eventId: string | undefined;
   const activities: string[] = [];
   const eventTypes: string[] = [];
@@ -151,12 +179,38 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       const parsed: ParsedCommandArgs = { command: "setup", setupSubject: "cli", setupScope: "local" };
       return parsed;
     }
+    if (arg.startsWith("--session-id=")) {
+      const requestedSession = arg.slice("--session-id=".length);
+      if (requestedSession.length === 0) throw new Error("--session-id requires a value");
+      if (sessionId !== undefined) throw new Error("cannot combine --session-id with a positional or --session selector");
+      exactSessionId = requestedSession;
+      continue;
+    }
+    if (arg === "--session-id") {
+      const requestedSession = args[++index];
+      if (!requestedSession || requestedSession.startsWith("--")) throw new Error("--session-id requires a value");
+      if (sessionId !== undefined) throw new Error("cannot combine --session-id with a positional or --session selector");
+      exactSessionId = requestedSession;
+      continue;
+    }
+    if (arg.startsWith("--session=")) {
+      const requestedSession = arg.slice("--session=".length);
+      if (requestedSession.length === 0) throw new Error("`--session` requires a value");
+      if (exactSessionId !== undefined) throw new Error("cannot combine --session-id with a positional or --session selector");
+      sessionId = requestedSession;
+      continue;
+    }
     if (arg === "--session") {
-      sessionId = args[++index];
+      const requestedSession = args[++index];
+      if (!requestedSession || requestedSession.startsWith("--")) throw new Error("`--session` requires a value");
+      if (exactSessionId !== undefined) throw new Error("cannot combine --session-id with a positional or --session selector");
+      sessionId = requestedSession;
       continue;
     }
     if (arg === "--event") {
-      eventId = args[++index];
+      const requestedEvent = args[++index];
+      if (!requestedEvent || requestedEvent.startsWith("--")) throw new Error("`--event` requires a value");
+      eventId = requestedEvent;
       continue;
     }
     if (arg === "--activity") {
@@ -205,12 +259,14 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
     if (arg.startsWith("--")) throw new Error(`Unknown option: ${arg}`);
     if (command === "sessions" && arg.toLowerCase() === "list") continue;
     if (command === "inspect" && ["list", "events"].includes(arg.toLowerCase())) continue;
+    if (exactSessionId !== undefined) throw new Error("cannot combine --session-id with a positional or --session selector");
     if (!sessionId) sessionId = arg;
   }
 
   const parsed: ParsedCommandArgs = {};
   if (command !== undefined) parsed.command = command;
   if (sessionId !== undefined) parsed.sessionId = sessionId;
+  if (exactSessionId !== undefined) parsed.exactSessionId = exactSessionId;
   if (eventId !== undefined) parsed.eventId = eventId;
   if (activities.length > 0) parsed.activities = activities;
   if (eventTypes.length > 0) parsed.eventTypes = eventTypes;
@@ -316,6 +372,25 @@ function sessionSnapshotIsActive(metadata: SessionMetadata, events: BashGuardEve
   return !latestSessionLifecycleIsShutdown(events) || metadataProvesRestartAfterShutdown(metadata, events);
 }
 
+function validSessionId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && !value.includes("\0");
+}
+
+export function normalizeSessionMetadata(value: unknown): SessionMetadata | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const source = value as Record<string, unknown>;
+  if (!validSessionId(source.sessionId)) return undefined;
+
+  const metadata: SessionMetadata = { sessionId: source.sessionId };
+  if (typeof source.schemaVersion === "number") metadata.schemaVersion = source.schemaVersion;
+  for (const key of ["cwd", "repository", "name", "title", "sessionName", "startedAt", "piMode", "recorderSource"] as const) {
+    const optional = source[key];
+    if (typeof optional === "string") metadata[key] = optional;
+  }
+  if (typeof source.processId === "number" && Number.isFinite(source.processId)) metadata.processId = source.processId;
+  return metadata;
+}
+
 export async function discoverSessions(root = getDataRoot()): Promise<SessionSummary[]> {
   let entries: string[] = [];
   try {
@@ -328,8 +403,8 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
     const directory = join(root, entry);
     const metadataPath = join(directory, "session.json");
     const eventsFile = join(directory, "events.jsonl");
-    const metadata = await readJsonFile<SessionMetadata>(metadataPath);
-    if (!metadata?.sessionId || !existsSync(eventsFile)) return undefined;
+    const metadata = normalizeSessionMetadata(await readJsonFile<unknown>(metadataPath));
+    if (!metadata || !existsSync(eventsFile)) return undefined;
 
     try {
       const info = await stat(eventsFile);
@@ -346,18 +421,45 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
     }
   }));
 
-  return sessions
-    .filter((session): session is SessionSummary => Boolean(session))
+  const discovered = sessions.filter((session): session is SessionSummary => Boolean(session));
+  const identityCounts = new Map<string, number>();
+  for (const session of discovered) {
+    const sessionId = session.metadata.sessionId;
+    identityCounts.set(sessionId, (identityCounts.get(sessionId) ?? 0) + 1);
+  }
+
+  return discovered
+    .filter((session) => identityCounts.get(session.metadata.sessionId) === 1)
     .sort((a, b) => Number(b.active) - Number(a.active) || b.modifiedAt - a.modifiedAt);
 }
 
-function sessionPrefix(sessionId: string, allSessionIds: string[]): string {
-  const minLength = Math.min(8, sessionId.length);
-  for (let length = minLength; length <= sessionId.length; length++) {
-    const prefix = sessionId.slice(0, length);
-    if (allSessionIds.filter((id) => id.startsWith(prefix)).length === 1) return prefix;
+export function indexSessionChoices(sessions: SessionSummary[]): SessionChoice[] {
+  const prefixes = uniqueSessionIdPrefixes(sessions.map((session) => session.metadata.sessionId));
+  return sessions.map((session, index) => ({ selector: index + 1, sessionIdPrefix: prefixes[index]!, session }));
+}
+
+export function eligibleSessionChoices(command: SessionCommand, choices: SessionChoice[]): SessionChoice[] {
+  if (command !== "attach") return choices;
+  const active = choices.filter((choice) => choice.session.active);
+  return active.length > 0 ? active : choices;
+}
+
+export function resolveSessionChoice(requestedId: string, choices: SessionChoice[]): SessionChoice | undefined {
+  const exact = choices.find((choice) => choice.session.metadata.sessionId === requestedId);
+  if (exact) return exact;
+
+  if (/^[1-9]\d*$/u.test(requestedId)) {
+    const index = Number(requestedId);
+    if (Number.isSafeInteger(index)) {
+      const indexed = choices.find((choice) => choice.selector === index);
+      if (indexed) return indexed;
+    }
   }
-  return sessionId;
+
+  const prefixMatches = choices.filter((choice) => choice.session.metadata.sessionId.startsWith(requestedId));
+  if (prefixMatches.length === 1) return prefixMatches[0];
+  if (prefixMatches.length > 1) throw new Error(`Session prefix ${singleLineDisplay(requestedId)} is ambiguous`);
+  return undefined;
 }
 
 function formatAge(timestamp: number): string {
@@ -374,14 +476,12 @@ function sessionDisplayName(metadata: SessionMetadata): string {
 }
 
 export function formatSessionList(sessions: SessionSummary[]): string {
-  const sessionIds = sessions.map((session) => session.metadata.sessionId);
+  const prefixes = uniqueSessionIdPrefixes(sessions.map((session) => session.metadata.sessionId));
   const lines = ["#  STATE     SESSION              NAME                  REPOSITORY           UPDATED"];
   for (const [index, session] of sessions.entries()) {
-    const state = session.active ? "active" : "complete";
-    const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
-    const name = sessionDisplayName(session.metadata);
-    const selector = String(index + 1).padEnd(2);
-    lines.push(`${selector} ${state.padEnd(9)} ${sessionPrefix(session.metadata.sessionId, sessionIds).padEnd(20)} ${name.slice(0, 20).padEnd(20)} ${repo.slice(0, 20).padEnd(20)} ${formatAge(session.modifiedAt)}`);
+    const row = sessionChoiceDisplay({ selector: index + 1, sessionIdPrefix: prefixes[index]!, session });
+    const selector = row.selector.padEnd(2);
+    lines.push(`${selector} ${row.state.padEnd(9)} ${row.sessionIdPrefix.padEnd(20)} ${row.name.slice(0, 20).padEnd(20)} ${row.repository.slice(0, 20).padEnd(20)} ${singleLineDisplay(formatAge(session.modifiedAt))}`);
   }
 
   lines.push("", "Use a # or SESSION prefix, for example:", "  bashguard attach 1", "  bashguard inspect 1 --event <event-id-or-sequence>", "  bashguard debrief 1");
@@ -1507,19 +1607,95 @@ export function formatDebrief(summary: DebriefSummary, options: DebriefFormatOpt
   return `${lines.join("\n")}\n`;
 }
 
-function formatSessionNotFound(requestedId: string, root: string, sessions: SessionSummary[]): string {
+function formatSessionNotFound(
+  requestedId: string,
+  root: string,
+  sessions: SessionSummary[],
+  command: SessionCommand = "attach",
+): string {
   return [
-    `Session ${requestedId} was not found in ${root}.`,
+    `Session ${singleLineDisplay(requestedId)} was not found in ${root}.`,
     "",
-    "BashGuard can only attach to sessions recorded while the BashGuard extension was loaded.",
+    command === "attach"
+      ? "BashGuard can only attach to sessions recorded while the BashGuard extension was loaded."
+      : `BashGuard ${command} can only use sessions recorded while the BashGuard extension was loaded.`,
     "Older Pi sessions or sessions recorded with a different BASHGUARD_DATA_DIR are not available here.",
     "",
     sessions.length > 0 ? "Available BashGuard sessions:" : undefined,
     sessions.length > 0 ? formatSessionList(sessions).trimEnd() : undefined,
     "Run:",
     "  bashguard sessions",
-    "  bashguard attach 1",
+    `  bashguard ${command} 1`,
   ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function formatNonInteractiveSessionChoices(command: SessionCommand, choices: readonly SessionChoice[]): string {
+  const lines = [
+    `More than one eligible session exists for \`bashguard ${command}\`.`,
+    "Choose one explicitly:",
+  ];
+
+  for (const choice of choices) {
+    const row = sessionChoiceDisplay(choice);
+    lines.push(`${row.selector}  ${row.state}  ${row.sessionIdPrefix}  ${row.name}  ${row.repository}`);
+  }
+
+  lines.push("", "Run one of:");
+  for (const choice of choices) {
+    const sessionArgument = `--session-id=${choice.session.metadata.sessionId}`;
+    lines.push(`  bashguard ${command} ${shellQuoteArgument(sessionArgument)}`);
+  }
+  return lines.join("\n");
+}
+
+export async function selectSessionForCommandResult(
+  command: SessionCommand,
+  requestedId: string | undefined,
+  options: SessionSelectionOptions = {},
+): Promise<SessionSelectionResult> {
+  const root = options.root ?? getDataRoot();
+  const discover = options.discoverSessions ?? discoverSessions;
+  const sessions = await discover(root);
+  if (sessions.length === 0) throw new Error(`No BashGuard sessions found in ${root}`);
+
+  const choices = indexSessionChoices(sessions);
+  let selected: SessionChoice;
+  if (options.exactSessionId !== undefined) {
+    const choice = choices.find(({ session }) => session.metadata.sessionId === options.exactSessionId);
+    if (!choice) throw new Error(formatSessionNotFound(options.exactSessionId, root, sessions, command));
+    selected = choice;
+  } else if (requestedId !== undefined) {
+    const choice = resolveSessionChoice(requestedId, choices);
+    if (!choice) throw new Error(formatSessionNotFound(requestedId, root, sessions, command));
+    selected = choice;
+  } else {
+    const eligible = eligibleSessionChoices(command, choices);
+    if (eligible.length === 1) {
+      selected = eligible[0]!;
+    } else {
+      const input = options.input ?? process.stdin;
+      const output = options.output ?? process.stdout;
+      if (input.isTTY !== true || output.isTTY !== true) {
+        throw new Error(formatNonInteractiveSessionChoices(command, eligible));
+      }
+      selected = await (options.prompt ?? promptForSessionChoice)(eligible, { input, output });
+    }
+  }
+
+  const rawSelector = requestedId ?? selected.sessionIdPrefix;
+  const requiresNamedSelector = rawSelector.startsWith("--") || ["list", "events"].includes(rawSelector.toLowerCase());
+  const selector = options.exactSessionId !== undefined
+    ? shellQuoteArgument(`--session-id=${options.exactSessionId}`)
+    : shellQuoteArgument(requiresNamedSelector ? `--session=${rawSelector}` : rawSelector);
+  return { session: selected.session, selector };
+}
+
+export async function selectSessionForCommand(
+  command: SessionCommand,
+  requestedId: string | undefined,
+  options: SessionSelectionOptions = {},
+): Promise<SessionSummary> {
+  return (await selectSessionForCommandResult(command, requestedId, options)).session;
 }
 
 export async function chooseSession(requestedId?: string, root = getDataRoot()): Promise<SessionSummary> {
@@ -1527,14 +1703,8 @@ export async function chooseSession(requestedId?: string, root = getDataRoot()):
   if (sessions.length === 0) throw new Error(`No BashGuard sessions found in ${root}`);
 
   if (requestedId) {
-    const index = Number(requestedId);
-    if (Number.isInteger(index) && index >= 1 && index <= sessions.length) return sessions[index - 1]!;
-
-    const exact = sessions.find((session) => session.metadata.sessionId === requestedId);
-    if (exact) return exact;
-    const prefixMatches = sessions.filter((session) => session.metadata.sessionId.startsWith(requestedId));
-    if (prefixMatches.length === 1) return prefixMatches[0];
-    if (prefixMatches.length > 1) throw new Error(`Session prefix ${requestedId} is ambiguous`);
+    const choice = resolveSessionChoice(requestedId, indexSessionChoices(sessions));
+    if (choice) return choice.session;
     throw new Error(formatSessionNotFound(requestedId, root, sessions));
   }
 
@@ -1545,10 +1715,7 @@ export async function chooseSession(requestedId?: string, root = getDataRoot()):
 }
 
 async function inspect(options: ParsedCommandArgs): Promise<void> {
-  const { sessionId, eventId: eventIdOrSequence } = options;
-  if (!sessionId) {
-    throw new Error("Usage: bashguard inspect <session-id> [--event <selector>|--activity <kind>|--type <event-type>]");
-  }
+  const { sessionId: requestedId, eventId: eventIdOrSequence } = options;
 
   if (options.activities?.includes("list")) {
     if (options.activities.length > 1 || options.eventTypes || options.grep || options.limit !== undefined || options.all || options.format) {
@@ -1559,7 +1726,9 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
   }
 
   const unknownActivities = (options.activities ?? []).filter((activity) => !Object.hasOwn(ACTIVITY_DESCRIPTIONS, activity));
-  if (unknownActivities.length > 0) throw new Error(`Unknown activity: ${unknownActivities.join(", ")}. Run \`bashguard inspect ${sessionId} --activity list\`.`);
+  if (unknownActivities.length > 0) {
+    throw new Error(`Unknown activity: ${unknownActivities.join(", ")}. Run \`bashguard inspect --activity list\`.`);
+  }
   if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1)) throw new Error("`--limit` must be a positive integer");
   if (options.limit !== undefined && options.all) throw new Error("`--limit` and `--all` cannot be combined");
   if (options.format !== undefined && !["text", "jsonl"].includes(options.format)) throw new Error("`--format` must be text or jsonl");
@@ -1567,17 +1736,22 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
   const hasFilters = Boolean(options.activities?.length || options.eventTypes?.length || options.grep !== undefined || options.limit !== undefined || options.all || options.format);
   if (eventIdOrSequence && hasFilters) throw new Error("`--event` cannot be combined with activity, type, search, limit, or format options");
 
-  const session = await chooseSession(sessionId);
+  const selection = await selectSessionForCommandResult("inspect", requestedId, {
+    exactSessionId: options.exactSessionId,
+    input: process.stdin,
+    output: process.stdout,
+  });
+  const { session, selector: effectiveSelector } = selection;
   const events = await readExistingEvents(session.eventsFile);
 
   if (hasFilters) {
     const filtered = filterEvidenceEvents(events, options);
-    process.stdout.write(formatFilteredEvents(sessionId, filtered.matches, filtered.totalMatches, options.format ?? "text"));
+    process.stdout.write(formatFilteredEvents(effectiveSelector, filtered.matches, filtered.totalMatches, options.format ?? "text"));
     return;
   }
 
   if (!eventIdOrSequence) {
-    process.stdout.write(formatInspectableEvents(sessionId, events));
+    process.stdout.write(formatInspectableEvents(effectiveSelector, events));
     return;
   }
 
@@ -1585,7 +1759,7 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
   if (!event) {
     const matches = sequenceMatches(events, eventIdOrSequence);
     if (matches.length > 1) {
-      throw new Error(`Event sequence ${eventIdOrSequence} is ambiguous (${matches.length} matches). Use an event ID prefix from \`bashguard inspect ${sessionId}\`.`);
+      throw new Error(`Event sequence ${eventIdOrSequence} is ambiguous (${matches.length} matches). Use an event ID prefix from \`bashguard inspect ${effectiveSelector}\`.`);
     }
     throw new Error(`Event ${eventIdOrSequence} was not found in session ${session.metadata.sessionId}`);
   }
@@ -1593,12 +1767,16 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
   process.stdout.write(formatEventInspection(event));
 }
 
-async function debrief(sessionId: string | undefined): Promise<void> {
-  if (!sessionId) throw new Error("Usage: bashguard debrief <session-id>");
-
-  const session = await chooseSession(sessionId);
+async function debrief(options: ParsedCommandArgs): Promise<void> {
+  const requestedId = options.sessionId;
+  const selection = await selectSessionForCommandResult("debrief", requestedId, {
+    exactSessionId: options.exactSessionId,
+    input: process.stdin,
+    output: process.stdout,
+  });
+  const { session, selector: effectiveSelector } = selection;
   const events = await readExistingEvents(session.eventsFile);
-  process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: sessionId, sessionState: session.active ? "active" : "complete" }));
+  process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: effectiveSelector, sessionState: session.active ? "active" : "complete" }));
 }
 
 async function attach(options: ParsedCommandArgs): Promise<void> {
@@ -1606,16 +1784,21 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
   if (options.attachHistory !== undefined && (!Number.isInteger(options.attachHistory) || options.attachHistory < 0)) throw new Error("`--history` must be a non-negative integer");
   if (options.attachHistory !== undefined && options.allHistory) throw new Error("`--history` and `--all-history` cannot be combined");
   const history = options.attachHistory ?? 50;
-  const session = await chooseSession(requestedId);
+  const selection = await selectSessionForCommandResult("attach", requestedId, {
+    exactSessionId: options.exactSessionId,
+    input: process.stdin,
+    output: process.stdout,
+  });
+  const { session } = selection;
   const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
   const snapshot = await readAttachSnapshot(session.eventsFile);
   const existing = snapshot.events;
   const active = sessionSnapshotIsActive(session.metadata, existing);
 
   process.stdout.write(`BashGuard · ${active ? "live" : "completed"}\n`);
-  process.stdout.write(`Session ${session.metadata.sessionId}\n`);
-  process.stdout.write(`Repo    ${repo}\n`);
-  if (session.metadata.cwd) process.stdout.write(`Cwd     ${session.metadata.cwd}\n`);
+  process.stdout.write(`Session ${singleLineDisplay(session.metadata.sessionId)}\n`);
+  process.stdout.write(`Repo    ${singleLineDisplay(repo)}\n`);
+  if (session.metadata.cwd) process.stdout.write(`Cwd     ${singleLineDisplay(session.metadata.cwd)}\n`);
   process.stdout.write("─".repeat(60) + "\n");
 
   let offset = snapshot.offset;
@@ -1630,7 +1813,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     if (rendered) process.stdout.write(`${rendered}\n`);
   }
 
-  const sessionSelector = requestedId ?? session.metadata.sessionId.slice(0, 8);
+  const sessionSelector = selection.selector;
   if (historySelection.visible.length > 0) process.stdout.write("─".repeat(60) + "\n");
   if (!active) {
     process.stdout.write(formatAttachGuidance(sessionSelector, {
@@ -1727,15 +1910,15 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const options = parseCommandArgs(process.argv.slice(2));
-  const { command, sessionId, setupSubject, setupScope } = options;
   try {
+    const options = parseCommandArgs(process.argv.slice(2));
+    const { command, setupSubject, setupScope } = options;
     if (command === "sessions") return await listSessions();
     if (command === "doctor") return await doctor();
     if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);
     if (command === "attach") return await attach(options);
     if (command === "inspect") return await inspect(options);
-    if (command === "debrief") return await debrief(sessionId);
+    if (command === "debrief") return await debrief(options);
     usage();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

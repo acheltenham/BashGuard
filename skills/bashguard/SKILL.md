@@ -23,19 +23,23 @@ bashguard setup cli --local
 Attach to a session timeline:
 
 ```bash
+bashguard attach
 bashguard attach <session-selector>
 bashguard attach <session-selector> --history 100
 bashguard attach <session-selector> --history 0
 bashguard attach <session-selector> --all-history
-bashguard attach --session <session-selector>
+bashguard attach --session <snapshot-selector>
+bashguard attach --session-id=<full-session-id>
 ```
 
 List inspectable events for a session:
 
 ```bash
+bashguard inspect
 bashguard inspect <session-selector>
 bashguard inspect <session-selector> list events
-bashguard inspect --session <session-selector>
+bashguard inspect --session <snapshot-selector>
+bashguard inspect --session-id=<full-session-id>
 ```
 
 Inspect one event by event ID, event ID prefix, or sequence:
@@ -62,8 +66,10 @@ Activity categories are `shell`, `file`, `git`, `risk`, `capture`, `prompt`, `to
 Generate a session debrief:
 
 ```bash
+bashguard debrief
 bashguard debrief <session-selector>
-bashguard debrief --session <session-selector>
+bashguard debrief --session <snapshot-selector>
+bashguard debrief --session-id=<full-session-id>
 ```
 
 Update installed Pi packages:
@@ -114,7 +120,11 @@ BashGuard may surface non-blocking risk notices for a small explicit set of risk
 
 Attach begins with a grounded startup status snapshot, then defaults to the latest 50 narrated historical events and follows every new narrated event. `Current activity` means a correlated tool request was recorded without a later matching completion; it does not prove execution is still in progress. Otherwise attach shows the latest narrated recorded activity. Capture status and freshness come from recorded event metadata. `--history N` changes only startup history, `--history 0` follows from now, and `--all-history` restores full historical narration. Complete recorded evidence remains available through inspect/JSONL.
 
-Prefer session `#` selectors from `bashguard sessions` when available. Unique session prefixes are also acceptable. If `sessions` shows a `NAME` column, use it only as human context; selectors and prefixes remain the command inputs. Do not ask users to copy middle-truncated display IDs.
+Selector-less `attach`, `inspect`, and `debrief` auto-select a sole eligible session. Attach considers active sessions first and, when any are active, limits multiple candidates to active sessions; with no active sessions it considers all discovered completed sessions. Inspect and debrief consider all discovered recorded sessions, active and completed. Multiple candidates open a structured-text picker only when both stdin and stdout are TTYs. Enter has no default, an exact displayed number is required, invalid input retries, and EOF or `Ctrl+C` cancels concisely.
+
+Non-TTY scripts, pipes, and redirected output never prompt: ambiguity exits nonzero with eligible rows and shell-quoted `--session-id=<full-session-id>` commands. Automation that allocates a PTY is interactive by contract and can wait for input, so always pass an explicit selector for automation and agent-driven CLI calls. Positional and `--session` selectors resolve exact ID, then canonical positive decimal row number, then unique prefix against the current discovery snapshot. Picker numbers retain their global positions and are not locally renumbered, but numbers and prefixes can change or collide after later discovery. `--session-id` is exact-only, never falls back, and is the durable form for generated remediation and automation.
+
+Use snapshot-local `#` selectors or prefixes only for immediate use against the current discovery order. Use `--session-id=<full-session-id>` whenever identity must survive reordering or future prefix collisions; if that full identity is removed, exact selection must fail rather than choose a replacement. If `sessions` shows a `NAME` column, use it only as human context. Do not ask users to copy middle-truncated display IDs.
 
 ## Evidence Rules
 

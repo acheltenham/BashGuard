@@ -14,16 +14,16 @@ Make selector-less `attach`, `inspect`, and `debrief` convenient in an interacti
 
 - one active session selects automatically;
 - multiple active sessions show a picker containing active sessions only;
-- no active sessions show a picker containing recent completed sessions;
-- one eligible completed session selects automatically.
+- with no active sessions, all discovered completed sessions become the candidates;
+- any sole eligible session, active or completed, selects automatically; multiple completed candidates require the same TTY picker policy.
 
-`bashguard inspect` and `bashguard debrief` without a selector consider all recent active and completed sessions. One eligible session selects automatically; multiple sessions require a picker.
+`bashguard inspect` and `bashguard debrief` without a selector consider all discovered recorded sessions, active and completed. One eligible session selects automatically; multiple sessions require a picker.
 
-Explicit list indexes, exact session IDs, and unique ID prefixes retain their current behavior and bypass interaction. The picker requires an explicit valid number; Enter never silently chooses a default.
+Positional and `--session` selectors bypass interaction and resolve against the current snapshot: exact ID first, then a canonical positive decimal index, then a unique prefix. `--session-id` is a separate exact-only selector: it matches only the full metadata session ID and never falls back to an index or prefix. The picker requires an explicit valid number; Enter never silently chooses a default.
 
 ## Architecture and data flow
 
-Session discovery produces one stable, ordered snapshot for a selection operation. A pure policy function derives eligible candidates by command. Existing explicit-selector resolution works against that same snapshot.
+Session discovery produces one active-first ordered snapshot for a selection operation. A pure policy function derives eligible candidates by command. Existing explicit-selector resolution works against that same full snapshot. Numeric selectors are assigned before command-specific filtering, so an active-only attach picker retains the global positions from that displayed `bashguard sessions` snapshot rather than locally renumbering its subset. They are stable within that snapshot, but metadata or ordering changes can assign a number to a different session later; an explicit positional/`--session` number resolves against the current discovery order unless it exactly matches a session ID. Because active sessions come first in the snapshot, eligible active selectors are currently contiguous. Session ID prefixes are derived against every session in the snapshot, including completed sessions hidden from that picker. They are snapshot-local display selectors because a future session can introduce a collision. Durable generated commands use the full identity through exact-only `--session-id`.
 
 A shared asynchronous selector then either:
 
@@ -31,43 +31,41 @@ A shared asynchronous selector then either:
 2. invokes an interactive terminal adapter for multiple candidates; or
 3. returns an actionable error when interaction is unavailable.
 
-The terminal adapter uses Node readline with injectable input and output streams. It renders the existing numbered session format, validates input, and returns the selected `SessionSummary`. This remains separate from the future split-pane TUI.
+The terminal adapter uses Node readline with injectable input and output streams. It renders numbered session rows from the supplied choices, validates input, and returns the selected choice from that snapshot. This remains separate from the future split-pane TUI.
 
-`attach`, `inspect`, and `debrief` call the shared selector. `inspect` and `debrief` no longer reject an omitted selector before selection. The selected snapshot is passed directly to command execution; discovery is not repeated after rendering the picker.
+`attach`, `inspect`, and `debrief` call the shared selector. `inspect` and `debrief` no longer reject an omitted selector before selection. Argument errors that do not depend on a selected session—including an unknown inspect activity, a missing value after `--session`, `--session-id`, or `--event`, and combining `--session-id` with another session selector—are validated before selection. The selected snapshot is passed directly to command execution; discovery is not repeated after rendering the picker.
 
 ## Interactive and non-interactive behavior
 
-The picker opens only when both stdin and stdout report interactive TTY capability. This prevents scripts, pipes, redirected output, and automation from hanging.
+The picker opens only when both stdin and stdout report interactive TTY capability. Non-TTY scripts, pipes, and redirected output therefore never prompt. Automation that allocates a PTY is interactive by contract and can legitimately wait for input; it must pass an explicit selector to avoid prompting. Explicit selectors are recommended for all automation, and no prompt timeout is imposed.
 
 For multiple non-interactive candidates, BashGuard exits non-zero with:
 
 - a concise ambiguity explanation;
 - the numbered eligible-session list;
-- a copyable command using a numeric selector.
+- a copyable command using each choice's complete raw session ID as one shell-quoted `--session-id=<value>` argument.
 
-Blank, non-numeric, and out-of-range input prints concise range guidance and prompts again. EOF cancels with a concise error. `Ctrl+C` exits cleanly without a stack trace or accidental selection.
+Only an exact displayed integer is accepted. Blank, non-numeric, whitespace-padded, and unavailable input prints concise selector guidance and prompts again; Enter has no default. EOF cancels with a concise error. `Ctrl+C` exits cleanly without a stack trace or accidental selection.
 
-Session files may change after discovery, but picker numbering and selection remain tied to the displayed snapshot. Existing degraded-file behavior applies after selection.
+Session files may change after discovery, but picker numbering and selection remain tied to the displayed snapshot. Neither numbers nor prefixes promise the same identity in a later discovery. Emitted exact-ID commands do: they continue selecting that identity after reordering or new prefix collisions, and fail not-found if the identity disappears. Existing degraded-file behavior applies after selection.
 
 ## Presentation
 
 The picker uses structured text and enough context to distinguish sessions:
 
 ```text
-Multiple active sessions
-
-#  SESSION   NAME       REPOSITORY      STATE   UPDATED
-1  019f…     api-work   backend         active  4s ago
-2  01a0…     ui-work    portfolio-site  active  18s ago
-
-Select a session [1-2]:
+1  019fc93a-1  api-work  backend  active  updated 2026-08-13T12:00:00.000Z
+2  019fc93a-2  ui-work  portfolio-site  active  updated 2026-08-13T11:59:46.000Z
+Select a session [1, 2]:
 ```
+
+The active selectors shown here are contiguous because discovery orders active sessions first, but they still retain their original global selectors rather than being locally renumbered. A completed session that is part of the full snapshot but hidden from the active-only attach picker can require a longer-than-expected globally unique prefix.
 
 It does not rely on color, mouse input, or a full-screen terminal mode.
 
 ## Evidence and compatibility boundaries
 
-The picker changes selection only. It does not alter stored events, evidence projection, capture semantics, attach history, inspect filtering, debrief narration, or explicit selectors.
+The picker changes selection only. It does not alter stored events, evidence/capture architecture, evidence projection, capture semantics, attach history, inspect filtering, debrief narration, or explicit selectors.
 
 Plain-text and JSONL workflows remain scriptable. BashGuard never chooses among multiple candidates merely because one is newest.
 
@@ -82,10 +80,10 @@ Write tests first for:
 - picker invocation only for multiple candidates with interactive streams;
 - blank, invalid, and out-of-range input retries;
 - EOF and interruption cancellation;
-- deterministic non-interactive errors with copyable selectors;
-- stable selection from one discovery snapshot;
+- deterministic non-interactive errors with durable exact `--session-id=<full-ID>` commands;
+- snapshot-local numeric/prefix selection and durable exact remediation after reordering, future collisions, and target removal;
 - selector-less attach, inspect, and debrief integration behavior;
-- regression coverage that piped/scripted commands never prompt.
+- regression coverage that piped and other non-TTY scripted commands never prompt.
 
 Final validation includes the complete automated gate and a real simultaneous-Pi-session smoke test.
 

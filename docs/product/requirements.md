@@ -106,7 +106,7 @@ bashguard sessions
 Requirements:
 
 - discover the active Pi session for the current repository when unambiguous;
-- list active and recent sessions with repository, status, start time, and warnings;
+- list recorded sessions with repository, status, start time, and warnings;
 - use the Pi session ID as the canonical identifier;
 - reconnect to a session after the companion starts late;
 - read completed sessions without Pi still running;

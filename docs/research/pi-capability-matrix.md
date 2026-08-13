@@ -23,7 +23,7 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 |---|---|---|---|---|
 | Session lifecycle | Detect session start and end | Create bounded BashGuard session records | Confirmed | Pi 0.80.6 produced `session.started` and `session.shutdown` in the local spike |
 | Session identity | Read stable Pi session ID | Use Pi session ID as canonical BashGuard identity | Confirmed | Stable ID observed across the tested session and matched BashGuard output directory |
-| Session discovery | Find active and recent sessions | Support `bashguard sessions` and `attach` | Confirmed | PR #5 discovered active and completed JSONL sessions from a separate process without terminal scraping |
+| Session discovery | Find recorded sessions | Support `bashguard sessions` and `attach` | Confirmed | PR #5 discovered active and completed JSONL sessions from a separate process without terminal scraping |
 | Prompt correlation | Associate a prompt or turn with later actions | Explain what initiated a command or edit | Partial | `turnIndex` and timestamps observed; no explicit turn ID in tested payload |
 | Tool interception | Observe tool calls before execution | Preview and evaluate shell actions | Confirmed | `tool.requested` captured name, input, and `toolCallId` |
 | Tool results | Observe completion, result, and error metadata | Complete the action story | Confirmed | `tool.completed` correlated deterministically by `toolCallId` |

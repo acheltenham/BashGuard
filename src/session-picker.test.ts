@@ -1,0 +1,232 @@
+import assert from "node:assert/strict";
+import { PassThrough } from "node:stream";
+import test from "node:test";
+
+import type { SessionChoice, SessionSummary } from "./cli.ts";
+import { shellQuoteArgument, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
+import { promptForSessionChoice } from "./session-picker.ts";
+
+function choice(
+  selector: number,
+  sessionId: string,
+  options: Partial<SessionSummary> & { name?: string; repository?: string } = {},
+): SessionChoice {
+  const { name, repository, ...summary } = options;
+  return {
+    selector,
+    sessionIdPrefix: sessionId.slice(0, Math.min(8, sessionId.length)),
+    session: {
+      metadata: { sessionId, name, repository },
+      directory: `/tmp/${sessionId}`,
+      eventsFile: `/tmp/${sessionId}/events.jsonl`,
+      modifiedAt: Date.parse("2026-08-03T12:00:00.000Z"),
+      active: false,
+      ...summary,
+    },
+  };
+}
+
+function streams(): { input: PassThrough; output: PassThrough; readOutput: () => string } {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  let rendered = "";
+  output.setEncoding("utf8");
+  output.on("data", (chunk: string) => {
+    rendered += chunk;
+  });
+  return { input, output, readOutput: () => rendered };
+}
+
+async function writeLines(input: PassThrough, lines: string[]): Promise<void> {
+  for (const line of lines) {
+    input.write(`${line}\n`);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+test("renders distinguishing context and the available stable selectors", async () => {
+  const io = streams();
+  const choices = [
+    choice(1, "019fc93a-1111-2222-3333-abcdefaaaaaa", { name: "Milestone smoke", repository: "BashGuard", active: true }),
+    choice(3, "019fc909-1111-2222-3333-abcdefbbbbbb", { name: "Evidence review", repository: "Evidence" }),
+  ];
+
+  const selected = promptForSessionChoice(choices, io);
+  io.input.end("3\n");
+
+  assert.equal((await selected).selector, 3);
+  const output = io.readOutput();
+  assert.match(output, /1\s+019fc93a\s+Milestone smoke\s+BashGuard\s+active\s+updated 2026-08-03T12:00:00\.000Z/);
+  assert.match(output, /3\s+019fc909\s+Evidence review\s+Evidence\s+complete\s+updated 2026-08-03T12:00:00\.000Z/);
+  assert.match(output, /Select a session \[1, 3\]: $/);
+});
+
+test("renders globally distinguishing session ID prefixes carried by each choice", async () => {
+  const io = streams();
+  const choices = [
+    { ...choice(1, "019fc93a-1111-2222-3333-abcdefaaaaaa"), sessionIdPrefix: "019fc93a-1" },
+    { ...choice(3, "019fc93a-2222-3333-4444-abcdefbbbbbb"), sessionIdPrefix: "019fc93a-2" },
+  ];
+
+  const selected = promptForSessionChoice(choices, io);
+  io.input.end("3\n");
+
+  assert.equal((await selected).selector, 3);
+  assert.match(io.readOutput(), /1\s+019fc93a-1\s+-/);
+  assert.match(io.readOutput(), /3\s+019fc93a-2\s+-/);
+});
+
+test("unique proper session ID prefixes are never numeric, regardless of current session count", () => {
+  assert.deepEqual(
+    uniqueSessionIdPrefixes(["00000003-target", "other-session"]),
+    ["00000003-", "other-se"],
+  );
+});
+
+test("singleLineDisplay removes terminal and Unicode format controls while preserving ordinary Unicode", () => {
+  assert.equal(
+    singleLineDisplay("  café\n\t\u001b[31m界\u0085 \u202eRLO\u2066LRI\u2069 😀  "),
+    "café [31m界 RLOLRI 😀",
+  );
+  assert.doesNotMatch(singleLineDisplay("safe\u200fname\u061crepo"), /\p{Cf}/u);
+});
+
+test("shellQuoteArgument leaves ordinary session selectors unchanged", () => {
+  for (const selector of ["019fc93a-1111", "prefix_1.2:/@+value", "--session=--foo"]) {
+    assert.equal(shellQuoteArgument(selector), selector);
+  }
+});
+
+test("shellQuoteArgument emits one-line Bash/Zsh ANSI-C quoting for unsafe selectors", () => {
+  const raw = "café space\nline\ttab\u001b\\quote'inject$`;\u0085\u202e";
+  const quoted = shellQuoteArgument(raw);
+
+  assert.equal(quoted, "$'café space\\nline\\ttab\\e\\\\quote\\'inject$`;\\xc2\\x85\\xe2\\x80\\xae'");
+  assert.doesNotMatch(quoted, /[\u0000-\u001f\u007f-\u009f]|\p{Cf}/u);
+});
+
+test("sanitizes every untrusted picker row field without changing the selected object", async () => {
+  const io = streams();
+  const supplied = choice(1, "session-one", {
+    name: "Name\nFORGED\u001b[31m\u202eBIDI",
+    repository: "Repo\tFORGED\u009b32m\u2066ISOLATE\u2069",
+  });
+  supplied.sessionIdPrefix = "safe\nFORGED\u001b[33m\u202eID";
+
+  const selected = promptForSessionChoice([supplied], io);
+  io.input.end("1\n");
+
+  assert.equal(await selected, supplied);
+  const output = io.readOutput();
+  assert.doesNotMatch(output, /\u001b|\u009b|\p{Cf}/u);
+  assert.doesNotMatch(output, /^FORGED/m);
+  assert.equal(output.split("\n").filter((line) => /^1  /.test(line)).length, 1);
+  assert.match(output, /^1  safe FORGED \[33mID  Name FORGED \[31mBIDI  Repo FORGED 32mISOLATE  complete  updated 2026-08-03T12:00:00\.000Z\nSelect a session \[1\]: $/);
+});
+
+test("returns the choice whose selector is 2", async () => {
+  const io = streams();
+  const choices = [choice(1, "session-one"), choice(2, "session-two")];
+
+  const selected = promptForSessionChoice(choices, io);
+  io.input.end("2\n");
+
+  assert.equal(await selected, choices[1]);
+});
+
+test("retries blank, nonnumeric, and unavailable selectors until a valid selector", async () => {
+  const io = streams();
+  const choices = [choice(1, "session-one"), choice(3, "session-three")];
+
+  const selected = promptForSessionChoice(choices, io);
+  await writeLines(io.input, ["", "nope", "2", "3"]);
+
+  assert.equal((await selected).selector, 3);
+  io.input.end();
+  assert.equal(io.readOutput().match(/Enter one of: 1, 3\./g)?.length, 3);
+  assert.equal(io.readOutput().match(/Select a session \[1, 3\]: /g)?.length, 4);
+});
+
+test("consumes buffered lines across retries without losing pasted input", async () => {
+  const io = streams();
+  const choices = [choice(1, "session-one"), choice(3, "session-three")];
+
+  const selected = promptForSessionChoice(choices, io);
+  io.input.end("\ninvalid\n3\n");
+
+  assert.equal((await selected).selector, 3);
+  assert.equal(io.readOutput().match(/Enter one of: 1, 3\./g)?.length, 2);
+  assert.equal(io.readOutput().match(/Select a session \[1, 3\]: /g)?.length, 3);
+});
+
+test("retries a whitespace-padded selector until an exact selector is entered", async () => {
+  const io = streams();
+  const choices = [choice(1, "session-one"), choice(3, "session-three")];
+
+  const selected = promptForSessionChoice(choices, io);
+  await writeLines(io.input, [" 3 ", "1"]);
+
+  assert.equal((await selected).selector, 1);
+  io.input.end();
+  assert.equal(io.readOutput().match(/Enter one of: 1, 3\./g)?.length, 1);
+  assert.equal(io.readOutput().match(/Select a session \[1, 3\]: /g)?.length, 2);
+});
+
+test("rejects an empty choice snapshot", async () => {
+  const io = streams();
+
+  await assert.rejects(promptForSessionChoice([], io), new Error("Session choices cannot be empty."));
+  assert.equal(io.readOutput(), "");
+});
+
+test("rejects duplicate stable selectors", async () => {
+  const io = streams();
+  const choices = [choice(1, "session-one"), choice(1, "session-two")];
+
+  await assert.rejects(promptForSessionChoice(choices, io), new Error("Duplicate session selector: 1."));
+  assert.equal(io.readOutput(), "");
+});
+
+test("blank input has no default", async () => {
+  const io = streams();
+  const selected = promptForSessionChoice([choice(1, "session-one")], io);
+
+  io.input.end("\n");
+
+  await assert.rejects(selected, new Error("Session selection cancelled."));
+  assert.match(io.readOutput(), /Enter one of: 1\./);
+});
+
+test("rejects when input reaches EOF", async () => {
+  const io = streams();
+  const selected = promptForSessionChoice([choice(1, "session-one")], io);
+
+  io.input.end();
+
+  await assert.rejects(selected, new Error("Session selection cancelled."));
+  assert.equal(io.output.destroyed, false);
+});
+
+test("rejects on a real readline Ctrl+C interruption", async () => {
+  const io = streams();
+  Object.assign(io.input, { isTTY: true, setRawMode: () => io.input });
+  Object.assign(io.output, { isTTY: true, columns: 80 });
+  const selected = promptForSessionChoice([choice(1, "session-one")], io);
+
+  io.input.write("\u0003");
+
+  await assert.rejects(selected, new Error("Session selection cancelled."));
+});
+
+test("renders and accepts only the supplied choice snapshot", async () => {
+  const io = streams();
+  const supplied = [choice(1, "visible-one"), choice(3, "visible-three")];
+
+  const selected = promptForSessionChoice(supplied, io);
+  await writeLines(io.input, ["2", "3"]);
+
+  assert.equal((await selected).selector, 3);
+  io.input.end();
+  assert.doesNotMatch(io.readOutput(), /visible-two/);
+  assert.match(io.readOutput(), /Enter one of: 1, 3\./);
+});

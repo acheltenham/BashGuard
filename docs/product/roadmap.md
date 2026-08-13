@@ -1,6 +1,6 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.4; Milestone 0 complete, Phase 1 live-companion work next
+**Status:** Draft v0.4; Milestone 0 complete, Phase 1 live-companion work in progress
 **Last updated:** August 13, 2026
 
 ## Milestone 0: Observe a Real Pi Session
@@ -15,7 +15,7 @@ Goal: build the smallest end-to-end BashGuard experience that can observe a real
 - create the shared event-model package;
 - create the BashGuard CLI skeleton;
 - implement append-only local event transport;
-- implement active and recent session discovery;
+- implement discovery of all readable stored sessions, active and completed;
 - implement `bashguard sessions`;
 - implement `bashguard attach [session-id]`;
 - narrate prompts, tool calls, commands, results, and file-tool activity;
@@ -38,21 +38,21 @@ Implementation reference: [`Milestone 0 plan`](../plans/milestone-0-observe-a-re
 
 ## Phase 1: Live Terminal Companion
 
-**Current focus:** improve live-session usability and terminal presentation before adding enforcement or provider-specific interpretation. Deterministic evidence filtering and JSONL export shipped during Milestone 0; bounded startup history and a grounded attach status snapshot are the first Phase 1 slices.
+**Current focus:** improve live-session usability and terminal presentation before adding enforcement or provider-specific interpretation. Deterministic evidence filtering and JSONL export shipped during Milestone 0. Bounded startup history, a grounded attach status snapshot, and interactive selection for ambiguous selector-less session commands are implemented Phase 1 slices.
 
 Goal: make a running Pi session understandable at a glance.
 
 - bound attach startup history while preserving complete live follow and inspect/JSONL evidence;
 - show an evidence-grounded startup snapshot for session state, correlated current/last activity, capture state, event count, and freshness;
 - refine the CLI and TUI architecture from Milestone 0 usage;
-- improve active-session selection;
-- add split-pane timeline and event detail views;
+- continue refining active-session selection after shipping the structured-text TTY picker with snapshot-local numbers and durable unique-prefix selectors;
+- add split-pane timeline and event detail views (the picker is not this full-screen TUI);
 - add grounded narrative projection;
 - add current activity and session status footer;
 - improve capture-completeness indicators;
 - support graceful narrow-terminal layouts;
 - retain plain-text output mode;
-- test simultaneous active sessions;
+- retain regression and real-TTY smoke coverage for simultaneous active sessions;
 - make installation and local development straightforward.
 
 Exit criteria:

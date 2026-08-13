@@ -1,7 +1,7 @@
 # BashGuard Terminal UX
 
 **Status:** Draft  
-**Last updated:** July 23, 2026
+**Last updated:** August 13, 2026
 
 ## UX Decision
 
@@ -74,7 +74,7 @@ Purpose:
 Command:
 
 ```bash
-bashguard inspect <session-id>
+bashguard inspect [session-id]
 ```
 
 Purpose:
@@ -116,6 +116,16 @@ Purpose:
 
 Replay is event replay, not hidden-reasoning capture, shell re-execution, or video playback.
 
+### Session Selection
+
+`bashguard attach`, `bashguard inspect`, and `bashguard debrief` may omit the session selector. A sole eligible session is selected automatically. For attach, active sessions are eligible when any exist; if none are active, all discovered completed sessions are eligible. Inspect and debrief consider all discovered recorded sessions, active and completed.
+
+When multiple sessions are eligible, BashGuard opens a numbered picker only if both stdin and stdout are TTYs. It is structured text, not the planned full-screen split-pane TUI. Enter does not choose a default: the user must type an exact displayed number. Blank, nonnumeric, whitespace-padded, or unavailable numbers receive concise guidance and retry; EOF and `Ctrl+C` cancel concisely.
+
+Pipes, redirected streams, scripts, and other non-TTY use never prompt or silently choose the newest session. When multiple sessions are eligible, they exit nonzero with eligible rows and shell-quoted commands using `--session-id=<full-session-id>`. This exact-only selector never falls back to a row or prefix, so a copied command either selects the same metadata identity in a future snapshot or fails not-found. Automation that allocates a PTY is interactive by contract and must pass an explicit selector to avoid prompting; explicit selectors are recommended for all automation. With no recorded sessions, BashGuard reports the existing no-sessions error without candidate rows or commands.
+
+Selection uses one discovery snapshot. Candidate rows keep their global positions within that displayed `bashguard sessions` snapshot and are not locally renumbered. Numbers are snapshot-local and may identify different sessions after metadata or ordering changes; only canonical positive decimal strings are row indexes. Positional and `--session` values resolve exact ID, then row, then unique prefix against the current snapshot. Because discovery orders active sessions first, eligible active selectors are currently contiguous. Displayed ID prefixes are computed for uniqueness against the full current snapshot, so a completed session hidden by an active-only attach picker may require a longer prefix; they remain readable current-snapshot selectors, not durable identities. Terminal rows and headers remove C0/C1 and Unicode format controls while preserving ordinary Unicode.
+
 ### Sessions Mode
 
 Command:
@@ -126,7 +136,7 @@ bashguard sessions
 
 Purpose:
 
-- find active and recent Pi sessions;
+- find recorded Pi sessions;
 - show repository, status, start time, duration, warnings, and attachment state;
 - copy or use the underlying session identifier.
 

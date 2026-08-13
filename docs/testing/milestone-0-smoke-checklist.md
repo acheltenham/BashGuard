@@ -93,14 +93,17 @@ bashguard sessions
 bashguard session list
 bashguard sessions list
 bashguard doctor
+bashguard attach
 bashguard attach 1
 bashguard attach 1 --history 0
 bashguard attach 1 --all-history
+bashguard inspect
 bashguard inspect 1
 bashguard inspect 1 --event 1
 bashguard inspect 1 --activity shell
 bashguard inspect 1 --activity shell --grep test
 bashguard inspect 1 --all --format jsonl
+bashguard debrief
 bashguard debrief 1
 ```
 
@@ -135,9 +138,12 @@ cd bashguard
 npm exec -- node --experimental-strip-types src/cli.ts sessions
 npm exec -- node --experimental-strip-types src/cli.ts session list
 npm exec -- node --experimental-strip-types src/cli.ts sessions list
+npm exec -- node --experimental-strip-types src/cli.ts attach
 npm exec -- node --experimental-strip-types src/cli.ts attach 1
+npm exec -- node --experimental-strip-types src/cli.ts inspect
 npm exec -- node --experimental-strip-types src/cli.ts inspect 1
 npm exec -- node --experimental-strip-types src/cli.ts inspect 1 --event 1
+npm exec -- node --experimental-strip-types src/cli.ts debrief
 npm exec -- node --experimental-strip-types src/cli.ts debrief 1
 ```
 
@@ -148,6 +154,31 @@ bashguard inspect 1 list events
 ```
 
 ## 6. Expected output checks
+
+### Selector-less session selection
+
+Use one isolated `BASHGUARD_DATA_DIR` and run two Pi sessions simultaneously so at least two sessions are active. If practical, retain a completed session whose ID shares leading characters with an active session.
+
+From an actual terminal, run `bashguard attach` without a selector and confirm:
+
+- the picker contains active sessions only, while `bashguard inspect` and `bashguard debrief` contain all discovered recorded sessions, active and completed;
+- a sole eligible candidate is automatic, but multiple candidates require an exact displayed number and Enter has no default;
+- invalid numbers retry, while EOF and `Ctrl+C` cancel with concise output and no stack trace;
+- choosing a non-first displayed number attaches to that session;
+- picker numbers match their global positions within the displayed `bashguard sessions` snapshot and are not locally renumbered; eligible active selectors are currently contiguous because discovery orders active sessions first;
+- numbers are stable only within that snapshot and may change after metadata or ordering changes; exact IDs take precedence over numeric row numbers, which otherwise resolve against the current discovery order;
+- prefixes remain unique against the full current discovery snapshot, including hidden completed sessions, but are not durable against future collisions; generated `--session-id=<full-session-id>` commands carry durable exact identity;
+- this is a structured-text prompt rather than a full-screen TUI.
+
+Exercise non-TTY behavior with multiple eligible sessions:
+
+```bash
+bashguard attach </dev/null >attach.out 2>&1; test $? -ne 0
+bashguard inspect </dev/null >inspect.out 2>&1; test $? -ne 0
+bashguard debrief </dev/null >debrief.out 2>&1; test $? -ne 0
+```
+
+Confirm none prints `Select a session`; each nonzero error lists only eligible snapshot-local rows and copyable, shell-quoted `--session-id=<full-session-id>` commands. Capture one command, reorder sessions and add a future prefix collision, then confirm it still selects the original identity. Remove that identity while leaving the collision and confirm the same command fails not-found. Exercise numeric full IDs plus IDs containing `list`, `events`, leading `--`, whitespace/newline, and quotes. Run positional/`--session` exact, canonical numeric, and unique-prefix forms against the current snapshot; verify `+1`, `01`, and exponent notation are not row indexes. Automation that allocates a PTY is interactive by contract, so use exact `--session-id` for durable automation. Also confirm unknown activity, missing option values (including `--session-id`), and mixed exact/snapshot selectors fail before prompting. Put bidi format controls in row/header fields and confirm no raw controls or forged lines appear while Unicode letters and emoji remain.
 
 ### `bashguard doctor`
 

@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, selectAttachHistory } from "./cli.ts";
+import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, eligibleSessionChoices, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, indexSessionChoices, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, resolveSessionChoice, selectAttachHistory, selectSessionForCommand, selectSessionForCommandResult, type SessionChoice, type SessionSummary } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -34,6 +35,64 @@ test("parseJsonlEvents skips malformed complete lines and incomplete final lines
 
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0]?.sequence, 2);
+});
+
+test("discoverSessions excludes metadata session IDs containing NUL while retaining valid neighbors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "valid-neighbor", [event(1, "session.started")]);
+  const malformedDirectory = join(root, "malformed-metadata");
+  await mkdir(malformedDirectory, { recursive: true });
+  await writeFile(
+    join(malformedDirectory, "session.json"),
+    `${JSON.stringify({ schemaVersion: 1, sessionId: "malformed\u0000session", processId: 999_999 })}\n`,
+  );
+  await writeFile(join(malformedDirectory, "events.jsonl"), `${JSON.stringify(event(1, "session.started"))}\n`);
+
+  const sessions = await discoverSessions(root);
+
+  assert.deepEqual(sessions.map((session) => session.metadata.sessionId), ["valid-neighbor"]);
+});
+
+test("discoverSessions normalizes malformed optional metadata while retaining the selectable session", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "valid-neighbor", [event(1, "session.started")]);
+  await writeSession(root, "malformed-optionals", [event(1, "session.shutdown")]);
+  await writeFile(join(root, "malformed-optionals", "session.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    sessionId: "malformed-optionals",
+    cwd: { forged: "cwd" },
+    repository: 42,
+    name: ["forged-name"],
+    title: false,
+    sessionName: {},
+    startedAt: [],
+    processId: "123",
+    piMode: 7,
+    recorderSource: { forged: true },
+  })}\n`);
+
+  const sessions = await discoverSessions(root);
+  const malformed = sessions.find((session) => session.metadata.sessionId === "malformed-optionals");
+
+  assert.equal(sessions.length, 2);
+  assert.deepEqual(malformed?.metadata, { schemaVersion: 1, sessionId: "malformed-optionals" });
+  assert.doesNotThrow(() => formatSessionList(sessions));
+  assert.match(formatSessionList(sessions), /malforme\s+-\s+unknown/);
+  assert.equal(resolveSessionChoice("malformed", indexSessionChoices(sessions))?.session, malformed);
+});
+
+test("discoverSessions excludes every session with a duplicate metadata ID while retaining valid neighbors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "duplicate-directory-a", [event(1, "session.started")]);
+  await writeSession(root, "duplicate-directory-b", [event(1, "session.started")]);
+  await writeSession(root, "valid-neighbor", [event(1, "session.started")]);
+  for (const directory of ["duplicate-directory-a", "duplicate-directory-b"]) {
+    await writeFile(join(root, directory, "session.json"), `${JSON.stringify({ schemaVersion: 1, sessionId: "duplicate-metadata-id", processId: 999_999 })}\n`);
+  }
+
+  const sessions = await discoverSessions(root);
+
+  assert.deepEqual(sessions.map((session) => session.metadata.sessionId), ["valid-neighbor"]);
 });
 
 test("discoverSessions treats a restart after an older shutdown as active when the current pid is alive", async () => {
@@ -98,6 +157,425 @@ test("formatSessionList shows copyable selectors and prefixes without middle ell
   assert.match(output, /bashguard attach 1/);
 });
 
+function sessionSummary(sessionId: string, active: boolean): SessionSummary {
+  return {
+    metadata: { sessionId },
+    directory: `/tmp/${sessionId}`,
+    eventsFile: `/tmp/${sessionId}/events.jsonl`,
+    modifiedAt: 0,
+    active,
+  };
+}
+
+test("formatSessionList sanitizes untrusted row fields into exactly one terminal line", () => {
+  const output = formatSessionList([{
+    metadata: {
+      sessionId: "safe\nFORGED\u001b[31m-session",
+      name: "Name\nFORGED\u009b32m",
+      repository: "Repo\tFORGED\u001b[33m",
+    },
+    directory: "/tmp/one",
+    eventsFile: "/tmp/one/events.jsonl",
+    modifiedAt: Date.now(),
+    active: true,
+  }]);
+
+  assert.doesNotMatch(output, /\u001b|\u009b/);
+  assert.doesNotMatch(output, /^FORGED/m);
+  assert.equal(output.split("\n").filter((line) => /^1\s/.test(line)).length, 1);
+  assert.match(output, /^1\s+active\s+safe FOR\s+Name FORGED 32m\s+Repo FORGED \[33m/m);
+});
+
+test("session choices retain global selectors and prefixes when attach filters to active sessions", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("shared-prefix-active", true),
+    sessionSummary("other-active-session", true),
+    sessionSummary("shared-prefix-completed", false),
+  ]);
+
+  assert.deepEqual(choices.map((choice) => choice.selector), [1, 2, 3]);
+  assert.deepEqual(choices.map((choice) => choice.sessionIdPrefix), ["shared-prefix-a", "other-ac", "shared-prefix-c"]);
+  assert.deepEqual(eligibleSessionChoices("attach", choices).map((choice) => choice.selector), [1, 2]);
+  assert.deepEqual(eligibleSessionChoices("inspect", choices).map((choice) => choice.selector), [1, 2, 3]);
+  assert.deepEqual(eligibleSessionChoices("debrief", choices).map((choice) => choice.selector), [1, 2, 3]);
+});
+
+test("attach session choices fall back to completed sessions when none are active", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("completed-a", false),
+    sessionSummary("completed-b", false),
+  ]);
+
+  assert.deepEqual(eligibleSessionChoices("attach", choices), choices);
+});
+
+test("resolveSessionChoice supports global indexes, exact IDs, and unique prefixes", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("completed-session", false),
+    sessionSummary("active-alpha", true),
+    sessionSummary("active-beta", true),
+  ]);
+
+  assert.equal(resolveSessionChoice("1", choices)?.session.metadata.sessionId, "completed-session");
+  assert.equal(resolveSessionChoice("active-beta", choices)?.selector, 3);
+  assert.equal(resolveSessionChoice("active-al", choices)?.selector, 2);
+  assert.equal(resolveSessionChoice("missing", choices), undefined);
+});
+
+test("resolveSessionChoice prefers an exact numeric ID before a row index", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("other-session", false),
+    sessionSummary("1", false),
+    sessionSummary("2-prefix-target", false),
+    sessionSummary("1-prefix-target", false),
+  ]);
+
+  assert.equal(resolveSessionChoice("1", choices)?.session.metadata.sessionId, "1");
+  assert.equal(resolveSessionChoice("2", choices)?.session.metadata.sessionId, "1");
+});
+
+test("indexSessionChoices expands a numeric-looking unique prefix that would resolve as another row", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("00000002-target", false),
+    sessionSummary("other-session", false),
+  ]);
+
+  assert.equal(choices[0]?.sessionIdPrefix, "00000002-");
+  assert.equal(resolveSessionChoice(choices[0]!.sessionIdPrefix, choices), choices[0]);
+});
+
+test("resolveSessionChoice rejects ambiguous prefixes", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("active-alpha", true),
+    sessionSummary("active-beta", true),
+    sessionSummary("99-alpha", false),
+    sessionSummary("99-beta", false),
+  ]);
+
+  assert.throws(() => resolveSessionChoice("active-", choices), /Session prefix active- is ambiguous/);
+  assert.throws(() => resolveSessionChoice("99", choices), /Session prefix 99 is ambiguous/);
+});
+
+test("resolveSessionChoice recognizes only canonical positive decimal row indexes", () => {
+  const choices = indexSessionChoices([
+    sessionSummary("canonical-row-one", false),
+    sessionSummary("+1-target", false),
+    sessionSummary("01-target", false),
+    sessionSummary("1e3-target", false),
+    sessionSummary("1e000000-target", false),
+  ]);
+  choices.push({ ...choices[0]!, selector: 1000 });
+
+  assert.equal(resolveSessionChoice("1", choices)?.session.metadata.sessionId, "canonical-row-one");
+  assert.equal(resolveSessionChoice("+1", choices)?.session.metadata.sessionId, "+1-target");
+  assert.equal(resolveSessionChoice("01", choices)?.session.metadata.sessionId, "01-target");
+  assert.equal(resolveSessionChoice("1e3", choices)?.session.metadata.sessionId, "1e3-target");
+  assert.equal(resolveSessionChoice("1e000000-target", choices)?.session.metadata.sessionId, "1e000000-target");
+});
+
+function selectionStreams(inputIsTTY: boolean | undefined, outputIsTTY: boolean | undefined): {
+  input: PassThrough & { isTTY?: boolean };
+  output: PassThrough & { isTTY?: boolean };
+} {
+  const input = Object.assign(new PassThrough(), { isTTY: inputIsTTY });
+  const output = Object.assign(new PassThrough(), { isTTY: outputIsTTY });
+  return { input, output };
+}
+
+test("selectSessionForCommand fails with the existing no-sessions error", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+
+  await assert.rejects(
+    () => selectSessionForCommand("inspect", undefined, { root }),
+    new Error(`No BashGuard sessions found in ${root}`),
+  );
+});
+
+test("selectSessionForCommand resolves explicit selectors against all sessions without prompting", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "completed-session", [event(1, "session.shutdown")]);
+  await writeSession(root, "active-alpha", [event(1, "session.started")], process.pid);
+  await writeSession(root, "active-beta", [event(1, "session.started")], process.pid);
+  let promptCalls = 0;
+
+  const selected = await selectSessionForCommand("attach", "completed", {
+    root,
+    ...selectionStreams(false, false),
+    prompt: async () => {
+      promptCalls += 1;
+      throw new Error("prompt should not run");
+    },
+  });
+
+  assert.equal(selected.metadata.sessionId, "completed-session");
+  assert.equal(promptCalls, 0);
+});
+
+test("selectSessionForCommand preserves explicit not-found and ambiguous-prefix behavior", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "shared-alpha", [event(1, "session.shutdown")]);
+  await writeSession(root, "shared-beta", [event(1, "session.shutdown")]);
+
+  await assert.rejects(
+    () => selectSessionForCommand("inspect", "shared-", { root }),
+    /Session prefix shared- is ambiguous/,
+  );
+  await assert.rejects(
+    () => selectSessionForCommand("inspect", "0", { root }),
+    /Session 0 was not found/,
+  );
+  await assert.rejects(
+    () => selectSessionForCommand("inspect", "-1", { root }),
+    /Session -1 was not found/,
+  );
+  await assert.rejects(
+    () => selectSessionForCommand("inspect", "3", { root }),
+    /Session 3 was not found/,
+  );
+});
+
+for (const command of ["inspect", "debrief"] as const) {
+  test(`${command} not-found guidance describes recorded sessions and gives a matching command`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+    await writeSession(root, "recorded-session", [event(1, "session.shutdown")]);
+
+    await assert.rejects(
+      () => selectSessionForCommand(command, "missing-session", { root }),
+      (error: Error) => {
+        assert.match(error.message, new RegExp(`^Session missing-session was not found in ${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.`));
+        assert.match(error.message, /sessions recorded while the BashGuard extension was loaded/);
+        assert.match(error.message, new RegExp(`^  bashguard ${command} 1$`, "m"));
+        return true;
+      },
+    );
+  });
+}
+
+test("selectSessionForCommand resolves zero, negative, and out-of-range numeric-looking IDs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "0", [event(1, "session.shutdown")]);
+  await writeSession(root, "-1-session", [event(1, "session.shutdown")]);
+  await writeSession(root, "99-session", [event(1, "session.shutdown")]);
+
+  assert.equal((await selectSessionForCommand("inspect", "0", { root })).metadata.sessionId, "0");
+  assert.equal((await selectSessionForCommand("inspect", "-1", { root })).metadata.sessionId, "-1-session");
+  assert.equal((await selectSessionForCommand("inspect", "99", { root })).metadata.sessionId, "99-session");
+});
+
+test("selectSessionForCommand auto-selects one eligible active session without prompting", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "completed-session", [event(1, "session.shutdown")]);
+  await writeSession(root, "only-active-session", [event(1, "session.started")], process.pid);
+
+  const selected = await selectSessionForCommand("attach", undefined, {
+    root,
+    prompt: async () => {
+      throw new Error("prompt should not run");
+    },
+  });
+
+  assert.equal(selected.metadata.sessionId, "only-active-session");
+});
+
+test("selectSessionForCommand prompts for only active attach choices with global selectors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "completed-session", [event(1, "session.shutdown")]);
+  await writeSession(root, "active-alpha", [event(1, "session.started")], process.pid);
+  await writeSession(root, "active-beta", [event(1, "session.started")], process.pid);
+  const snapshot = await discoverSessions(root);
+  const expected = eligibleSessionChoices("attach", indexSessionChoices(snapshot));
+  let prompted: readonly SessionChoice[] | undefined;
+
+  const selected = await selectSessionForCommand("attach", undefined, {
+    root,
+    ...selectionStreams(true, true),
+    prompt: async (choices) => {
+      prompted = choices;
+      return choices[1]!;
+    },
+  });
+
+  assert.deepEqual(prompted?.map((choice) => choice.selector), expected.map((choice) => choice.selector));
+  assert.ok(prompted?.every((choice) => choice.session.active));
+  assert.equal(selected, prompted?.[1]?.session);
+});
+
+test("selectSessionForCommand uses all completed attach choices when none are active", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "completed-alpha", [event(1, "session.shutdown")]);
+  await writeSession(root, "completed-beta", [event(1, "session.shutdown")]);
+  let prompted: readonly SessionChoice[] | undefined;
+
+  await selectSessionForCommand("attach", undefined, {
+    root,
+    ...selectionStreams(true, true),
+    prompt: async (choices) => {
+      prompted = choices;
+      return choices[0]!;
+    },
+  });
+
+  assert.equal(prompted?.length, 2);
+  assert.ok(prompted?.every((choice) => !choice.session.active));
+});
+
+for (const command of ["inspect", "debrief"] as const) {
+  test(`selectSessionForCommand passes all sessions to the ${command} prompt`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+    await writeSession(root, "completed-session", [event(1, "session.shutdown")]);
+    await writeSession(root, "active-session", [event(1, "session.started")], process.pid);
+    let prompted: readonly SessionChoice[] | undefined;
+
+    await selectSessionForCommand(command, undefined, {
+      root,
+      ...selectionStreams(true, true),
+      prompt: async (choices) => {
+        prompted = choices;
+        return choices[0]!;
+      },
+    });
+
+    assert.equal(prompted?.length, 2);
+    assert.deepEqual(prompted?.map((choice) => choice.session.active).sort(), [false, true]);
+  });
+}
+
+for (const [inputIsTTY, outputIsTTY] of [[false, true], [true, false], [undefined, true]] as const) {
+  test(`non-interactive session selection rejects for TTY pair ${inputIsTTY}/${outputIsTTY}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+    await writeSession(root, "completed-alpha", [event(1, "session.shutdown")]);
+    await writeSession(root, "completed-beta", [event(1, "session.shutdown")]);
+    const sessions = await discoverSessions(root);
+    const choices = indexSessionChoices(sessions);
+    let promptCalls = 0;
+
+    await assert.rejects(
+      () => selectSessionForCommand("debrief", undefined, {
+        root,
+        ...selectionStreams(inputIsTTY, outputIsTTY),
+        prompt: async () => {
+          promptCalls += 1;
+          throw new Error("prompt should not run");
+        },
+      }),
+      (error: Error) => {
+        assert.match(error.message, /More than one eligible session exists for `bashguard debrief`\./);
+        for (const choice of choices) {
+          assert.match(error.message, new RegExp(`^${choice.selector}\\s+`, "m"));
+          assert.match(error.message, new RegExp(`bashguard debrief --session-id=${choice.session.metadata.sessionId}`));
+          assert.doesNotMatch(error.message, new RegExp(`bashguard debrief --session=${choice.sessionIdPrefix}`));
+        }
+        assert.match(error.message, /completed-/);
+        return true;
+      },
+    );
+    assert.equal(promptCalls, 0);
+  });
+}
+
+test("selectSessionForCommand returns the exact session object from its prompt snapshot", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "snapshot-alpha", [event(1, "session.shutdown")]);
+  await writeSession(root, "snapshot-beta", [event(1, "session.shutdown")]);
+  let promptedChoice: SessionChoice | undefined;
+
+  const selected = await selectSessionForCommand("inspect", undefined, {
+    root,
+    ...selectionStreams(true, true),
+    prompt: async (choices) => {
+      promptedChoice = choices[0];
+      await writeSession(root, "later-session", [event(1, "session.shutdown")]);
+      return promptedChoice!;
+    },
+  });
+
+  assert.equal(selected, promptedChoice?.session);
+  assert.notEqual(selected.metadata.sessionId, "later-session");
+});
+
+test("selectSessionForCommand discovers once and prompts from that snapshot", async () => {
+  const firstSnapshot = [sessionSummary("first-alpha", false), sessionSummary("first-beta", false)];
+  const hypotheticalSecondSnapshot = [sessionSummary("later-alpha", false), sessionSummary("later-beta", false)];
+  let discoveryCalls = 0;
+  let promptedIds: string[] = [];
+
+  const selected = await selectSessionForCommand("inspect", undefined, {
+    ...selectionStreams(true, true),
+    discoverSessions: async () => {
+      discoveryCalls += 1;
+      return discoveryCalls === 1 ? firstSnapshot : hypotheticalSecondSnapshot;
+    },
+    prompt: async (choices) => {
+      promptedIds = choices.map((choice) => choice.session.metadata.sessionId);
+      return choices[1]!;
+    },
+  });
+
+  assert.equal(discoveryCalls, 1);
+  assert.deepEqual(promptedIds, ["first-alpha", "first-beta"]);
+  assert.equal(selected, firstSnapshot[1]);
+});
+
+for (const command of ["inspect", "debrief", "attach"] as const) {
+  test(`selector-less ${command} derives its shortest unique session prefix from one snapshot`, async () => {
+    const snapshot = [
+      sessionSummary("019fc93a-1111-aaaa", command === "attach"),
+      sessionSummary("019fc93a-2222-bbbb", command === "attach"),
+    ];
+    let discoveryCalls = 0;
+
+    const result = await selectSessionForCommandResult(command, undefined, {
+      ...selectionStreams(true, true),
+      discoverSessions: async () => {
+        discoveryCalls += 1;
+        return snapshot;
+      },
+      prompt: async (choices) => choices[0]!,
+    });
+
+    assert.equal(discoveryCalls, 1);
+    assert.equal(result.session, snapshot[0]);
+    assert.equal(result.selector, "019fc93a-1");
+    assert.notEqual(result.selector, result.session.metadata.sessionId);
+  });
+}
+
+test("explicit session selection preserves the requested selector", async () => {
+  const snapshot = [sessionSummary("019fc93a-1111-aaaa", false), sessionSummary("019fc93a-2222-bbbb", false)];
+
+  const result = await selectSessionForCommandResult("debrief", "019fc93a-2", {
+    discoverSessions: async () => snapshot,
+  });
+
+  assert.equal(result.session, snapshot[1]);
+  assert.equal(result.selector, "019fc93a-2");
+});
+
+test("exact session selection matches only the full metadata ID and bypasses prompting", async () => {
+  const snapshot = [sessionSummary("1", false), sessionSummary("1-future", false)];
+  let promptCalls = 0;
+
+  const result = await selectSessionForCommandResult("inspect", undefined, {
+    exactSessionId: "1",
+    discoverSessions: async () => snapshot,
+    prompt: async () => {
+      promptCalls += 1;
+      throw new Error("prompt should not run");
+    },
+  });
+
+  assert.equal(result.session, snapshot[0]);
+  assert.equal(result.selector, "--session-id=1");
+  assert.equal(promptCalls, 0);
+  await assert.rejects(
+    () => selectSessionForCommandResult("inspect", undefined, {
+      exactSessionId: "1-",
+      discoverSessions: async () => snapshot,
+    }),
+    /Session 1- was not found/,
+  );
+});
+
 test("chooseSession accepts session list index selectors", async () => {
   const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
   await writeSession(root, "session-a", [event(1, "session.started"), event(2, "session.shutdown")]);
@@ -107,6 +585,16 @@ test("chooseSession accepts session list index selectors", async () => {
   const selected = await chooseSession("2", root);
 
   assert.equal(selected.metadata.sessionId, sessions[1]?.metadata.sessionId);
+});
+
+test("chooseSession preserves exact ID, unique-prefix, and ambiguous-prefix compatibility", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "shared-alpha", [event(1, "session.shutdown")]);
+  await writeSession(root, "shared-beta", [event(1, "session.shutdown")]);
+
+  assert.equal((await chooseSession("shared-alpha", root)).metadata.sessionId, "shared-alpha");
+  assert.equal((await chooseSession("shared-b", root)).metadata.sessionId, "shared-beta");
+  await assert.rejects(() => chooseSession("shared-", root), /Session prefix shared- is ambiguous/);
 });
 
 test("chooseSession not-found errors explain BashGuard recorded-session scope", async () => {
@@ -119,12 +607,21 @@ test("chooseSession not-found errors explain BashGuard recorded-session scope", 
   );
 });
 
-test("parseCommandArgs accepts positional and --session selectors", () => {
+test("parseCommandArgs accepts positional, snapshot, and exact session selectors", () => {
   assert.deepEqual(parseCommandArgs(["sessions"]), { command: "sessions" });
   assert.deepEqual(parseCommandArgs(["sessions", "list"]), { command: "sessions" });
   assert.deepEqual(parseCommandArgs(["session", "list"]), { command: "sessions" });
   assert.deepEqual(parseCommandArgs(["attach", "1"]), { command: "attach", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["attach", "--session", "1"]), { command: "attach", sessionId: "1" });
+  for (const command of ["attach", "inspect", "debrief"]) {
+    assert.deepEqual(parseCommandArgs([command, "--session-id", "exact value"]), { command, exactSessionId: "exact value" });
+    for (const exactId of ["--foo", "list", "events", " spaced\tselector\n", "1"]) {
+      assert.deepEqual(parseCommandArgs([command, `--session-id=${exactId}`]), { command, exactSessionId: exactId });
+    }
+    for (const selector of ["--foo", "list", "events", " spaced\tselector\n"]) {
+      assert.deepEqual(parseCommandArgs([command, `--session=${selector}`]), { command, sessionId: selector });
+    }
+  }
   assert.deepEqual(parseCommandArgs(["attach", "1", "--history", "100"]), { command: "attach", sessionId: "1", attachHistory: 100 });
   assert.deepEqual(parseCommandArgs(["attach", "1", "--history", "0"]), { command: "attach", sessionId: "1", attachHistory: 0 });
   assert.deepEqual(parseCommandArgs(["attach", "1", "--all-history"]), { command: "attach", sessionId: "1", allHistory: true });
@@ -147,6 +644,19 @@ test("parseCommandArgs accepts positional and --session selectors", () => {
 });
 
 test("parseCommandArgs rejects missing filter values and unknown options", () => {
+  for (const command of ["attach", "inspect", "debrief"]) {
+    assert.throws(() => parseCommandArgs([command, "--session"]), new Error("`--session` requires a value"));
+    assert.throws(() => parseCommandArgs([command, "--session", "--activity"]), new Error("`--session` requires a value"));
+    assert.throws(() => parseCommandArgs([command, "--session="]), new Error("`--session` requires a value"));
+    assert.throws(() => parseCommandArgs([command, "--session-id"]), new Error("--session-id requires a value"));
+    assert.throws(() => parseCommandArgs([command, "--session-id", "--activity"]), new Error("--session-id requires a value"));
+    assert.throws(() => parseCommandArgs([command, "--session-id="]), new Error("--session-id requires a value"));
+    assert.throws(() => parseCommandArgs([command, "positional", "--session-id=exact"]), /cannot combine --session-id with a positional or --session selector/);
+    assert.throws(() => parseCommandArgs([command, "--session=prefix", "--session-id=exact"]), /cannot combine --session-id with a positional or --session selector/);
+    assert.throws(() => parseCommandArgs([command, "--session-id=exact", "positional"]), /cannot combine --session-id with a positional or --session selector/);
+  }
+  assert.throws(() => parseCommandArgs(["inspect", "--event"]), new Error("`--event` requires a value"));
+  assert.throws(() => parseCommandArgs(["inspect", "--event", "--all"]), new Error("`--event` requires a value"));
   assert.throws(() => parseCommandArgs(["inspect", "1", "--activity"]), /`--activity` requires a value/);
   assert.throws(() => parseCommandArgs(["inspect", "1", "--grep"]), /`--grep` requires a value/);
   assert.throws(() => parseCommandArgs(["inspect", "1", "--unknown"]), /Unknown option: --unknown/);

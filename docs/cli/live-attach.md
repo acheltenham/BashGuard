@@ -10,6 +10,20 @@ bashguard attach 1
 
 The startup limit changes terminal presentation only. It does not remove, truncate, or rewrite recorded JSONL evidence.
 
+## Choosing a session
+
+A selector is optional:
+
+```bash
+bashguard attach
+```
+
+Selector-less attach chooses its sole eligible session automatically. If active sessions exist, only they are eligible: one active session is automatic and multiple active sessions open a numbered picker when both stdin and stdout are TTYs. If no session is active, all discovered completed sessions become the candidates, with the same sole-candidate automatic selection and multiple-candidate picker behavior.
+
+The picker requires an exact displayed number. Enter has no default, invalid input prints concise guidance and retries, and EOF or `Ctrl+C` cancels concisely. Explicit numeric selectors, exact session IDs, and unique ID prefixes bypass the picker. An exact session ID takes precedence when it is also a valid numeric row number.
+
+Non-TTY scripts, pipes, and redirected output never prompt. With multiple eligible sessions, attach exits nonzero and prints eligible rows plus copyable commands using a globally unique ID prefix or full ID. Automation that allocates a PTY is interactive by contract and must pass an explicit selector to avoid prompting; explicit selectors are recommended for all automation. With no recorded sessions, attach uses the existing `No BashGuard sessions found` error and does not print candidate rows or commands. Selection uses one discovery snapshot: rows retain their global positions within that snapshot and are not locally renumbered. Numbers can change after discovery ordering changes and an explicit number resolves against the current order unless it exactly matches a session ID; globally unique ID prefixes or full IDs remain durable against the full snapshot, including completed sessions hidden by an active-only picker. This is a structured-text prompt, not the planned full-screen split-pane TUI.
+
 ## Status snapshot
 
 Active sessions show:

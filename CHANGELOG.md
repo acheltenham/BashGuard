@@ -4,14 +4,16 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
-### Fixed
-
-- Git package dependency reconciliation no longer requires Pi `0.84.1`; BashGuard develops and type-checks against the compatible `0.84.0` baseline while retaining a `*` runtime peer dependency.
+## 0.3.0 - 2026-08-13
 
 ### Added
 
 - `bashguard attach` now starts with an evidence-grounded session/activity/capture/freshness snapshot.
 - `bashguard attach` now defaults to the latest 50 narrated historical events, supports `--history N`, `--history 0`, and `--all-history`, and continues to display every new narrated event.
+
+### Fixed
+
+- Git package dependency reconciliation no longer requires Pi `0.84.1`; BashGuard develops and type-checks against the compatible `0.84.0` baseline while retaining a `*` runtime peer dependency.
 
 ## 0.2.0 - 2026-08-13
 

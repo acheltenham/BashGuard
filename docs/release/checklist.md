@@ -12,7 +12,7 @@ Use this checklist before tagging a BashGuard release.
 Current target:
 
 ```text
-v0.2.0
+v0.3.0
 ```
 
 ## 2. Run automated verification

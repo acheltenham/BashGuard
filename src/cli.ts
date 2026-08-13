@@ -8,6 +8,8 @@ import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
+import { sessionIdPrefixes } from "./session-format.ts";
+
 export type SessionMetadata = {
   schemaVersion?: number;
   sessionId: string;
@@ -383,15 +385,6 @@ export function resolveSessionChoice(requestedId: string, choices: SessionChoice
   return undefined;
 }
 
-function sessionPrefix(sessionId: string, allSessionIds: string[]): string {
-  const minLength = Math.min(8, sessionId.length);
-  for (let length = minLength; length <= sessionId.length; length++) {
-    const prefix = sessionId.slice(0, length);
-    if (allSessionIds.filter((id) => id.startsWith(prefix)).length === 1) return prefix;
-  }
-  return sessionId;
-}
-
 function formatAge(timestamp: number): string {
   const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
   if (seconds < 60) return `${seconds}s ago`;
@@ -406,14 +399,14 @@ function sessionDisplayName(metadata: SessionMetadata): string {
 }
 
 export function formatSessionList(sessions: SessionSummary[]): string {
-  const sessionIds = sessions.map((session) => session.metadata.sessionId);
+  const prefixes = sessionIdPrefixes(sessions.map((session) => session.metadata.sessionId));
   const lines = ["#  STATE     SESSION              NAME                  REPOSITORY           UPDATED"];
   for (const [index, session] of sessions.entries()) {
     const state = session.active ? "active" : "complete";
     const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
     const name = sessionDisplayName(session.metadata);
     const selector = String(index + 1).padEnd(2);
-    lines.push(`${selector} ${state.padEnd(9)} ${sessionPrefix(session.metadata.sessionId, sessionIds).padEnd(20)} ${name.slice(0, 20).padEnd(20)} ${repo.slice(0, 20).padEnd(20)} ${formatAge(session.modifiedAt)}`);
+    lines.push(`${selector} ${state.padEnd(9)} ${prefixes[index]!.padEnd(20)} ${name.slice(0, 20).padEnd(20)} ${repo.slice(0, 20).padEnd(20)} ${formatAge(session.modifiedAt)}`);
   }
 
   lines.push("", "Use a # or SESSION prefix, for example:", "  bashguard attach 1", "  bashguard inspect 1 --event <event-id-or-sequence>", "  bashguard debrief 1");

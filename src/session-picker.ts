@@ -3,15 +3,15 @@ import { createInterface } from "node:readline/promises";
 import type { Readable, Writable } from "node:stream";
 
 import type { SessionChoice } from "./cli.ts";
+import { sessionIdPrefixes } from "./session-format.ts";
 
 export type SessionPromptStreams = {
   input: Readable;
   output: Writable;
 };
 
-function renderChoice(choice: SessionChoice): string {
+function renderChoice(choice: SessionChoice, sessionIdPrefix: string): string {
   const { metadata } = choice.session;
-  const sessionIdPrefix = metadata.sessionId.slice(0, 8);
   const name = metadata.name ?? metadata.title ?? metadata.sessionName ?? "-";
   const repository = metadata.repository ?? basename(metadata.cwd ?? "unknown");
   const state = choice.session.active ? "active" : "complete";
@@ -21,57 +21,49 @@ function renderChoice(choice: SessionChoice): string {
   return `${choice.selector}  ${sessionIdPrefix}  ${name}  ${repository}  ${state}  updated ${updated}`;
 }
 
-function waitForInterruption(readline: ReturnType<typeof createInterface>): {
-  promise: Promise<never>;
-  cleanup: () => void;
-} {
-  const cancel = (reject: (reason: Error) => void) => () => {
-    reject(new Error("Session selection cancelled."));
-  };
-  let onCancel: () => void = () => undefined;
-  const promise = new Promise<never>((_resolve, reject) => {
-    onCancel = cancel(reject);
-    readline.once("close", onCancel);
-    readline.once("SIGINT", onCancel);
-  });
-  return {
-    promise,
-    cleanup: () => {
-      readline.off("close", onCancel);
-      readline.off("SIGINT", onCancel);
-    },
-  };
+function validateChoices(choices: readonly SessionChoice[]): void {
+  if (choices.length === 0) throw new Error("Session choices cannot be empty.");
+
+  const selectors = new Set<string>();
+  for (const choice of choices) {
+    const selector = String(choice.selector);
+    if (selectors.has(selector)) throw new Error(`Duplicate session selector: ${selector}.`);
+    selectors.add(selector);
+  }
 }
 
 export async function promptForSessionChoice(
   choices: readonly SessionChoice[],
   { input, output }: SessionPromptStreams,
 ): Promise<SessionChoice> {
+  validateChoices(choices);
   const selectors = choices.map((choice) => String(choice.selector));
   const selectorList = selectors.join(", ");
   const choicesBySelector = new Map(choices.map((choice) => [String(choice.selector), choice]));
+  const prefixes = sessionIdPrefixes(choices.map((choice) => choice.session.metadata.sessionId));
 
-  output.write(`${choices.map(renderChoice).join("\n")}\n`);
+  output.write(`${choices.map((choice, index) => renderChoice(choice, prefixes[index]!)).join("\n")}\n`);
   const readline = createInterface({ input, output });
+  let interrupted = false;
+  const onInterrupt = (): void => {
+    interrupted = true;
+    readline.close();
+  };
+  readline.on("SIGINT", onInterrupt);
 
   try {
+    const lines = readline[Symbol.asyncIterator]();
     while (true) {
-      const interruption = waitForInterruption(readline);
-      let answer: string;
-      try {
-        answer = await Promise.race([
-          readline.question(`Select a session [${selectorList}]: `),
-          interruption.promise,
-        ]);
-      } finally {
-        interruption.cleanup();
-      }
+      output.write(`Select a session [${selectorList}]: `);
+      const { value: answer, done } = await lines.next();
+      if (interrupted || done) throw new Error("Session selection cancelled.");
 
       const selected = choicesBySelector.get(answer);
       if (selected && /^\d+$/.test(answer)) return selected;
       output.write(`Enter one of: ${selectorList}.\n`);
     }
   } finally {
+    readline.off("SIGINT", onInterrupt);
     readline.close();
   }
 }

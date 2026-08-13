@@ -59,6 +59,21 @@ test("renders distinguishing context and the available stable selectors", async 
   assert.match(output, /Select a session \[1, 3\]: $/);
 });
 
+test("renders uniquely distinguishing session ID prefixes", async () => {
+  const io = streams();
+  const choices = [
+    choice(1, "019fc93a-1111-2222-3333-abcdefaaaaaa"),
+    choice(3, "019fc93a-2222-3333-4444-abcdefbbbbbb"),
+  ];
+
+  const selected = promptForSessionChoice(choices, io);
+  io.input.end("3\n");
+
+  assert.equal((await selected).selector, 3);
+  assert.match(io.readOutput(), /1\s+019fc93a-1\s+-/);
+  assert.match(io.readOutput(), /3\s+019fc93a-2\s+-/);
+});
+
 test("returns the choice whose selector is 2", async () => {
   const io = streams();
   const choices = [choice(1, "session-one"), choice(2, "session-two")];
@@ -82,6 +97,18 @@ test("retries blank, nonnumeric, and unavailable selectors until a valid selecto
   assert.equal(io.readOutput().match(/Select a session \[1, 3\]: /g)?.length, 4);
 });
 
+test("consumes buffered lines across retries without losing pasted input", async () => {
+  const io = streams();
+  const choices = [choice(1, "session-one"), choice(3, "session-three")];
+
+  const selected = promptForSessionChoice(choices, io);
+  io.input.end("\ninvalid\n3\n");
+
+  assert.equal((await selected).selector, 3);
+  assert.equal(io.readOutput().match(/Enter one of: 1, 3\./g)?.length, 2);
+  assert.equal(io.readOutput().match(/Select a session \[1, 3\]: /g)?.length, 3);
+});
+
 test("retries a whitespace-padded selector until an exact selector is entered", async () => {
   const io = streams();
   const choices = [choice(1, "session-one"), choice(3, "session-three")];
@@ -93,6 +120,21 @@ test("retries a whitespace-padded selector until an exact selector is entered", 
   io.input.end();
   assert.equal(io.readOutput().match(/Enter one of: 1, 3\./g)?.length, 1);
   assert.equal(io.readOutput().match(/Select a session \[1, 3\]: /g)?.length, 2);
+});
+
+test("rejects an empty choice snapshot", async () => {
+  const io = streams();
+
+  await assert.rejects(promptForSessionChoice([], io), new Error("Session choices cannot be empty."));
+  assert.equal(io.readOutput(), "");
+});
+
+test("rejects duplicate stable selectors", async () => {
+  const io = streams();
+  const choices = [choice(1, "session-one"), choice(1, "session-two")];
+
+  await assert.rejects(promptForSessionChoice(choices, io), new Error("Duplicate session selector: 1."));
+  assert.equal(io.readOutput(), "");
 });
 
 test("blank input has no default", async () => {

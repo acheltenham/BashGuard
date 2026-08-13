@@ -9,6 +9,7 @@ import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 import { sessionIdPrefixes } from "./session-format.ts";
+import { promptForSessionChoice, type SessionPromptStreams } from "./session-picker.ts";
 
 export type SessionMetadata = {
   schemaVersion?: number;
@@ -59,6 +60,13 @@ export type SessionCommand = "attach" | "inspect" | "debrief";
 export type SessionChoice = {
   selector: number;
   session: SessionSummary;
+};
+
+export type SessionSelectionOptions = {
+  root?: string;
+  input?: SessionPromptStreams["input"] & { isTTY?: boolean };
+  output?: SessionPromptStreams["output"] & { isTTY?: boolean };
+  prompt?: typeof promptForSessionChoice;
 };
 
 export type DebriefSummary = {
@@ -1545,6 +1553,55 @@ function formatSessionNotFound(requestedId: string, root: string, sessions: Sess
     "  bashguard sessions",
     "  bashguard attach 1",
   ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function formatNonInteractiveSessionChoices(command: SessionCommand, choices: readonly SessionChoice[]): string {
+  const prefixes = sessionIdPrefixes(choices.map((choice) => choice.session.metadata.sessionId));
+  const lines = [
+    `More than one eligible session exists for \`bashguard ${command}\`.`,
+    "Choose one explicitly:",
+  ];
+
+  for (const [index, choice] of choices.entries()) {
+    const { metadata } = choice.session;
+    const state = choice.session.active ? "active" : "complete";
+    const name = sessionDisplayName(metadata);
+    const repository = metadata.repository ?? basename(metadata.cwd ?? "unknown");
+    lines.push(`${choice.selector}  ${state}  ${prefixes[index]}  ${name}  ${repository}`);
+  }
+
+  lines.push("", "Run one of:");
+  for (const choice of choices) lines.push(`  bashguard ${command} ${choice.selector}`);
+  return lines.join("\n");
+}
+
+export async function selectSessionForCommand(
+  command: SessionCommand,
+  requestedId: string | undefined,
+  options: SessionSelectionOptions = {},
+): Promise<SessionSummary> {
+  const root = options.root ?? getDataRoot();
+  const sessions = await discoverSessions(root);
+  if (sessions.length === 0) throw new Error(`No BashGuard sessions found in ${root}`);
+
+  const choices = indexSessionChoices(sessions);
+  if (requestedId !== undefined) {
+    const choice = resolveSessionChoice(requestedId, choices);
+    if (choice) return choice.session;
+    throw new Error(formatSessionNotFound(requestedId, root, sessions));
+  }
+
+  const eligible = eligibleSessionChoices(command, choices);
+  if (eligible.length === 1) return eligible[0]!.session;
+
+  const input = options.input ?? process.stdin;
+  const output = options.output ?? process.stdout;
+  if (input.isTTY !== true || output.isTTY !== true) {
+    throw new Error(formatNonInteractiveSessionChoices(command, eligible));
+  }
+
+  const selected = await (options.prompt ?? promptForSessionChoice)(eligible, { input, output });
+  return selected.session;
 }
 
 export async function chooseSession(requestedId?: string, root = getDataRoot()): Promise<SessionSummary> {

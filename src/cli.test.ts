@@ -256,17 +256,21 @@ test("resolveSessionChoice rejects ambiguous prefixes", () => {
   assert.throws(() => resolveSessionChoice("99", choices), /Session prefix 99 is ambiguous/);
 });
 
-test("resolveSessionChoice handles invalid numeric indexes and numeric-looking IDs", () => {
+test("resolveSessionChoice recognizes only canonical positive decimal row indexes", () => {
   const choices = indexSessionChoices([
-    sessionSummary("0", false),
-    sessionSummary("-1-session", false),
-    sessionSummary("99-session", false),
+    sessionSummary("canonical-row-one", false),
+    sessionSummary("+1-target", false),
+    sessionSummary("01-target", false),
+    sessionSummary("1e3-target", false),
+    sessionSummary("1e000000-target", false),
   ]);
+  choices.push({ ...choices[0]!, selector: 1000 });
 
-  assert.equal(resolveSessionChoice("0", choices)?.session.metadata.sessionId, "0");
-  assert.equal(resolveSessionChoice("-1", choices)?.session.metadata.sessionId, "-1-session");
-  assert.equal(resolveSessionChoice("99", choices)?.session.metadata.sessionId, "99-session");
-  assert.equal(resolveSessionChoice("4", choices), undefined);
+  assert.equal(resolveSessionChoice("1", choices)?.session.metadata.sessionId, "canonical-row-one");
+  assert.equal(resolveSessionChoice("+1", choices)?.session.metadata.sessionId, "+1-target");
+  assert.equal(resolveSessionChoice("01", choices)?.session.metadata.sessionId, "01-target");
+  assert.equal(resolveSessionChoice("1e3", choices)?.session.metadata.sessionId, "1e3-target");
+  assert.equal(resolveSessionChoice("1e000000-target", choices)?.session.metadata.sessionId, "1e000000-target");
 });
 
 function selectionStreams(inputIsTTY: boolean | undefined, outputIsTTY: boolean | undefined): {
@@ -458,8 +462,8 @@ for (const [inputIsTTY, outputIsTTY] of [[false, true], [true, false], [undefine
         assert.match(error.message, /More than one eligible session exists for `bashguard debrief`\./);
         for (const choice of choices) {
           assert.match(error.message, new RegExp(`^${choice.selector}\\s+`, "m"));
-          assert.match(error.message, new RegExp(`bashguard debrief --session=${choice.sessionIdPrefix}`));
-          assert.doesNotMatch(error.message, new RegExp(`bashguard debrief --session=${choice.selector}(?:\\s|$)`));
+          assert.match(error.message, new RegExp(`bashguard debrief --session-id=${choice.session.metadata.sessionId}`));
+          assert.doesNotMatch(error.message, new RegExp(`bashguard debrief --session=${choice.sessionIdPrefix}`));
         }
         assert.match(error.message, /completed-/);
         return true;
@@ -547,6 +551,31 @@ test("explicit session selection preserves the requested selector", async () => 
   assert.equal(result.selector, "019fc93a-2");
 });
 
+test("exact session selection matches only the full metadata ID and bypasses prompting", async () => {
+  const snapshot = [sessionSummary("1", false), sessionSummary("1-future", false)];
+  let promptCalls = 0;
+
+  const result = await selectSessionForCommandResult("inspect", undefined, {
+    exactSessionId: "1",
+    discoverSessions: async () => snapshot,
+    prompt: async () => {
+      promptCalls += 1;
+      throw new Error("prompt should not run");
+    },
+  });
+
+  assert.equal(result.session, snapshot[0]);
+  assert.equal(result.selector, "--session-id=1");
+  assert.equal(promptCalls, 0);
+  await assert.rejects(
+    () => selectSessionForCommandResult("inspect", undefined, {
+      exactSessionId: "1-",
+      discoverSessions: async () => snapshot,
+    }),
+    /Session 1- was not found/,
+  );
+});
+
 test("chooseSession accepts session list index selectors", async () => {
   const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
   await writeSession(root, "session-a", [event(1, "session.started"), event(2, "session.shutdown")]);
@@ -578,13 +607,17 @@ test("chooseSession not-found errors explain BashGuard recorded-session scope", 
   );
 });
 
-test("parseCommandArgs accepts positional and --session selectors", () => {
+test("parseCommandArgs accepts positional, snapshot, and exact session selectors", () => {
   assert.deepEqual(parseCommandArgs(["sessions"]), { command: "sessions" });
   assert.deepEqual(parseCommandArgs(["sessions", "list"]), { command: "sessions" });
   assert.deepEqual(parseCommandArgs(["session", "list"]), { command: "sessions" });
   assert.deepEqual(parseCommandArgs(["attach", "1"]), { command: "attach", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["attach", "--session", "1"]), { command: "attach", sessionId: "1" });
   for (const command of ["attach", "inspect", "debrief"]) {
+    assert.deepEqual(parseCommandArgs([command, "--session-id", "exact value"]), { command, exactSessionId: "exact value" });
+    for (const exactId of ["--foo", "list", "events", " spaced\tselector\n", "1"]) {
+      assert.deepEqual(parseCommandArgs([command, `--session-id=${exactId}`]), { command, exactSessionId: exactId });
+    }
     for (const selector of ["--foo", "list", "events", " spaced\tselector\n"]) {
       assert.deepEqual(parseCommandArgs([command, `--session=${selector}`]), { command, sessionId: selector });
     }
@@ -615,6 +648,12 @@ test("parseCommandArgs rejects missing filter values and unknown options", () =>
     assert.throws(() => parseCommandArgs([command, "--session"]), new Error("`--session` requires a value"));
     assert.throws(() => parseCommandArgs([command, "--session", "--activity"]), new Error("`--session` requires a value"));
     assert.throws(() => parseCommandArgs([command, "--session="]), new Error("`--session` requires a value"));
+    assert.throws(() => parseCommandArgs([command, "--session-id"]), new Error("--session-id requires a value"));
+    assert.throws(() => parseCommandArgs([command, "--session-id", "--activity"]), new Error("--session-id requires a value"));
+    assert.throws(() => parseCommandArgs([command, "--session-id="]), new Error("--session-id requires a value"));
+    assert.throws(() => parseCommandArgs([command, "positional", "--session-id=exact"]), /cannot combine --session-id with a positional or --session selector/);
+    assert.throws(() => parseCommandArgs([command, "--session=prefix", "--session-id=exact"]), /cannot combine --session-id with a positional or --session selector/);
+    assert.throws(() => parseCommandArgs([command, "--session-id=exact", "positional"]), /cannot combine --session-id with a positional or --session selector/);
   }
   assert.throws(() => parseCommandArgs(["inspect", "--event"]), new Error("`--event` requires a value"));
   assert.throws(() => parseCommandArgs(["inspect", "--event", "--all"]), new Error("`--event` requires a value"));

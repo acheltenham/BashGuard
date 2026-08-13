@@ -83,8 +83,12 @@ test("unique proper session ID prefixes are never numeric, regardless of current
   );
 });
 
-test("singleLineDisplay removes terminal controls and collapses whitespace while preserving Unicode", () => {
-  assert.equal(singleLineDisplay("  café\n\t\u001b[31m界\u0085  "), "café [31m界");
+test("singleLineDisplay removes terminal and Unicode format controls while preserving ordinary Unicode", () => {
+  assert.equal(
+    singleLineDisplay("  café\n\t\u001b[31m界\u0085 \u202eRLO\u2066LRI\u2069 😀  "),
+    "café [31m界 RLOLRI 😀",
+  );
+  assert.doesNotMatch(singleLineDisplay("safe\u200fname\u061crepo"), /\p{Cf}/u);
 });
 
 test("shellQuoteArgument leaves ordinary session selectors unchanged", () => {
@@ -94,30 +98,30 @@ test("shellQuoteArgument leaves ordinary session selectors unchanged", () => {
 });
 
 test("shellQuoteArgument emits one-line Bash/Zsh ANSI-C quoting for unsafe selectors", () => {
-  const raw = "café space\nline\ttab\u001b\\quote'inject$`;\u0085";
+  const raw = "café space\nline\ttab\u001b\\quote'inject$`;\u0085\u202e";
   const quoted = shellQuoteArgument(raw);
 
-  assert.equal(quoted, "$'café space\\nline\\ttab\\e\\\\quote\\'inject$`;\\xc2\\x85'");
-  assert.doesNotMatch(quoted, /[\u0000-\u001f\u007f-\u009f]/u);
+  assert.equal(quoted, "$'café space\\nline\\ttab\\e\\\\quote\\'inject$`;\\xc2\\x85\\xe2\\x80\\xae'");
+  assert.doesNotMatch(quoted, /[\u0000-\u001f\u007f-\u009f]|\p{Cf}/u);
 });
 
 test("sanitizes every untrusted picker row field without changing the selected object", async () => {
   const io = streams();
   const supplied = choice(1, "session-one", {
-    name: "Name\nFORGED\u001b[31m",
-    repository: "Repo\tFORGED\u009b32m",
+    name: "Name\nFORGED\u001b[31m\u202eBIDI",
+    repository: "Repo\tFORGED\u009b32m\u2066ISOLATE\u2069",
   });
-  supplied.sessionIdPrefix = "safe\nFORGED\u001b[33m";
+  supplied.sessionIdPrefix = "safe\nFORGED\u001b[33m\u202eID";
 
   const selected = promptForSessionChoice([supplied], io);
   io.input.end("1\n");
 
   assert.equal(await selected, supplied);
   const output = io.readOutput();
-  assert.doesNotMatch(output, /\u001b|\u009b/);
+  assert.doesNotMatch(output, /\u001b|\u009b|\p{Cf}/u);
   assert.doesNotMatch(output, /^FORGED/m);
   assert.equal(output.split("\n").filter((line) => /^1  /.test(line)).length, 1);
-  assert.match(output, /^1  safe FORGED \[33m  Name FORGED \[31m  Repo FORGED 32m  complete  updated 2026-08-03T12:00:00\.000Z\nSelect a session \[1\]: $/);
+  assert.match(output, /^1  safe FORGED \[33mID  Name FORGED \[31mBIDI  Repo FORGED 32mISOLATE  complete  updated 2026-08-03T12:00:00\.000Z\nSelect a session \[1\]: $/);
 });
 
 test("returns the choice whose selector is 2", async () => {

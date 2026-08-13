@@ -15,6 +15,7 @@ export type SessionChoiceDisplay = {
 export function singleLineDisplay(value: string): string {
   return value
     .replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ")
+    .replace(/\p{Cf}/gu, "")
     .replace(/\s+/gu, " ")
     .trim();
 }
@@ -38,7 +39,7 @@ export function shellQuoteArgument(value: string): string {
     else if (codePoint === 0x1b) escaped += "\\e";
     else if (codePoint <= 0x1f || codePoint === 0x7f) {
       escaped += `\\x${codePoint.toString(16).padStart(2, "0")}`;
-    } else if ((codePoint >= 0x80 && codePoint <= 0x9f) || codePoint === 0x2028 || codePoint === 0x2029) {
+    } else if ((codePoint >= 0x80 && codePoint <= 0x9f) || codePoint === 0x2028 || codePoint === 0x2029 || /\p{Cf}/u.test(character)) {
       escaped += [...Buffer.from(character)].map((byte) => `\\x${byte.toString(16).padStart(2, "0")}`).join("");
     } else escaped += character;
   }

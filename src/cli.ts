@@ -71,6 +71,7 @@ export type SessionSelectionResult = {
 
 export type SessionSelectionOptions = {
   root?: string;
+  exactSessionId?: string;
   input?: NodeJS.ReadableStream & { isTTY?: boolean };
   output?: NodeJS.WritableStream & { isTTY?: boolean };
   discoverSessions?: typeof discoverSessions;
@@ -114,6 +115,7 @@ export type EvidenceFilterOptions = {
 export type ParsedCommandArgs = {
   command?: string;
   sessionId?: string;
+  exactSessionId?: string;
   eventId?: string;
   activities?: string[];
   eventTypes?: string[];
@@ -144,7 +146,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session=<session-id> [--history <n>|--all-history]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session=<session-selector> [--history <n>|--all-history]\n  bashguard attach --session-id=<exact-session-id> [--history <n>|--all-history]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-selector> --event <event-id-or-sequence>\n  bashguard inspect --session-id=<exact-session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-selector>\n  bashguard debrief --session-id=<exact-session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -152,6 +154,7 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   const [rawCommand, ...args] = argv;
   const command = rawCommand === "session" && args[0] === "list" ? "sessions" : rawCommand;
   let sessionId: string | undefined;
+  let exactSessionId: string | undefined;
   let eventId: string | undefined;
   const activities: string[] = [];
   const eventTypes: string[] = [];
@@ -176,15 +179,31 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       const parsed: ParsedCommandArgs = { command: "setup", setupSubject: "cli", setupScope: "local" };
       return parsed;
     }
+    if (arg.startsWith("--session-id=")) {
+      const requestedSession = arg.slice("--session-id=".length);
+      if (requestedSession.length === 0) throw new Error("--session-id requires a value");
+      if (sessionId !== undefined) throw new Error("cannot combine --session-id with a positional or --session selector");
+      exactSessionId = requestedSession;
+      continue;
+    }
+    if (arg === "--session-id") {
+      const requestedSession = args[++index];
+      if (!requestedSession || requestedSession.startsWith("--")) throw new Error("--session-id requires a value");
+      if (sessionId !== undefined) throw new Error("cannot combine --session-id with a positional or --session selector");
+      exactSessionId = requestedSession;
+      continue;
+    }
     if (arg.startsWith("--session=")) {
       const requestedSession = arg.slice("--session=".length);
       if (requestedSession.length === 0) throw new Error("`--session` requires a value");
+      if (exactSessionId !== undefined) throw new Error("cannot combine --session-id with a positional or --session selector");
       sessionId = requestedSession;
       continue;
     }
     if (arg === "--session") {
       const requestedSession = args[++index];
       if (!requestedSession || requestedSession.startsWith("--")) throw new Error("`--session` requires a value");
+      if (exactSessionId !== undefined) throw new Error("cannot combine --session-id with a positional or --session selector");
       sessionId = requestedSession;
       continue;
     }
@@ -240,12 +259,14 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
     if (arg.startsWith("--")) throw new Error(`Unknown option: ${arg}`);
     if (command === "sessions" && arg.toLowerCase() === "list") continue;
     if (command === "inspect" && ["list", "events"].includes(arg.toLowerCase())) continue;
+    if (exactSessionId !== undefined) throw new Error("cannot combine --session-id with a positional or --session selector");
     if (!sessionId) sessionId = arg;
   }
 
   const parsed: ParsedCommandArgs = {};
   if (command !== undefined) parsed.command = command;
   if (sessionId !== undefined) parsed.sessionId = sessionId;
+  if (exactSessionId !== undefined) parsed.exactSessionId = exactSessionId;
   if (eventId !== undefined) parsed.eventId = eventId;
   if (activities.length > 0) parsed.activities = activities;
   if (eventTypes.length > 0) parsed.eventTypes = eventTypes;
@@ -427,10 +448,12 @@ export function resolveSessionChoice(requestedId: string, choices: SessionChoice
   const exact = choices.find((choice) => choice.session.metadata.sessionId === requestedId);
   if (exact) return exact;
 
-  const index = Number(requestedId);
-  if (Number.isInteger(index) && index >= 1) {
-    const indexed = choices.find((choice) => choice.selector === index);
-    if (indexed) return indexed;
+  if (/^[1-9]\d*$/u.test(requestedId)) {
+    const index = Number(requestedId);
+    if (Number.isSafeInteger(index)) {
+      const indexed = choices.find((choice) => choice.selector === index);
+      if (indexed) return indexed;
+    }
   }
 
   const prefixMatches = choices.filter((choice) => choice.session.metadata.sessionId.startsWith(requestedId));
@@ -1619,7 +1642,7 @@ function formatNonInteractiveSessionChoices(command: SessionCommand, choices: re
 
   lines.push("", "Run one of:");
   for (const choice of choices) {
-    const sessionArgument = `--session=${choice.sessionIdPrefix}`;
+    const sessionArgument = `--session-id=${choice.session.metadata.sessionId}`;
     lines.push(`  bashguard ${command} ${shellQuoteArgument(sessionArgument)}`);
   }
   return lines.join("\n");
@@ -1637,7 +1660,11 @@ export async function selectSessionForCommandResult(
 
   const choices = indexSessionChoices(sessions);
   let selected: SessionChoice;
-  if (requestedId !== undefined) {
+  if (options.exactSessionId !== undefined) {
+    const choice = choices.find(({ session }) => session.metadata.sessionId === options.exactSessionId);
+    if (!choice) throw new Error(formatSessionNotFound(options.exactSessionId, root, sessions, command));
+    selected = choice;
+  } else if (requestedId !== undefined) {
     const choice = resolveSessionChoice(requestedId, choices);
     if (!choice) throw new Error(formatSessionNotFound(requestedId, root, sessions, command));
     selected = choice;
@@ -1657,7 +1684,9 @@ export async function selectSessionForCommandResult(
 
   const rawSelector = requestedId ?? selected.sessionIdPrefix;
   const requiresNamedSelector = rawSelector.startsWith("--") || ["list", "events"].includes(rawSelector.toLowerCase());
-  const selector = shellQuoteArgument(requiresNamedSelector ? `--session=${rawSelector}` : rawSelector);
+  const selector = options.exactSessionId !== undefined
+    ? shellQuoteArgument(`--session-id=${options.exactSessionId}`)
+    : shellQuoteArgument(requiresNamedSelector ? `--session=${rawSelector}` : rawSelector);
   return { session: selected.session, selector };
 }
 
@@ -1707,7 +1736,11 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
   const hasFilters = Boolean(options.activities?.length || options.eventTypes?.length || options.grep !== undefined || options.limit !== undefined || options.all || options.format);
   if (eventIdOrSequence && hasFilters) throw new Error("`--event` cannot be combined with activity, type, search, limit, or format options");
 
-  const selection = await selectSessionForCommandResult("inspect", requestedId, { input: process.stdin, output: process.stdout });
+  const selection = await selectSessionForCommandResult("inspect", requestedId, {
+    exactSessionId: options.exactSessionId,
+    input: process.stdin,
+    output: process.stdout,
+  });
   const { session, selector: effectiveSelector } = selection;
   const events = await readExistingEvents(session.eventsFile);
 
@@ -1736,7 +1769,11 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
 
 async function debrief(options: ParsedCommandArgs): Promise<void> {
   const requestedId = options.sessionId;
-  const selection = await selectSessionForCommandResult("debrief", requestedId, { input: process.stdin, output: process.stdout });
+  const selection = await selectSessionForCommandResult("debrief", requestedId, {
+    exactSessionId: options.exactSessionId,
+    input: process.stdin,
+    output: process.stdout,
+  });
   const { session, selector: effectiveSelector } = selection;
   const events = await readExistingEvents(session.eventsFile);
   process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: effectiveSelector, sessionState: session.active ? "active" : "complete" }));
@@ -1747,7 +1784,11 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
   if (options.attachHistory !== undefined && (!Number.isInteger(options.attachHistory) || options.attachHistory < 0)) throw new Error("`--history` must be a non-negative integer");
   if (options.attachHistory !== undefined && options.allHistory) throw new Error("`--history` and `--all-history` cannot be combined");
   const history = options.attachHistory ?? 50;
-  const selection = await selectSessionForCommandResult("attach", requestedId, { input: process.stdin, output: process.stdout });
+  const selection = await selectSessionForCommandResult("attach", requestedId, {
+    exactSessionId: options.exactSessionId,
+    input: process.stdin,
+    output: process.stdout,
+  });
   const { session } = selection;
   const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
   const snapshot = await readAttachSnapshot(session.eventsFile);

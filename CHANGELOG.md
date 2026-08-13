@@ -4,10 +4,16 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
+## 0.4.0 - 2026-08-13
+
 ### Added
 
 - Selector-less `attach`, `inspect`, and `debrief` now auto-select a sole eligible session or show a structured-text numbered picker when multiple candidates and interactive stdin/stdout TTYs are available. Active sessions take priority for selector-less attach; inspect and debrief consider all discovered recorded sessions.
-- Non-interactive ambiguous selection now exits nonzero without prompting and prints stable global selectors with copyable commands. Explicit numeric selectors, exact session IDs, and unique ID prefixes continue to bypass interaction.
+- Non-interactive ambiguous selection now exits nonzero without prompting and prints exact, copyable `--session-id` commands. Explicit numeric selectors, exact session IDs, and unique ID prefixes continue to bypass interaction.
+
+### Fixed
+
+- Session selection now preserves exact identity across ordering changes, validates malformed metadata, and sanitizes terminal control and bidirectional formatting characters in session presentation.
 
 ## 0.3.0 - 2026-08-13
 

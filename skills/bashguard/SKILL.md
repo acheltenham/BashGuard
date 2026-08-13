@@ -77,6 +77,8 @@ pi install git:github.com/acheltenham/BashGuard@v0.1.1
 
 Already-running Pi sessions keep the extension code they started with, so start a new Pi session after updating.
 
+Do not load BashGuard from multiple sources in one Pi session, such as an installed package plus a local `pi -e` path. The first instance owns the per-session recorder lock; duplicate instances warn and remain inactive. Remove the redundant source and start a new Pi session.
+
 Install BashGuard globally for all Pi sessions:
 
 ```bash

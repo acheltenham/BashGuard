@@ -248,6 +248,8 @@ The global setup runs `npm link` from the BashGuard package checkout. The local 
 
 Start a new Pi session after installing or updating BashGuard; an already-running Pi process keeps the extension and skill version it started with. BashGuard can only record and attach to sessions where the extension was loaded before the session began and is writing to the same `BASHGUARD_DATA_DIR`.
 
+Do not load BashGuard from multiple sources in the same Pi session, such as an installed GitHub package plus `pi -e /path/to/local/BashGuard`. BashGuard prevents duplicate recording with a per-session ownership lock and warns when another instance is already active. Remove the redundant source and start a new Pi session.
+
 During local development, you can also run the CLI from your BashGuard checkout without linking:
 
 ```bash

@@ -2,8 +2,10 @@ import { execFile } from "node:child_process";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { acquireRecorderLock, releaseRecorderLock, type RecorderLockOwner } from "./recorder-lock.ts";
 
 type EvidenceKind = "observed" | "reported" | "inferred" | "redacted" | "missing";
 
@@ -35,7 +37,12 @@ type SessionState = {
   sequence: number;
   directory: string;
   eventsFile: string;
+  lockOwnerId: string;
 };
+
+type SessionStateResult =
+  | { acquired: true; state: SessionState }
+  | { acquired: false; sessionId: string; directory: string; owner?: RecorderLockOwner };
 
 const execFileAsync = promisify(execFile);
 
@@ -292,33 +299,47 @@ async function readGitStatus(cwd: string, phase: "start" | "shutdown"): Promise<
   }
 }
 
-async function createSessionState(ctx: ExtensionContext): Promise<SessionState> {
+async function createSessionState(ctx: ExtensionContext): Promise<SessionStateResult> {
   const sessionId = resolveSessionId(ctx);
   const directory = join(getDataRoot(), sessionId);
   await mkdir(directory, { recursive: true });
+  const lock = await acquireRecorderLock(directory, fileURLToPath(import.meta.url));
+  if (!lock.acquired) return { acquired: false, sessionId, directory, owner: lock.owner };
 
-  const metadata = {
-    schemaVersion: 1,
-    sessionId,
-    name: resolveSessionName(ctx),
-    cwd: ctx.cwd,
-    repository: basename(ctx.cwd),
-    startedAt: new Date().toISOString(),
-    processId: process.pid,
-    piMode: ctx.hasUI ? "interactive" : "non-interactive",
-  };
+  try {
+    const metadata = {
+      schemaVersion: 1,
+      sessionId,
+      name: resolveSessionName(ctx),
+      cwd: ctx.cwd,
+      repository: basename(ctx.cwd),
+      startedAt: new Date().toISOString(),
+      processId: process.pid,
+      piMode: ctx.hasUI ? "interactive" : "non-interactive",
+      recorderSource: fileURLToPath(import.meta.url),
+    };
 
-  await writeFile(join(directory, "session.json"), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
-  return {
-    sessionId,
-    sequence: 0,
-    directory,
-    eventsFile: join(directory, "events.jsonl"),
-  };
+    await writeFile(join(directory, "session.json"), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+    return {
+      acquired: true,
+      state: {
+        sessionId,
+        sequence: 0,
+        directory,
+        eventsFile: join(directory, "events.jsonl"),
+        lockOwnerId: lock.ownerId,
+      },
+    };
+  } catch (error) {
+    await releaseRecorderLock(directory, lock.ownerId);
+    throw error;
+  }
 }
 
 export default function bashGuard(pi: ExtensionAPI): void {
   let state: SessionState | undefined;
+  let duplicateOwner: RecorderLockOwner | undefined;
+  let recordingDisabled = false;
   let writeChain: Promise<void> = Promise.resolve();
 
   const record = async (
@@ -327,7 +348,7 @@ export default function bashGuard(pi: ExtensionAPI): void {
     payload: Record<string, unknown> = {},
     evidence: EvidenceKind = "observed",
   ): Promise<void> => {
-    if (!state) state = await createSessionState(ctx);
+    if (recordingDisabled || !state) return;
     const sequence = ++state.sequence;
     const redacted: string[] = [];
     const truncated: string[] = [];
@@ -402,7 +423,21 @@ export default function bashGuard(pi: ExtensionAPI): void {
   };
 
   pi.on("session_start", async (event, ctx) => {
-    state = await createSessionState(ctx);
+    const result = await createSessionState(ctx);
+    if (!result.acquired) {
+      recordingDisabled = true;
+      duplicateOwner = result.owner;
+      const ownerSource = result.owner?.source ? ` Owner: ${result.owner.source}.` : "";
+      const message = `Duplicate BashGuard extension detected; this instance will not record session ${result.sessionId}.${ownerSource}`;
+      if (ctx.hasUI) {
+        ctx.ui.notify(message, "warning");
+      } else {
+        process.stderr.write(`BashGuard: ${message}\n`);
+      }
+      return;
+    }
+
+    state = result.state;
     await record("session.started", ctx, { event });
     await recordGitStatus(ctx, "start");
     if (ctx.hasUI) {
@@ -412,10 +447,13 @@ export default function bashGuard(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async (event, ctx) => {
-    await recordGitStatus(ctx, "shutdown");
-    await record("session.shutdown", ctx, { event });
-    await writeChain;
-    if (ctx.hasUI) ctx.ui.setStatus("bashguard", undefined);
+    if (state) {
+      await recordGitStatus(ctx, "shutdown");
+      await record("session.shutdown", ctx, { event });
+      await writeChain;
+      await releaseRecorderLock(state.directory, state.lockOwnerId);
+    }
+    if (state && ctx.hasUI) ctx.ui.setStatus("bashguard", undefined);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
@@ -481,12 +519,19 @@ export default function bashGuard(pi: ExtensionAPI): void {
   pi.registerCommand("bashguard-status", {
     description: "Show where BashGuard is recording the current Pi session",
     handler: async (_args, ctx) => {
-      if (!state) state = await createSessionState(ctx);
-      const summary = [
-        `Session: ${state.sessionId}`,
-        `Events: ${state.sequence}`,
-        `Directory: ${state.directory}`,
-      ].join("\n");
+      const summary = recordingDisabled
+        ? [
+            "Recording: disabled for duplicate extension instance",
+            `Owner: ${duplicateOwner?.source ?? "another BashGuard extension"}`,
+            "Remove or disable the redundant BashGuard package source, then start a new Pi session.",
+          ].join("\n")
+        : state
+          ? [
+              `Session: ${state.sessionId}`,
+              `Events: ${state.sequence}`,
+              `Directory: ${state.directory}`,
+            ].join("\n")
+          : "BashGuard has not started recording this session.";
       if (ctx.hasUI) ctx.ui.notify(summary, "info");
       else process.stdout.write(`${summary}\n`);
     },

@@ -13,6 +13,7 @@ All notable project changes will be recorded here.
 
 ### Fixed
 
+- Multiple BashGuard extension instances now coordinate through a per-session ownership lock so only one records events; duplicate instances warn and remain inactive.
 - CLI output now exits quietly when a downstream pipe closes instead of printing an `EPIPE` stack trace.
 - Repeated event sequences now preserve JSONL append order; ambiguous sequence selectors explain how to use an event ID prefix.
 - `attach` now explains whether it shows narrated events or raw events requiring `inspect`, and points to the next CLI commands.

@@ -11,6 +11,9 @@ const cliArgs = ["--experimental-strip-types", "src/cli.ts"];
 
 type StoredSession = {
   id: string;
+  metadataId?: string;
+  name?: string;
+  repository?: string;
   active?: boolean;
   modifiedAt?: number;
   command?: string;
@@ -37,9 +40,9 @@ async function writeSession(root: string, session: StoredSession): Promise<void>
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "session.json"), `${JSON.stringify({
     schemaVersion: 1,
-    sessionId: session.id,
-    repository: "picker-integration",
-    name: session.id,
+    sessionId: session.metadataId ?? session.id,
+    repository: session.repository ?? "picker-integration",
+    name: session.name ?? session.id,
     processId: session.active ? process.pid : undefined,
   })}\n`);
   const events = [
@@ -148,9 +151,11 @@ test("piped selector-less commands fail without prompting and print stable copya
     const output = combined(result);
     assert.notEqual(result.status, 0);
     assert.doesNotMatch(output, /Select a session/);
-    for (const selector of [1, 2, 3]) {
+    const expected = [[1, "active-n"], [2, "active-o"], [3, "complete"]] as const;
+    for (const [selector, prefix] of expected) {
       assert.match(output, new RegExp(`^${selector}\\s+`, "m"));
-      assert.match(output, new RegExp(`bashguard ${command} ${selector}`));
+      assert.match(output, new RegExp(`bashguard ${command} ${prefix}`));
+      assert.doesNotMatch(output, new RegExp(`bashguard ${command} ${selector}(?:\\s|$)`));
     }
   }
 
@@ -160,8 +165,9 @@ test("piped selector-less commands fail without prompting and print stable copya
   assert.doesNotMatch(output, /Select a session|completed-middle/);
   assert.match(output, /^1\s+active\s+/m);
   assert.match(output, /^2\s+active\s+/m);
-  assert.match(output, /bashguard attach 1/);
-  assert.match(output, /bashguard attach 2/);
+  assert.match(output, /bashguard attach active-n/);
+  assert.match(output, /bashguard attach active-o/);
+  assert.doesNotMatch(output, /bashguard attach [12](?:\s|$)/);
   assert.doesNotMatch(output, /^3\s+active\s+/m);
 });
 
@@ -180,6 +186,8 @@ test("attach choices render prefixes unique against hidden completed sessions", 
   assert.match(output, /^1\s+active\s+shared-prefix-a\s+/m);
   assert.doesNotMatch(output, /^1\s+active\s+shared-p\s+/m);
   assert.doesNotMatch(output, /shared-prefix-completed/);
+  assert.match(output, /bashguard attach shared-prefix-a/);
+  assert.doesNotMatch(output, /bashguard attach 1(?:\s|$)/);
 
   const inspect = run(root, ["inspect", "shared-prefix-a"]);
   assert.equal(inspect.status, 0, inspect.stderr);
@@ -219,8 +227,9 @@ test("global session order is active-first and newest-first within each state", 
   assert.notEqual(attach.status, 0);
   assert.match(output, /^1\s+active\s+newer-ac/m);
   assert.match(output, /^2\s+active\s+older-ac/m);
-  assert.match(output, /bashguard attach 1/);
-  assert.match(output, /bashguard attach 2/);
+  assert.match(output, /bashguard attach newer-ac/);
+  assert.match(output, /bashguard attach older-ac/);
+  assert.doesNotMatch(output, /bashguard attach [12](?:\s|$)/);
   assert.doesNotMatch(output, /^3\s+|^4\s+|newer-completed|older-completed/m);
 });
 
@@ -253,6 +262,66 @@ test("explicit ID prefixes still resolve without interaction", async (t) => {
     const result = run(root, [command, "prefix-target"]);
     assert.equal(result.status, 0, result.stderr);
     assert.doesNotMatch(combined(result), /Select a session/);
+  }
+});
+
+test("non-TTY remediation prefix survives discovery reordering", async (t) => {
+  const now = Date.now();
+  const targetId = "durable-target-session";
+  const otherId = "durable-other-session";
+  const root = await store(t, [
+    { id: targetId, modifiedAt: now, command: "echo originally-displayed-target" },
+    { id: otherId, modifiedAt: now - 10_000, command: "echo reordered-other" },
+  ]);
+
+  const ambiguity = run(root, ["inspect"]);
+  const output = combined(ambiguity);
+  assert.notEqual(ambiguity.status, 0);
+  const emittedPrefix = output.match(/bashguard inspect (durable-t\S*)/)?.[1];
+  assert.ok(emittedPrefix, output);
+  assert.notEqual(emittedPrefix, "1");
+
+  await appendFile(join(root, otherId, "events.jsonl"), `${JSON.stringify(event(otherId, 5, "agent.ended"))}\n`);
+  const reordered = run(root, ["sessions"]);
+  assert.match(reordered.stdout, /^1\s+complete\s+durable-o/m);
+
+  const remediated = run(root, ["inspect", emittedPrefix]);
+  assert.equal(remediated.status, 0, remediated.stderr);
+  assert.match(remediated.stdout, /originally-displayed-target/);
+  assert.doesNotMatch(remediated.stdout, /reordered-other/);
+});
+
+test("noninteractive rows sanitize terminal controls without forging extra candidates", async (t) => {
+  const root = await store(t, [
+    {
+      id: "malicious-directory",
+      metadataId: "safe-id\nFORGED\u001b[31m-session",
+      name: "Name\nFORGED\u009b32m",
+      repository: "Repo\tFORGED\u001b[33m",
+    },
+    { id: "ordinary-session" },
+  ]);
+
+  const result = run(root, ["inspect"]);
+  const output = combined(result);
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(output, /\u001b|\u009b/);
+  assert.doesNotMatch(output, /^FORGED/m);
+  assert.equal(output.split("\n").filter((line) => /^\d+\s+complete\s+/.test(line)).length, 2);
+});
+
+test("bare --event and option-valued --event fail before selection", async (t) => {
+  const root = await store(t, [
+    { id: "first-session" },
+    { id: "second-session" },
+  ]);
+
+  for (const suffix of [["--event"], ["--event", "--all"]]) {
+    const result = run(root, ["inspect", ...suffix]);
+    const output = combined(result);
+    assert.notEqual(result.status, 0);
+    assert.match(output, /`--event` requires a value/);
+    assert.doesNotMatch(output, /Select a session|More than one eligible session|No BashGuard sessions/);
   }
 });
 

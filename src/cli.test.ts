@@ -109,6 +109,25 @@ function sessionSummary(sessionId: string, active: boolean): SessionSummary {
   };
 }
 
+test("formatSessionList sanitizes untrusted row fields into exactly one terminal line", () => {
+  const output = formatSessionList([{
+    metadata: {
+      sessionId: "safe\nFORGED\u001b[31m-session",
+      name: "Name\nFORGED\u009b32m",
+      repository: "Repo\tFORGED\u001b[33m",
+    },
+    directory: "/tmp/one",
+    eventsFile: "/tmp/one/events.jsonl",
+    modifiedAt: Date.now(),
+    active: true,
+  }]);
+
+  assert.doesNotMatch(output, /\u001b|\u009b/);
+  assert.doesNotMatch(output, /^FORGED/m);
+  assert.equal(output.split("\n").filter((line) => /^1\s/.test(line)).length, 1);
+  assert.match(output, /^1\s+active\s+safe FOR\s+Name FORGED 32m\s+Repo FORGED \[33m/m);
+});
+
 test("session choices retain global selectors and prefixes when attach filters to active sessions", () => {
   const choices = indexSessionChoices([
     sessionSummary("shared-prefix-active", true),
@@ -340,7 +359,7 @@ for (const [inputIsTTY, outputIsTTY] of [[false, true], [true, false], [undefine
     await writeSession(root, "completed-alpha", [event(1, "session.shutdown")]);
     await writeSession(root, "completed-beta", [event(1, "session.shutdown")]);
     const sessions = await discoverSessions(root);
-    const selectors = indexSessionChoices(sessions).map((choice) => choice.selector);
+    const choices = indexSessionChoices(sessions);
     let promptCalls = 0;
 
     await assert.rejects(
@@ -354,9 +373,10 @@ for (const [inputIsTTY, outputIsTTY] of [[false, true], [true, false], [undefine
       }),
       (error: Error) => {
         assert.match(error.message, /More than one eligible session exists for `bashguard debrief`\./);
-        for (const selector of selectors) {
-          assert.match(error.message, new RegExp(`^${selector}\\s+`, "m"));
-          assert.match(error.message, new RegExp(`bashguard debrief ${selector}`));
+        for (const choice of choices) {
+          assert.match(error.message, new RegExp(`^${choice.selector}\\s+`, "m"));
+          assert.match(error.message, new RegExp(`bashguard debrief ${choice.sessionIdPrefix}`));
+          assert.doesNotMatch(error.message, new RegExp(`bashguard debrief ${choice.selector}(?:\\s|$)`));
         }
         assert.match(error.message, /completed-/);
         return true;
@@ -507,6 +527,8 @@ test("parseCommandArgs rejects missing filter values and unknown options", () =>
     assert.throws(() => parseCommandArgs([command, "--session"]), new Error("`--session` requires a value"));
     assert.throws(() => parseCommandArgs([command, "--session", "--activity"]), new Error("`--session` requires a value"));
   }
+  assert.throws(() => parseCommandArgs(["inspect", "--event"]), new Error("`--event` requires a value"));
+  assert.throws(() => parseCommandArgs(["inspect", "--event", "--all"]), new Error("`--event` requires a value"));
   assert.throws(() => parseCommandArgs(["inspect", "1", "--activity"]), /`--activity` requires a value/);
   assert.throws(() => parseCommandArgs(["inspect", "1", "--grep"]), /`--grep` requires a value/);
   assert.throws(() => parseCommandArgs(["inspect", "1", "--unknown"]), /Unknown option: --unknown/);

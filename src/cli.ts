@@ -8,7 +8,7 @@ import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
-import { uniqueSessionIdPrefixes } from "./session-format.ts";
+import { sessionChoiceDisplay, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
 import { promptForSessionChoice } from "./session-picker.ts";
 
 export type SessionMetadata = {
@@ -182,7 +182,9 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       continue;
     }
     if (arg === "--event") {
-      eventId = args[++index];
+      const requestedEvent = args[++index];
+      if (!requestedEvent || requestedEvent.startsWith("--")) throw new Error("`--event` requires a value");
+      eventId = requestedEvent;
       continue;
     }
     if (arg === "--activity") {
@@ -420,11 +422,9 @@ export function formatSessionList(sessions: SessionSummary[]): string {
   const prefixes = uniqueSessionIdPrefixes(sessions.map((session) => session.metadata.sessionId));
   const lines = ["#  STATE     SESSION              NAME                  REPOSITORY           UPDATED"];
   for (const [index, session] of sessions.entries()) {
-    const state = session.active ? "active" : "complete";
-    const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
-    const name = sessionDisplayName(session.metadata);
-    const selector = String(index + 1).padEnd(2);
-    lines.push(`${selector} ${state.padEnd(9)} ${prefixes[index]!.padEnd(20)} ${name.slice(0, 20).padEnd(20)} ${repo.slice(0, 20).padEnd(20)} ${formatAge(session.modifiedAt)}`);
+    const row = sessionChoiceDisplay({ selector: index + 1, sessionIdPrefix: prefixes[index]!, session });
+    const selector = row.selector.padEnd(2);
+    lines.push(`${selector} ${row.state.padEnd(9)} ${row.sessionIdPrefix.padEnd(20)} ${row.name.slice(0, 20).padEnd(20)} ${row.repository.slice(0, 20).padEnd(20)} ${singleLineDisplay(formatAge(session.modifiedAt))}`);
   }
 
   lines.push("", "Use a # or SESSION prefix, for example:", "  bashguard attach 1", "  bashguard inspect 1 --event <event-id-or-sequence>", "  bashguard debrief 1");
@@ -1579,15 +1579,12 @@ function formatNonInteractiveSessionChoices(command: SessionCommand, choices: re
   ];
 
   for (const choice of choices) {
-    const { metadata } = choice.session;
-    const state = choice.session.active ? "active" : "complete";
-    const name = sessionDisplayName(metadata);
-    const repository = metadata.repository ?? basename(metadata.cwd ?? "unknown");
-    lines.push(`${choice.selector}  ${state}  ${choice.sessionIdPrefix}  ${name}  ${repository}`);
+    const row = sessionChoiceDisplay(choice);
+    lines.push(`${row.selector}  ${row.state}  ${row.sessionIdPrefix}  ${row.name}  ${row.repository}`);
   }
 
   lines.push("", "Run one of:");
-  for (const choice of choices) lines.push(`  bashguard ${command} ${choice.selector}`);
+  for (const choice of choices) lines.push(`  bashguard ${command} ${singleLineDisplay(choice.sessionIdPrefix)}`);
   return lines.join("\n");
 }
 

@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import type { SessionChoice, SessionSummary } from "./cli.ts";
+import { singleLineDisplay } from "./session-format.ts";
 import { promptForSessionChoice } from "./session-picker.ts";
 
 function choice(
@@ -73,6 +74,29 @@ test("renders globally distinguishing session ID prefixes carried by each choice
   assert.equal((await selected).selector, 3);
   assert.match(io.readOutput(), /1\s+019fc93a-1\s+-/);
   assert.match(io.readOutput(), /3\s+019fc93a-2\s+-/);
+});
+
+test("singleLineDisplay removes terminal controls and collapses whitespace while preserving Unicode", () => {
+  assert.equal(singleLineDisplay("  café\n\t\u001b[31m界\u0085  "), "café [31m界");
+});
+
+test("sanitizes every untrusted picker row field without changing the selected object", async () => {
+  const io = streams();
+  const supplied = choice(1, "session-one", {
+    name: "Name\nFORGED\u001b[31m",
+    repository: "Repo\tFORGED\u009b32m",
+  });
+  supplied.sessionIdPrefix = "safe\nFORGED\u001b[33m";
+
+  const selected = promptForSessionChoice([supplied], io);
+  io.input.end("1\n");
+
+  assert.equal(await selected, supplied);
+  const output = io.readOutput();
+  assert.doesNotMatch(output, /\u001b|\u009b/);
+  assert.doesNotMatch(output, /^FORGED/m);
+  assert.equal(output.split("\n").filter((line) => /^1  /.test(line)).length, 1);
+  assert.match(output, /^1  safe FORGED \[33m  Name FORGED \[31m  Repo FORGED 32m  complete  updated 2026-08-03T12:00:00\.000Z\nSelect a session \[1\]: $/);
 });
 
 test("returns the choice whose selector is 2", async () => {

@@ -1,7 +1,7 @@
-import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import type { SessionChoice } from "./cli.ts";
+import { sessionChoiceDisplay } from "./session-format.ts";
 
 export type SessionPromptStreams = {
   input: NodeJS.ReadableStream;
@@ -9,14 +9,8 @@ export type SessionPromptStreams = {
 };
 
 function renderChoice(choice: SessionChoice): string {
-  const { metadata } = choice.session;
-  const name = metadata.name ?? metadata.title ?? metadata.sessionName ?? "-";
-  const repository = metadata.repository ?? basename(metadata.cwd ?? "unknown");
-  const state = choice.session.active ? "active" : "complete";
-  const updated = Number.isFinite(choice.session.modifiedAt)
-    ? new Date(choice.session.modifiedAt).toISOString()
-    : "unknown";
-  return `${choice.selector}  ${choice.sessionIdPrefix}  ${name}  ${repository}  ${state}  updated ${updated}`;
+  const row = sessionChoiceDisplay(choice);
+  return `${row.selector}  ${row.sessionIdPrefix}  ${row.name}  ${row.repository}  ${row.state}  updated ${row.updated}`;
 }
 
 function validateChoices(choices: readonly SessionChoice[]): void {

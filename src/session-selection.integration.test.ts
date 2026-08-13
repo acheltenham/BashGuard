@@ -1,0 +1,218 @@
+import assert from "node:assert/strict";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { appendFile, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+const cliArgs = ["--experimental-strip-types", "src/cli.ts"];
+
+type StoredSession = {
+  id: string;
+  active?: boolean;
+  modifiedAt?: number;
+  command?: string;
+};
+
+function event(sessionId: string, sequence: number, type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    id: `${sessionId}-event-${sequence}`,
+    sequence,
+    timestamp: `2026-08-13T12:00:0${sequence}.000Z`,
+    type,
+    evidence: "observed",
+    sessionId,
+    cwd: "/tmp/session-selection",
+    payload,
+    capture: { missing: [], redacted: [], truncated: [] },
+  };
+}
+
+async function writeSession(root: string, session: StoredSession): Promise<void> {
+  const directory = join(root, session.id);
+  const eventsFile = join(directory, "events.jsonl");
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "session.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    sessionId: session.id,
+    repository: "picker-integration",
+    name: session.id,
+    processId: session.active ? process.pid : undefined,
+  })}\n`);
+  const events = [
+    event(session.id, 1, "session.started"),
+    event(session.id, 2, "bash.user_requested", { command: session.command ?? `echo ${session.id}` }),
+    {
+      ...event(session.id, 3, "tool.requested", { toolCallId: `${session.id}-call`, input: { command: "rm -rf /tmp/bashguard-picker-fixture" } }),
+      toolName: "bash",
+      toolCallId: `${session.id}-call`,
+    },
+    ...(session.active ? [] : [event(session.id, 4, "session.shutdown")]),
+  ];
+  await writeFile(eventsFile, `${events.map((item) => JSON.stringify(item)).join("\n")}\n`);
+  if (session.modifiedAt !== undefined) {
+    const timestamp = new Date(session.modifiedAt);
+    await utimes(eventsFile, timestamp, timestamp);
+  }
+}
+
+async function store(t: test.TestContext, sessions: StoredSession[]): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-session-selection-"));
+  t.after(async () => rm(root, { recursive: true, force: true }));
+  for (const session of sessions) await writeSession(root, session);
+  return root;
+}
+
+function run(root: string, args: string[]) {
+  return spawnSync(process.execPath, [...cliArgs, ...args], {
+    cwd: process.cwd(),
+    env: { ...process.env, BASHGUARD_DATA_DIR: root },
+    encoding: "utf8",
+    timeout: 5_000,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+function combined(result: ReturnType<typeof run>): string {
+  return `${result.stdout ?? ""}${result.stderr ?? ""}`;
+}
+
+function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", resolve);
+  });
+}
+
+test("selector-less inspect auto-selects one session and renders its events with a copyable selector", async (t) => {
+  const id = "inspect-single-019fc93a";
+  const root = await store(t, [{ id, command: "echo inspect-auto-selected" }]);
+
+  const result = run(root, ["inspect"]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /inspect-auto-selected/);
+  assert.match(result.stdout, new RegExp(`bashguard inspect ${id} --event`));
+  assert.doesNotMatch(result.stdout, /undefined|Select a session/);
+});
+
+test("selector-less debrief auto-selects one session and renders a usable summary", async (t) => {
+  const id = "debrief-single-019fc909";
+  const root = await store(t, [{ id, command: "echo debrief-auto-selected" }]);
+
+  const result = run(root, ["debrief"]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Session complete/);
+  assert.match(result.stdout, new RegExp(`bashguard inspect ${id} --event`));
+  assert.doesNotMatch(result.stdout, /undefined|Select a session/);
+});
+
+test("selector-less attach auto-selects its only active session and uses its prefix in guidance", async (t) => {
+  const id = "attach-single-019fc911";
+  const root = await store(t, [
+    { id: "newer-completed-019fc910", modifiedAt: Date.now() },
+    { id, active: true, modifiedAt: Date.now() - 1_000, command: "echo attach-auto-selected" },
+  ]);
+  const child = spawn(process.execPath, [...cliArgs, "attach", "--history", "0"], {
+    cwd: process.cwd(),
+    env: { ...process.env, BASHGUARD_DATA_DIR: root },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  t.after(() => { if (child.exitCode === null) child.kill("SIGTERM"); });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+
+  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.match(stdout, /Following live events/);
+  assert.match(stdout, new RegExp(`bashguard inspect ${id} --event`));
+  assert.doesNotMatch(stdout, /undefined|Select a session/);
+  await appendFile(join(root, id, "events.jsonl"), `${JSON.stringify(event(id, 4, "session.shutdown"))}\n`);
+  assert.equal(await waitForExit(child), 0, stderr);
+});
+
+test("piped selector-less commands fail without prompting and print stable copyable choices", async (t) => {
+  const now = Date.now();
+  const root = await store(t, [
+    { id: "active-newest-019fc901", active: true, modifiedAt: now },
+    { id: "completed-middle-019fc902", modifiedAt: now - 1_000 },
+    { id: "active-oldest-019fc903", active: true, modifiedAt: now - 2_000 },
+  ]);
+
+  for (const command of ["inspect", "debrief"] as const) {
+    const result = run(root, [command]);
+    const output = combined(result);
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(output, /Select a session/);
+    for (const selector of [1, 2, 3]) {
+      assert.match(output, new RegExp(`^${selector}\\s+`, "m"));
+      assert.match(output, new RegExp(`bashguard ${command} ${selector}`));
+    }
+  }
+
+  const attach = run(root, ["attach"]);
+  const output = combined(attach);
+  assert.notEqual(attach.status, 0);
+  assert.doesNotMatch(output, /Select a session|completed-middle/);
+  assert.match(output, /^1\s+active\s+/m);
+  assert.match(output, /^3\s+active\s+/m);
+  assert.match(output, /bashguard attach 1/);
+  assert.match(output, /bashguard attach 3/);
+  assert.doesNotMatch(output, /^2\s+active\s+/m);
+});
+
+test("explicit numeric selectors bypass selection for attach, inspect, and debrief", async (t) => {
+  const now = Date.now();
+  const root = await store(t, [
+    { id: "explicit-first-019fc921", modifiedAt: now, command: "echo explicit-first" },
+    { id: "explicit-second-019fc922", modifiedAt: now - 1_000, command: "echo explicit-second" },
+  ]);
+
+  const inspect = run(root, ["inspect", "2"]);
+  assert.equal(inspect.status, 0, inspect.stderr);
+  assert.match(inspect.stdout, /explicit-second/);
+  assert.doesNotMatch(combined(inspect), /Select a session/);
+
+  const debrief = run(root, ["debrief", "2"]);
+  assert.equal(debrief.status, 0, debrief.stderr);
+  assert.match(debrief.stdout, /Session complete/);
+  assert.match(debrief.stdout, /bashguard inspect 2 --event/);
+
+  const attach = run(root, ["attach", "2", "--history", "0"]);
+  assert.equal(attach.status, 0, attach.stderr);
+  assert.match(attach.stdout, /Session explicit-second-019fc922/);
+  assert.match(attach.stdout, /bashguard inspect 2 --event/);
+});
+
+test("explicit ID prefixes still resolve without interaction", async (t) => {
+  const root = await store(t, [{ id: "prefix-target-019fc931" }]);
+  for (const command of ["inspect", "debrief"] as const) {
+    const result = run(root, [command, "prefix-target"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(combined(result), /Select a session/);
+  }
+});
+
+test("inspect --activity list remains session-independent", async (t) => {
+  const root = await store(t, []);
+
+  const result = run(root, ["inspect", "--activity", "list"]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^shell\s+Pi Bash commands/m);
+  assert.doesNotMatch(combined(result), /Select a session|No BashGuard sessions|eligible session/i);
+});
+
+test("usage advertises selector-less and optional-selector forms", async (t) => {
+  const root = await store(t, []);
+  const result = run(root, []);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /bashguard attach \[session-id\]/);
+  assert.match(result.stderr, /bashguard inspect \[session-id\] --event/);
+  assert.match(result.stderr, /bashguard debrief \[session-id\]/);
+});

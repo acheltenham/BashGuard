@@ -137,7 +137,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session <session-id> [--history <n>|--all-history]\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect <session-id> --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect <session-id> --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect <session-id> --activity list\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session <session-id> [--history <n>|--all-history]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -366,7 +366,7 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
 
   return sessions
     .filter((session): session is SessionSummary => Boolean(session))
-    .sort((a, b) => Number(b.active) - Number(a.active) || b.modifiedAt - a.modifiedAt);
+    .sort((a, b) => b.modifiedAt - a.modifiedAt);
 }
 
 export function indexSessionChoices(sessions: SessionSummary[]): SessionChoice[] {
@@ -1630,10 +1630,7 @@ export async function chooseSession(requestedId?: string, root = getDataRoot()):
 }
 
 async function inspect(options: ParsedCommandArgs): Promise<void> {
-  const { sessionId, eventId: eventIdOrSequence } = options;
-  if (!sessionId) {
-    throw new Error("Usage: bashguard inspect <session-id> [--event <selector>|--activity <kind>|--type <event-type>]");
-  }
+  const { sessionId: requestedId, eventId: eventIdOrSequence } = options;
 
   if (options.activities?.includes("list")) {
     if (options.activities.length > 1 || options.eventTypes || options.grep || options.limit !== undefined || options.all || options.format) {
@@ -1644,7 +1641,9 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
   }
 
   const unknownActivities = (options.activities ?? []).filter((activity) => !Object.hasOwn(ACTIVITY_DESCRIPTIONS, activity));
-  if (unknownActivities.length > 0) throw new Error(`Unknown activity: ${unknownActivities.join(", ")}. Run \`bashguard inspect ${sessionId} --activity list\`.`);
+  if (requestedId !== undefined && unknownActivities.length > 0) {
+    throw new Error(`Unknown activity: ${unknownActivities.join(", ")}. Run \`bashguard inspect ${requestedId} --activity list\`.`);
+  }
   if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1)) throw new Error("`--limit` must be a positive integer");
   if (options.limit !== undefined && options.all) throw new Error("`--limit` and `--all` cannot be combined");
   if (options.format !== undefined && !["text", "jsonl"].includes(options.format)) throw new Error("`--format` must be text or jsonl");
@@ -1652,17 +1651,19 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
   const hasFilters = Boolean(options.activities?.length || options.eventTypes?.length || options.grep !== undefined || options.limit !== undefined || options.all || options.format);
   if (eventIdOrSequence && hasFilters) throw new Error("`--event` cannot be combined with activity, type, search, limit, or format options");
 
-  const session = await chooseSession(sessionId);
+  const session = await selectSessionForCommand("inspect", requestedId, { input: process.stdin, output: process.stdout });
+  const effectiveSelector = requestedId ?? session.metadata.sessionId;
+  if (unknownActivities.length > 0) throw new Error(`Unknown activity: ${unknownActivities.join(", ")}. Run \`bashguard inspect ${effectiveSelector} --activity list\`.`);
   const events = await readExistingEvents(session.eventsFile);
 
   if (hasFilters) {
     const filtered = filterEvidenceEvents(events, options);
-    process.stdout.write(formatFilteredEvents(sessionId, filtered.matches, filtered.totalMatches, options.format ?? "text"));
+    process.stdout.write(formatFilteredEvents(effectiveSelector, filtered.matches, filtered.totalMatches, options.format ?? "text"));
     return;
   }
 
   if (!eventIdOrSequence) {
-    process.stdout.write(formatInspectableEvents(sessionId, events));
+    process.stdout.write(formatInspectableEvents(effectiveSelector, events));
     return;
   }
 
@@ -1670,7 +1671,7 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
   if (!event) {
     const matches = sequenceMatches(events, eventIdOrSequence);
     if (matches.length > 1) {
-      throw new Error(`Event sequence ${eventIdOrSequence} is ambiguous (${matches.length} matches). Use an event ID prefix from \`bashguard inspect ${sessionId}\`.`);
+      throw new Error(`Event sequence ${eventIdOrSequence} is ambiguous (${matches.length} matches). Use an event ID prefix from \`bashguard inspect ${effectiveSelector}\`.`);
     }
     throw new Error(`Event ${eventIdOrSequence} was not found in session ${session.metadata.sessionId}`);
   }
@@ -1678,12 +1679,12 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
   process.stdout.write(formatEventInspection(event));
 }
 
-async function debrief(sessionId: string | undefined): Promise<void> {
-  if (!sessionId) throw new Error("Usage: bashguard debrief <session-id>");
-
-  const session = await chooseSession(sessionId);
+async function debrief(options: ParsedCommandArgs): Promise<void> {
+  const requestedId = options.sessionId;
+  const session = await selectSessionForCommand("debrief", requestedId, { input: process.stdin, output: process.stdout });
+  const effectiveSelector = requestedId ?? session.metadata.sessionId;
   const events = await readExistingEvents(session.eventsFile);
-  process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: sessionId, sessionState: session.active ? "active" : "complete" }));
+  process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: effectiveSelector, sessionState: session.active ? "active" : "complete" }));
 }
 
 async function attach(options: ParsedCommandArgs): Promise<void> {
@@ -1691,7 +1692,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
   if (options.attachHistory !== undefined && (!Number.isInteger(options.attachHistory) || options.attachHistory < 0)) throw new Error("`--history` must be a non-negative integer");
   if (options.attachHistory !== undefined && options.allHistory) throw new Error("`--history` and `--all-history` cannot be combined");
   const history = options.attachHistory ?? 50;
-  const session = await chooseSession(requestedId);
+  const session = await selectSessionForCommand("attach", requestedId, { input: process.stdin, output: process.stdout });
   const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
   const snapshot = await readAttachSnapshot(session.eventsFile);
   const existing = snapshot.events;
@@ -1715,7 +1716,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     if (rendered) process.stdout.write(`${rendered}\n`);
   }
 
-  const sessionSelector = requestedId ?? session.metadata.sessionId.slice(0, 8);
+  const sessionSelector = requestedId ?? session.metadata.sessionId;
   if (historySelection.visible.length > 0) process.stdout.write("─".repeat(60) + "\n");
   if (!active) {
     process.stdout.write(formatAttachGuidance(sessionSelector, {
@@ -1813,14 +1814,14 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
 
 async function main(): Promise<void> {
   const options = parseCommandArgs(process.argv.slice(2));
-  const { command, sessionId, setupSubject, setupScope } = options;
+  const { command, setupSubject, setupScope } = options;
   try {
     if (command === "sessions") return await listSessions();
     if (command === "doctor") return await doctor();
     if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);
     if (command === "attach") return await attach(options);
     if (command === "inspect") return await inspect(options);
-    if (command === "debrief") return await debrief(sessionId);
+    if (command === "debrief") return await debrief(options);
     usage();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

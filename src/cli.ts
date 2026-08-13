@@ -9,7 +9,7 @@ import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 import { sessionIdPrefixes } from "./session-format.ts";
-import { promptForSessionChoice, type SessionPromptStreams } from "./session-picker.ts";
+import { promptForSessionChoice } from "./session-picker.ts";
 
 export type SessionMetadata = {
   schemaVersion?: number;
@@ -64,8 +64,9 @@ export type SessionChoice = {
 
 export type SessionSelectionOptions = {
   root?: string;
-  input?: SessionPromptStreams["input"] & { isTTY?: boolean };
-  output?: SessionPromptStreams["output"] & { isTTY?: boolean };
+  input?: NodeJS.ReadableStream & { isTTY?: boolean };
+  output?: NodeJS.WritableStream & { isTTY?: boolean };
+  discoverSessions?: typeof discoverSessions;
   prompt?: typeof promptForSessionChoice;
 };
 
@@ -1540,18 +1541,25 @@ export function formatDebrief(summary: DebriefSummary, options: DebriefFormatOpt
   return `${lines.join("\n")}\n`;
 }
 
-function formatSessionNotFound(requestedId: string, root: string, sessions: SessionSummary[]): string {
+function formatSessionNotFound(
+  requestedId: string,
+  root: string,
+  sessions: SessionSummary[],
+  command: SessionCommand = "attach",
+): string {
   return [
     `Session ${requestedId} was not found in ${root}.`,
     "",
-    "BashGuard can only attach to sessions recorded while the BashGuard extension was loaded.",
+    command === "attach"
+      ? "BashGuard can only attach to sessions recorded while the BashGuard extension was loaded."
+      : `BashGuard ${command} can only use sessions recorded while the BashGuard extension was loaded.`,
     "Older Pi sessions or sessions recorded with a different BASHGUARD_DATA_DIR are not available here.",
     "",
     sessions.length > 0 ? "Available BashGuard sessions:" : undefined,
     sessions.length > 0 ? formatSessionList(sessions).trimEnd() : undefined,
     "Run:",
     "  bashguard sessions",
-    "  bashguard attach 1",
+    `  bashguard ${command} 1`,
   ].filter((line): line is string => line !== undefined).join("\n");
 }
 
@@ -1581,14 +1589,15 @@ export async function selectSessionForCommand(
   options: SessionSelectionOptions = {},
 ): Promise<SessionSummary> {
   const root = options.root ?? getDataRoot();
-  const sessions = await discoverSessions(root);
+  const discover = options.discoverSessions ?? discoverSessions;
+  const sessions = await discover(root);
   if (sessions.length === 0) throw new Error(`No BashGuard sessions found in ${root}`);
 
   const choices = indexSessionChoices(sessions);
   if (requestedId !== undefined) {
     const choice = resolveSessionChoice(requestedId, choices);
     if (choice) return choice.session;
-    throw new Error(formatSessionNotFound(requestedId, root, sessions));
+    throw new Error(formatSessionNotFound(requestedId, root, sessions, command));
   }
 
   const eligible = eligibleSessionChoices(command, choices);

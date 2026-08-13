@@ -1,13 +1,12 @@
 import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
-import type { Readable, Writable } from "node:stream";
 
 import type { SessionChoice } from "./cli.ts";
 import { sessionIdPrefixes } from "./session-format.ts";
 
 export type SessionPromptStreams = {
-  input: Readable;
-  output: Writable;
+  input: NodeJS.ReadableStream;
+  output: NodeJS.WritableStream;
 };
 
 function renderChoice(choice: SessionChoice, sessionIdPrefix: string): string {

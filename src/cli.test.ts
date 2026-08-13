@@ -227,6 +227,23 @@ test("selectSessionForCommand preserves explicit not-found and ambiguous-prefix 
   );
 });
 
+for (const command of ["inspect", "debrief"] as const) {
+  test(`${command} not-found guidance describes recorded sessions and gives a matching command`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+    await writeSession(root, "recorded-session", [event(1, "session.shutdown")]);
+
+    await assert.rejects(
+      () => selectSessionForCommand(command, "missing-session", { root }),
+      (error: Error) => {
+        assert.match(error.message, new RegExp(`^Session missing-session was not found in ${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.`));
+        assert.match(error.message, /sessions recorded while the BashGuard extension was loaded/);
+        assert.match(error.message, new RegExp(`^  bashguard ${command} 1$`, "m"));
+        return true;
+      },
+    );
+  });
+}
+
 test("selectSessionForCommand resolves zero, negative, and out-of-range numeric-looking IDs", async () => {
   const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
   await writeSession(root, "0", [event(1, "session.shutdown")]);
@@ -366,6 +383,29 @@ test("selectSessionForCommand returns the exact session object from its prompt s
 
   assert.equal(selected, promptedChoice?.session);
   assert.notEqual(selected.metadata.sessionId, "later-session");
+});
+
+test("selectSessionForCommand discovers once and prompts from that snapshot", async () => {
+  const firstSnapshot = [sessionSummary("first-alpha", false), sessionSummary("first-beta", false)];
+  const hypotheticalSecondSnapshot = [sessionSummary("later-alpha", false), sessionSummary("later-beta", false)];
+  let discoveryCalls = 0;
+  let promptedIds: string[] = [];
+
+  const selected = await selectSessionForCommand("inspect", undefined, {
+    ...selectionStreams(true, true),
+    discoverSessions: async () => {
+      discoveryCalls += 1;
+      return discoveryCalls === 1 ? firstSnapshot : hypotheticalSecondSnapshot;
+    },
+    prompt: async (choices) => {
+      promptedIds = choices.map((choice) => choice.session.metadata.sessionId);
+      return choices[1]!;
+    },
+  });
+
+  assert.equal(discoveryCalls, 1);
+  assert.deepEqual(promptedIds, ["first-alpha", "first-beta"]);
+  assert.equal(selected, firstSnapshot[1]);
 });
 
 test("chooseSession accepts session list index selectors", async () => {

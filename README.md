@@ -30,7 +30,7 @@ BashGuard is intended to narrate the session rather than dump raw logs. The curr
 
 ## Current Commands
 
-Implemented in the Milestone 0 vertical slice:
+Available in the current CLI (the Milestone 0 foundation plus Phase 1 additions):
 
 ```bash
 bashguard sessions
@@ -207,7 +207,7 @@ Pi can use the same local CLI and recorded session store to answer those questio
 
 ### Use BashGuard from a second terminal
 
-In another terminal, list and inspect recorded BashGuard sessions. Selector-less `attach`, `inspect`, and `debrief` auto-select a sole eligible session. With multiple eligible sessions, they open a structured-text numbered picker only when both stdin and stdout are TTYs. Enter has no default: enter an exact displayed number; invalid input retries, while EOF or `Ctrl+C` cancels concisely. Scripts, pipes, and redirected output never prompt; they exit nonzero with eligible stable selectors and copyable commands. Picker rows retain the global numbers and globally unique prefixes from the single `bashguard sessions` discovery snapshot, even when completed sessions are hidden from an active-only attach picker.
+In another terminal, list and inspect recorded BashGuard sessions. Selector-less `attach`, `inspect`, and `debrief` auto-select a sole eligible session. With multiple eligible sessions, they open a structured-text numbered picker only when both stdin and stdout are TTYs. Enter has no default: enter an exact displayed number; invalid input retries, while EOF or `Ctrl+C` cancels concisely. With multiple eligible sessions, scripts, pipes, and redirected output never prompt; they exit nonzero with eligible stable selectors and copyable commands. With no recorded sessions, the CLI instead reports its existing no-sessions error. Picker rows retain the global numbers and globally unique prefixes from the single `bashguard sessions` discovery snapshot, even when completed sessions are hidden from an active-only attach picker.
 
 If the `bashguard` CLI is on your `PATH`, use:
 

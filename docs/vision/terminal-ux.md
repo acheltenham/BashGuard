@@ -74,7 +74,7 @@ Purpose:
 Command:
 
 ```bash
-bashguard inspect <session-id>
+bashguard inspect [session-id]
 ```
 
 Purpose:
@@ -122,7 +122,7 @@ Replay is event replay, not hidden-reasoning capture, shell re-execution, or vid
 
 When multiple sessions are eligible, BashGuard opens a numbered picker only if both stdin and stdout are TTYs. It is structured text, not the planned full-screen split-pane TUI. Enter does not choose a default: the user must type an exact displayed number. Blank, nonnumeric, whitespace-padded, or unavailable numbers receive concise guidance and retry; EOF and `Ctrl+C` cancel concisely.
 
-Pipes, redirected streams, scripts, and other non-TTY use never prompt or silently choose the newest session. They exit nonzero with the eligible rows and copyable explicit commands. Explicit global numeric selectors, exact session IDs, and unique session ID prefixes bypass the picker.
+Pipes, redirected streams, scripts, and other non-TTY use never prompt or silently choose the newest session. When multiple sessions are eligible, they exit nonzero with the eligible rows and copyable explicit commands. With no recorded sessions, BashGuard reports the existing no-sessions error without candidate rows or commands. Explicit global numeric selectors, exact session IDs, and unique session ID prefixes bypass the picker.
 
 Selection uses one discovery snapshot. Candidate rows keep their global `bashguard sessions` numbers, and displayed ID prefixes are computed for uniqueness against that full snapshot. Consequently an active-only attach picker may skip a number or use a longer prefix because a completed session is hidden; the displayed selectors remain stable and copyable.
 

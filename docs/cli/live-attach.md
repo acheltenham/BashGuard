@@ -22,7 +22,7 @@ Selector-less attach chooses its sole eligible session automatically. If active 
 
 The picker requires an exact displayed number. Enter has no default, invalid input prints concise guidance and retries, and EOF or `Ctrl+C` cancels concisely. Explicit numeric selectors, exact session IDs, and unique ID prefixes bypass the picker.
 
-Scripts, pipes, and redirected output never prompt. Unless exactly one eligible session can be selected automatically, attach exits nonzero and prints the eligible rows plus copyable explicit commands. Selection uses one discovery snapshot: rows retain their global `bashguard sessions` numbers, and ID prefixes remain globally unique against the full snapshot even when an active-only picker hides completed sessions. This is a structured-text prompt, not the planned full-screen split-pane TUI.
+Scripts, pipes, and redirected output never prompt. With multiple eligible sessions, attach exits nonzero and prints the eligible rows plus copyable explicit commands. With no recorded sessions, it uses the existing `No BashGuard sessions found` error and does not print candidate rows or commands. Selection uses one discovery snapshot: rows retain their global `bashguard sessions` numbers, and ID prefixes remain globally unique against the full snapshot even when an active-only picker hides completed sessions. This is a structured-text prompt, not the planned full-screen split-pane TUI.
 
 ## Status snapshot
 

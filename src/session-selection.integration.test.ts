@@ -97,6 +97,22 @@ function runShell(root: string, command: string) {
   });
 }
 
+test("selector-less non-TTY selection ignores a NUL session ID and auto-selects its valid neighbor", async (t) => {
+  const malformedMarker = "malformed-nul-session";
+  const validId = "valid-neighbor-019fc93a";
+  const root = await store(t, [
+    { id: malformedMarker, metadataId: "malformed\u0000session" },
+    { id: validId, command: "echo valid-neighbor-selected" },
+  ]);
+
+  const result = run(root, ["inspect"]);
+  const output = combined(result);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /valid-neighbor-selected/);
+  assert.doesNotMatch(output, /malformed|Select a session|Choose one explicitly/);
+});
+
 test("selector-less inspect auto-selects one session and renders its events with a copyable selector", async (t) => {
   const id = "inspect-single-019fc93a";
   const root = await store(t, [{ id, command: "echo inspect-auto-selected" }]);

@@ -37,6 +37,22 @@ test("parseJsonlEvents skips malformed complete lines and incomplete final lines
   assert.equal(parsed[0]?.sequence, 2);
 });
 
+test("discoverSessions excludes metadata session IDs containing NUL while retaining valid neighbors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "valid-neighbor", [event(1, "session.started")]);
+  const malformedDirectory = join(root, "malformed-metadata");
+  await mkdir(malformedDirectory, { recursive: true });
+  await writeFile(
+    join(malformedDirectory, "session.json"),
+    `${JSON.stringify({ schemaVersion: 1, sessionId: "malformed\u0000session", processId: 999_999 })}\n`,
+  );
+  await writeFile(join(malformedDirectory, "events.jsonl"), `${JSON.stringify(event(1, "session.started"))}\n`);
+
+  const sessions = await discoverSessions(root);
+
+  assert.deepEqual(sessions.map((session) => session.metadata.sessionId), ["valid-neighbor"]);
+});
+
 test("discoverSessions treats a restart after an older shutdown as active when the current pid is alive", async () => {
   const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
   await writeSession(root, "session-a", [

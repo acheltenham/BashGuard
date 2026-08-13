@@ -344,6 +344,10 @@ function sessionSnapshotIsActive(metadata: SessionMetadata, events: BashGuardEve
   return !latestSessionLifecycleIsShutdown(events) || metadataProvesRestartAfterShutdown(metadata, events);
 }
 
+function validSessionId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && !value.includes("\0");
+}
+
 export async function discoverSessions(root = getDataRoot()): Promise<SessionSummary[]> {
   let entries: string[] = [];
   try {
@@ -357,7 +361,7 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
     const metadataPath = join(directory, "session.json");
     const eventsFile = join(directory, "events.jsonl");
     const metadata = await readJsonFile<SessionMetadata>(metadataPath);
-    if (!metadata?.sessionId || !existsSync(eventsFile)) return undefined;
+    if (!validSessionId(metadata?.sessionId) || !existsSync(eventsFile)) return undefined;
 
     try {
       const info = await stat(eventsFile);

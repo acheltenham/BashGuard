@@ -1,11 +1,11 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.4; Milestone 0 foundation implemented, final validation and Phase 1/2 usability work remain
-**Last updated:** August 9, 2026
+**Status:** Draft v0.4; Milestone 0 validation complete, Phase 1/2 usability work next
+**Last updated:** August 13, 2026
 
 ## Milestone 0: Observe a Real Pi Session
 
-The recording, attach, inspect, debrief, capture-completeness, risk-notice, file-activity, Git-snapshot, and provider-neutral shell-activity foundation is implemented. Final manual validation and an explicit decision about the first TUI enhancement remain before calling the milestone complete. See [`docs/current-state.md`](../current-state.md) for public capability and limitation wording.
+The recording, attach, inspect, debrief, capture-completeness, risk-notice, file-activity, Git-snapshot, provider-neutral shell-activity, filtering, JSONL export, duplicate-recorder protection, and measurable validation foundation is implemented. Latency, storage, failure behavior, active attach, and inside-Pi workflows are documented in [`docs/testing/milestone-0-validation-baseline.md`](../testing/milestone-0-validation-baseline.md). The split-pane TUI is explicitly deferred to Phase 1. See [`docs/current-state.md`](../current-state.md) for public capability and limitation wording.
 
 Goal: build the smallest end-to-end BashGuard experience that can observe a real Pi session from a second terminal.
 

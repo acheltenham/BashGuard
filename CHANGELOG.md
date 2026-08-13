@@ -13,7 +13,7 @@ All notable project changes will be recorded here.
 
 ### Fixed
 
-- Session selection now preserves exact identity across ordering changes, validates malformed metadata, and sanitizes terminal control and bidirectional formatting characters in session presentation.
+- Generated non-interactive guidance now uses exact-only `--session-id` selectors that preserve identity across ordering changes; numeric and prefix selectors remain current-snapshot conveniences. Session discovery also validates malformed metadata, and session presentation sanitizes terminal control and bidirectional formatting characters.
 
 ## 0.3.0 - 2026-08-13
 

@@ -152,7 +152,8 @@ Confirm:
 - it reports the BashGuard data directory;
 - it reports session count and latest session when present;
 - it reports whether BashGuard appears in `pi list`;
-- it suggests install/update/setup next steps without mutating anything.
+- it suggests install/update/setup next steps without mutating anything;
+- if `pi list` contains multiple configured BashGuard sources, it warns without claiming both are active in the current Pi process.
 
 ### `bashguard sessions`
 

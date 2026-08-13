@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,6 +19,20 @@ test("only one extension instance owns a session recorder lock", async () => {
   const persisted = JSON.parse(await readFile(join(directory, "recorder.lock"), "utf8"));
   assert.equal(persisted.ownerId, first.ownerId);
   assert.equal(persisted.source, "/packages/first/bashguard.ts");
+});
+
+test("a dead recorder owner lock can be reclaimed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "bashguard-recorder-lock-"));
+  await writeFile(join(directory, "recorder.lock"), `${JSON.stringify({
+    ownerId: "dead-owner",
+    processId: 999_999_999,
+    source: "/packages/old/bashguard.ts",
+    acquiredAt: "2026-08-01T00:00:00.000Z",
+  })}\n`);
+
+  const replacement = await acquireRecorderLock(directory, "/packages/new/bashguard.ts");
+
+  assert.equal(replacement.acquired, true);
 });
 
 test("only the owner can release a recorder lock", async () => {

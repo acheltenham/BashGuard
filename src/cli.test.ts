@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, findEvent, formatAttachGuidance, formatDebrief, formatDoctorReport, formatEventInspection, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, renderEvent } from "./cli.ts";
+import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, findEvent, formatAttachGuidance, formatDebrief, formatDoctorReport, formatEventInspection, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -106,6 +106,12 @@ test("parseCommandArgs accepts positional and --session selectors", () => {
   assert.deepEqual(parseCommandArgs(["doctor"]), { command: "doctor" });
 });
 
+test("parsePiListPackages keeps configured sources and ignores resolved checkout paths", () => {
+  const packages = parsePiListPackages(`User packages:\n  git:github.com/acheltenham/BashGuard\n    /Users/example/.pi/agent/git/github.com/acheltenham/BashGuard\nProject packages:\n  /Users/example/Development/BashGuard\n`);
+
+  assert.deepEqual(packages, ["git:github.com/acheltenham/BashGuard", "/Users/example/Development/BashGuard"]);
+});
+
 test("formatDoctorReport summarizes CLI, session store, Pi package, and next steps", () => {
   const output = formatDoctorReport({
     cliCommand: "/tmp/bashguard/bin/bashguard",
@@ -135,6 +141,26 @@ test("formatDoctorReport summarizes CLI, session store, Pi package, and next ste
   assert.match(output, /Source\s+git:github\.com\/acheltenham\/BashGuard/);
   assert.match(output, /Update\s+pi update git:github\.com\/acheltenham\/BashGuard/);
   assert.match(output, /- bashguard sessions/);
+});
+
+test("formatDoctorReport warns about multiple configured BashGuard package sources", () => {
+  const output = formatDoctorReport({
+    cliCommand: "/tmp/bashguard/bin/bashguard",
+    packageRoot: "/tmp/bashguard",
+    dataRoot: "/tmp/bashguard-data",
+    sessions: [],
+    piListAvailable: true,
+    piPackages: [
+      "git:github.com/acheltenham/BashGuard",
+      "/tmp/local/BashGuard",
+      "git:github.com/coctostan/pi-superpowers",
+    ],
+  });
+
+  assert.match(output, /Configured sources\s+2/);
+  assert.match(output, /Configuration warning\s+multiple BashGuard package sources found/);
+  assert.match(output, /This does not prove both sources are active in a running Pi session/);
+  assert.match(output, /- Review `pi list` and remove the redundant BashGuard source/);
 });
 
 test("formatDoctorReport explains missing Pi package and CLI setup", () => {

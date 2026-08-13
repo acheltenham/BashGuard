@@ -13,7 +13,8 @@ All notable project changes will be recorded here.
 
 ### Fixed
 
-- Multiple BashGuard extension instances now coordinate through a per-session ownership lock so only one records events; duplicate instances warn and remain inactive.
+- Multiple BashGuard extension instances now coordinate through a per-session ownership lock so only one records events; duplicate instances warn and remain inactive. `bashguard doctor` also warns about multiple configured sources reported by `pi list` without treating configuration as proof of runtime duplication.
+- Updated the Pi development dependency to `0.84.1`, resolving the reported transitive `undici` and `brace-expansion` vulnerabilities in `package-lock.json`.
 - CLI output now exits quietly when a downstream pipe closes instead of printing an `EPIPE` stack trace.
 - Repeated event sequences now preserve JSONL append order; ambiguous sequence selectors explain how to use an event ID prefix.
 - `attach` now explains whether it shows narrated events or raw events requiring `inspect`, and points to the next CLI commands.

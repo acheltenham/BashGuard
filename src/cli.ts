@@ -1693,14 +1693,15 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     const lines = combined.split("\n");
     remainder = lines.pop() ?? "";
 
-    let shutdownSeen = false;
+    let latestLifecycleInBatch: "started" | "shutdown" | undefined;
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as BashGuardEvent;
         if (seenEventIds.has(event.id)) continue;
         seenEventIds.add(event.id);
-        if (event.type === "session.shutdown") shutdownSeen = true;
+        if (event.type === "session.started") latestLifecycleInBatch = "started";
+        if (event.type === "session.shutdown") latestLifecycleInBatch = "shutdown";
         const rendered = formatTimelineEvent(event);
         if (rendered) process.stdout.write(`${rendered}\n`);
       } catch {
@@ -1708,7 +1709,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
       }
     }
 
-    if (shutdownSeen) {
+    if (latestLifecycleInBatch === "shutdown") {
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
       if (replacementMetadata && replacementMetadata.processId !== followedProcessId && processIsAlive(replacementMetadata.processId)) {

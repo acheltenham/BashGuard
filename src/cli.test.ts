@@ -418,6 +418,17 @@ test("formatTimelineEvent prefixes rendered events with sequence and event-id pr
   );
 });
 
+test("buildAttachStatus does not resurrect old unmatched activity while restart metadata is ahead of events", () => {
+  const status = buildAttachStatus([
+    event(1, "session.started", { id: "old-start" }),
+    event(2, "tool.requested", { id: "old-request", toolName: "bash", toolCallId: "old-call", payload: { toolCallId: "old-call", input: { command: "old command" } } }),
+    event(3, "session.shutdown", { id: "old-shutdown" }),
+  ], true);
+
+  assert.equal(status.activityLabel, "Last activity");
+  assert.equal(status.activity, "Pi session ended");
+});
+
 test("buildAttachStatus ignores unmatched requests from before the latest recorded restart", () => {
   const status = buildAttachStatus([
     event(1, "session.started", { id: "old-start" }),

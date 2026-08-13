@@ -124,6 +124,40 @@ test("attach drains a final append observed after the followed process exits", a
   assert.match(stdout, /Pi session ended/);
 });
 
+test("attach follows replacement recorder events appended after shutdown", async (t) => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "bashguard-attach-restart-"));
+  t.after(async () => rm(dataRoot, { recursive: true, force: true }));
+  const sessionId = "attach-restart-session";
+  const directory = join(dataRoot, sessionId);
+  const eventsFile = join(directory, "events.jsonl");
+  await mkdir(directory, { recursive: true });
+  const oldOwner = spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"]);
+  const replacement = spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"]);
+  t.after(() => { if (oldOwner.exitCode === null) oldOwner.kill("SIGKILL"); if (replacement.exitCode === null) replacement.kill("SIGKILL"); });
+  await writeFile(join(directory, "session.json"), `${JSON.stringify({ schemaVersion: 1, sessionId, processId: oldOwner.pid, startedAt: "2026-08-13T12:00:00.000Z" })}\n`);
+  await writeFile(eventsFile, `${JSON.stringify(event(1, "oldstart", "session.started"))}\n`);
+
+  const child = spawn(process.execPath, ["--experimental-strip-types", "src/cli.ts", "attach", sessionId, "--history", "0"], {
+    cwd: process.cwd(), env: { ...process.env, BASHGUARD_DATA_DIR: dataRoot }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(() => { if (child.exitCode === null) child.kill("SIGTERM"); });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.match(stdout, /Following live events/);
+
+  await appendFile(eventsFile, `${JSON.stringify(event(2, "oldstop", "session.shutdown"))}\n`);
+  await writeFile(join(directory, "session.json"), `${JSON.stringify({ schemaVersion: 1, sessionId, processId: replacement.pid, startedAt: "2026-08-13T12:02:00.000Z" })}\n`);
+  await appendFile(eventsFile, `${JSON.stringify(event(1, "newstart", "session.started"))}\n${JSON.stringify(event(2, "newwork1", "bash.user_requested", { command: "echo replacement-work" }))}\n`);
+  for (let attempt = 0; attempt < 100 && !stdout.includes("replacement-work"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.match(stdout, /replacement-work/);
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "newstop1", "session.shutdown"))}\n`);
+
+  await new Promise<void>((resolve, reject) => child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`attach exited ${code}: ${stderr}`))));
+});
+
 test("attach bounds startup history but streams every new narrated event", async (t) => {
   const dataRoot = await mkdtemp(join(tmpdir(), "bashguard-attach-history-"));
   t.after(async () => rm(dataRoot, { recursive: true, force: true }));

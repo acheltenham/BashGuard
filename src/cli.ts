@@ -649,7 +649,12 @@ export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now
   const latestStartIndex = normalized.findLastIndex((event) => event.type === "session.started");
   const currentSessionTail = latestStartIndex >= 0 ? normalized.slice(latestStartIndex) : normalized;
   const latestShutdownIndex = currentSessionTail.findLastIndex((event) => event.type === "session.shutdown");
-  const currentSessionEvents = !active && latestShutdownIndex >= 0 ? currentSessionTail.slice(0, latestShutdownIndex + 1) : currentSessionTail;
+  const restartPending = active && latestShutdownIndex === currentSessionTail.length - 1;
+  const currentSessionEvents = restartPending
+    ? currentSessionTail.slice(latestShutdownIndex)
+    : !active && latestShutdownIndex >= 0
+      ? currentSessionTail.slice(0, latestShutdownIndex + 1)
+      : currentSessionTail;
   const outstanding = new Map<string, BashGuardEvent>();
   for (const event of currentSessionEvents) {
     const toolCallId = toolCallIdFor(event);
@@ -1703,7 +1708,20 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
       }
     }
 
-    if (shutdownSeen) return;
+    if (shutdownSeen) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
+      if (replacementMetadata && replacementMetadata.processId !== followedProcessId && processIsAlive(replacementMetadata.processId)) {
+        followedProcessId = replacementMetadata.processId;
+        continue;
+      }
+      try {
+        if ((await stat(session.eventsFile)).size !== offset) continue;
+      } catch {
+        continue;
+      }
+      return;
+    }
   }
 }
 

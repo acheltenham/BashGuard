@@ -4,6 +4,8 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
+## 0.2.0 - 2026-08-13
+
 ### Added
 
 - Added a reproducible Milestone 0 baseline runner and documented latency, storage overhead, failure behavior, active attach, full CLI, and inside-Pi skill validation. Milestone 0 is now complete; split-pane TUI work moves to Phase 1.

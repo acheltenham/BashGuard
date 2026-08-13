@@ -295,9 +295,25 @@ async function readAttachSnapshot(eventsFile: string): Promise<{ events: BashGua
   }
 }
 
+function latestSessionLifecycle(events: BashGuardEvent[]): BashGuardEvent | undefined {
+  return [...events].reverse().find((event) => event.type === "session.started" || event.type === "session.shutdown");
+}
+
 function latestSessionLifecycleIsShutdown(events: BashGuardEvent[]): boolean {
-  const latestLifecycle = [...events].reverse().find((event) => event.type === "session.started" || event.type === "session.shutdown");
-  return latestLifecycle?.type === "session.shutdown";
+  return latestSessionLifecycle(events)?.type === "session.shutdown";
+}
+
+function metadataProvesRestartAfterShutdown(metadata: SessionMetadata, events: BashGuardEvent[]): boolean {
+  const lifecycle = latestSessionLifecycle(events);
+  if (lifecycle?.type !== "session.shutdown") return false;
+  const metadataStart = Date.parse(metadata.startedAt ?? "");
+  const shutdownAt = Date.parse(lifecycle.timestamp);
+  return Number.isFinite(metadataStart) && Number.isFinite(shutdownAt) && metadataStart > shutdownAt;
+}
+
+function sessionSnapshotIsActive(metadata: SessionMetadata, events: BashGuardEvent[]): boolean {
+  if (!processIsAlive(metadata.processId)) return false;
+  return !latestSessionLifecycleIsShutdown(events) || metadataProvesRestartAfterShutdown(metadata, events);
 }
 
 export async function discoverSessions(root = getDataRoot()): Promise<SessionSummary[]> {
@@ -318,13 +334,12 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
     try {
       const info = await stat(eventsFile);
       const events = await readExistingEvents(eventsFile);
-      const shutdownRecorded = latestSessionLifecycleIsShutdown(events);
       return {
         metadata,
         directory,
         eventsFile,
         modifiedAt: info.mtimeMs,
-        active: !shutdownRecorded && processIsAlive(metadata.processId),
+        active: sessionSnapshotIsActive(metadata, events),
       };
     } catch {
       return undefined;
@@ -1590,7 +1605,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
   const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
   const snapshot = await readAttachSnapshot(session.eventsFile);
   const existing = snapshot.events;
-  const active = !latestSessionLifecycleIsShutdown(existing) && processIsAlive(session.metadata.processId);
+  const active = sessionSnapshotIsActive(session.metadata, existing);
 
   process.stdout.write(`BashGuard · ${active ? "live" : "completed"}\n`);
   process.stdout.write(`Session ${session.metadata.sessionId}\n`);
@@ -1629,6 +1644,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     active,
   }));
 
+  let followedProcessId = session.metadata.processId;
   while (true) {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
 
@@ -1645,7 +1661,18 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
       decoder = new StringDecoder("utf8");
     }
     if (info.size === offset) {
-      if (!processIsAlive(session.metadata.processId)) {
+      if (!processIsAlive(followedProcessId)) {
+        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+        const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
+        if (replacementMetadata && processIsAlive(replacementMetadata.processId)) {
+          followedProcessId = replacementMetadata.processId;
+          continue;
+        }
+        try {
+          if ((await stat(session.eventsFile)).size !== offset) continue;
+        } catch {
+          continue;
+        }
         process.stdout.write("Pi session ended.\n");
         return;
       }

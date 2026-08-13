@@ -49,6 +49,20 @@ test("discoverSessions treats a restart after an older shutdown as active when t
   assert.equal(sessions[0]?.active, true);
 });
 
+test("discoverSessions recognizes newer metadata while the restarted session-start event is pending", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
+  await writeSession(root, "session-a", [
+    event(1, "session.started", { timestamp: "2026-08-03T12:00:00.000Z" }),
+    event(2, "session.shutdown", { timestamp: "2026-08-03T12:01:00.000Z" }),
+  ], process.pid);
+  const metadataPath = join(root, "session-a", "session.json");
+  await writeFile(metadataPath, `${JSON.stringify({ schemaVersion: 1, sessionId: "session-a", processId: process.pid, startedAt: "2026-08-03T12:02:00.000Z" })}\n`);
+
+  const sessions = await discoverSessions(root);
+
+  assert.equal(sessions[0]?.active, true);
+});
+
 test("discoverSessions marks sessions with shutdown events complete even if the pid appears alive", async () => {
   const root = await mkdtemp(join(tmpdir(), "bashguard-cli-test-"));
   await writeSession(root, "session-a", [event(1, "session.started"), event(2, "session.shutdown")], process.pid);

@@ -91,6 +91,39 @@ test("attach preserves UTF-8 split across live polling cycles", async (t) => {
   assert.doesNotMatch(stdout, /�/);
 });
 
+test("attach drains a final append observed after the followed process exits", async (t) => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "bashguard-attach-final-append-"));
+  t.after(async () => rm(dataRoot, { recursive: true, force: true }));
+  const sessionId = "attach-final-append-session";
+  const directory = join(dataRoot, sessionId);
+  const eventsFile = join(directory, "events.jsonl");
+  await mkdir(directory, { recursive: true });
+  const owner = spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"]);
+  t.after(() => { if (owner.exitCode === null) owner.kill("SIGKILL"); });
+  await writeFile(join(directory, "session.json"), `${JSON.stringify({ schemaVersion: 1, sessionId, processId: owner.pid })}\n`);
+  await writeFile(eventsFile, `${JSON.stringify(event(1, "start001", "session.started"))}\n`);
+
+  const child = spawn(process.execPath, ["--experimental-strip-types", "src/cli.ts", "attach", sessionId, "--history", "0"], {
+    cwd: process.cwd(), env: { ...process.env, BASHGUARD_DATA_DIR: dataRoot }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(() => { if (child.exitCode === null) child.kill("SIGTERM"); });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.match(stdout, /Following live events/);
+
+  owner.kill("SIGKILL");
+  await new Promise((resolve) => owner.once("exit", resolve));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await appendFile(eventsFile, `${JSON.stringify(event(2, "final001", "bash.user_requested", { command: "echo final-append" }))}\n${JSON.stringify(event(3, "shutdown", "session.shutdown"))}\n`);
+
+  await new Promise<void>((resolve, reject) => child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`attach exited ${code}: ${stderr}`))));
+  assert.match(stdout, /final-append/);
+  assert.match(stdout, /Pi session ended/);
+});
+
 test("attach bounds startup history but streams every new narrated event", async (t) => {
   const dataRoot = await mkdtemp(join(tmpdir(), "bashguard-attach-history-"));
   t.after(async () => rm(dataRoot, { recursive: true, force: true }));

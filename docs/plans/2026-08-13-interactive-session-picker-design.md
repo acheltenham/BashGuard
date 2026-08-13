@@ -23,7 +23,7 @@ Explicit list indexes, exact session IDs, and unique ID prefixes retain their cu
 
 ## Architecture and data flow
 
-Session discovery produces one stable, active-first ordered snapshot for a selection operation. A pure policy function derives eligible candidates by command. Existing explicit-selector resolution works against that same full snapshot. Numeric selectors are assigned before command-specific filtering, so an active-only attach picker retains the original global `bashguard sessions` numbers rather than locally renumbering its subset. Because active sessions come first in the snapshot, eligible active selectors are currently contiguous. Session ID prefixes are also derived against every session in the snapshot, including completed sessions hidden from that picker, so displayed prefixes remain globally unique and copyable.
+Session discovery produces one active-first ordered snapshot for a selection operation. A pure policy function derives eligible candidates by command. Existing explicit-selector resolution works against that same full snapshot. Numeric selectors are assigned before command-specific filtering, so an active-only attach picker retains the global positions from that displayed `bashguard sessions` snapshot rather than locally renumbering its subset. They are stable within that snapshot, but metadata or ordering changes can assign a number to a different session later; an explicit number always resolves against the current discovery order. Because active sessions come first in the snapshot, eligible active selectors are currently contiguous. Session ID prefixes are derived against every session in the snapshot, including completed sessions hidden from that picker, so displayed prefixes remain globally unique and are the durable copyable selectors.
 
 A shared asynchronous selector then either:
 
@@ -31,23 +31,23 @@ A shared asynchronous selector then either:
 2. invokes an interactive terminal adapter for multiple candidates; or
 3. returns an actionable error when interaction is unavailable.
 
-The terminal adapter uses Node readline with injectable input and output streams. It renders numbered session rows from the supplied choices, validates input, and returns the selected choice and its stable selector. This remains separate from the future split-pane TUI.
+The terminal adapter uses Node readline with injectable input and output streams. It renders numbered session rows from the supplied choices, validates input, and returns the selected choice from that snapshot. This remains separate from the future split-pane TUI.
 
-`attach`, `inspect`, and `debrief` call the shared selector. `inspect` and `debrief` no longer reject an omitted selector before selection. Argument errors that do not depend on a selected session—including an unknown inspect activity or a missing value after `--session`—are validated before selection. The selected snapshot is passed directly to command execution; discovery is not repeated after rendering the picker.
+`attach`, `inspect`, and `debrief` call the shared selector. `inspect` and `debrief` no longer reject an omitted selector before selection. Argument errors that do not depend on a selected session—including an unknown inspect activity or a missing value after `--session` or `--event`—are validated before selection. The selected snapshot is passed directly to command execution; discovery is not repeated after rendering the picker.
 
 ## Interactive and non-interactive behavior
 
-The picker opens only when both stdin and stdout report interactive TTY capability. This prevents scripts, pipes, redirected output, and automation from hanging.
+The picker opens only when both stdin and stdout report interactive TTY capability. Non-TTY scripts, pipes, and redirected output therefore never prompt. Automation that allocates a PTY is interactive by contract and can legitimately wait for input; it must pass an explicit selector to avoid prompting. Explicit selectors are recommended for all automation, and no prompt timeout is imposed.
 
 For multiple non-interactive candidates, BashGuard exits non-zero with:
 
 - a concise ambiguity explanation;
 - the numbered eligible-session list;
-- a copyable command using a numeric selector.
+- a copyable command using each choice's globally unique session ID prefix.
 
 Only an exact displayed integer is accepted. Blank, non-numeric, whitespace-padded, and unavailable input prints concise selector guidance and prompts again; Enter has no default. EOF cancels with a concise error. `Ctrl+C` exits cleanly without a stack trace or accidental selection.
 
-Session files may change after discovery, but picker numbering and selection remain tied to the displayed snapshot. Existing degraded-file behavior applies after selection.
+Session files may change after discovery, but picker numbering and selection remain tied to the displayed snapshot. Those numbers are not promised to identify the same sessions in a later discovery; emitted unique ID prefixes do. Existing degraded-file behavior applies after selection.
 
 ## Presentation
 
@@ -80,10 +80,10 @@ Write tests first for:
 - picker invocation only for multiple candidates with interactive streams;
 - blank, invalid, and out-of-range input retries;
 - EOF and interruption cancellation;
-- deterministic non-interactive errors with copyable selectors;
-- stable selection from one discovery snapshot;
+- deterministic non-interactive errors with durable unique-prefix commands;
+- snapshot-local numeric selection and durable remediation after discovery reordering;
 - selector-less attach, inspect, and debrief integration behavior;
-- regression coverage that piped/scripted commands never prompt.
+- regression coverage that piped and other non-TTY scripted commands never prompt.
 
 Final validation includes the complete automated gate and a real simultaneous-Pi-session smoke test.
 

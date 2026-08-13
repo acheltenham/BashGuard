@@ -45,7 +45,7 @@ Goal: make a running Pi session understandable at a glance.
 - bound attach startup history while preserving complete live follow and inspect/JSONL evidence;
 - show an evidence-grounded startup snapshot for session state, correlated current/last activity, capture state, event count, and freshness;
 - refine the CLI and TUI architecture from Milestone 0 usage;
-- continue refining active-session selection after shipping the structured-text TTY picker with stable global selectors;
+- continue refining active-session selection after shipping the structured-text TTY picker with snapshot-local numbers and durable unique-prefix selectors;
 - add split-pane timeline and event detail views (the picker is not this full-screen TUI);
 - add grounded narrative projection;
 - add current activity and session status footer;

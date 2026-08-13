@@ -63,10 +63,11 @@ Confirm:
 - `doctor` reports CLI path, package root, data dir, Pi package status, and next steps;
 - `sessions` output includes `#`, `SESSION`, `NAME`, `REPOSITORY`, and `UPDATED`;
 - with two simultaneous active sessions in an actual TTY, selector-less attach shows an active-only structured-text picker and accepts a non-first displayed global number; selector-less inspect/debrief show all discovered recorded sessions;
-- selector-less commands auto-select a sole eligible session, while explicit numeric, exact-ID, and unique-prefix selectors bypass the picker;
-- piped or redirected ambiguous commands never prompt, exit nonzero, and list eligible stable global numbers with copyable commands; picker prefixes remain unique against the full discovery snapshot even when completed rows are hidden;
-- Enter has no default, invalid input retries, and EOF/`Ctrl+C` cancels concisely;
-- unknown inspect activity and a missing `--session` value fail before session selection;
+- selector-less commands auto-select a sole eligible session, while explicit numeric, exact-ID, and unique-prefix selectors bypass the picker; numeric selectors resolve against current discovery order;
+- piped or redirected ambiguous commands never prompt, exit nonzero, and list eligible snapshot-local numbers with durable unique-prefix commands; prefixes remain unique against the full discovery snapshot even when completed rows are hidden, and a copied prefix still selects the displayed session after reordering;
+- PTY-allocating automation is treated as interactive and uses an explicit selector to avoid prompting; explicit selectors are used for all automation;
+- Enter has no default, invalid input retries, and EOF/`Ctrl+C` cancels concisely, with no prompt timeout;
+- unknown inspect activity and missing `--session` or `--event` values fail before session selection;
 - `attach 1` shows an evidence-grounded state/activity/capture/freshness snapshot;
 - default `attach 1` bounds narrated startup history, `--history 0` skips it, and `--all-history` restores it;
 - `inspect 1` lists events with sequence and event ID prefix examples;

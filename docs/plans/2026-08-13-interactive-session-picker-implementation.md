@@ -22,7 +22,7 @@ Create an issue titled `Add interactive session picker for selector-less command
 - approved command policy for attach versus inspect/debrief;
 - TTY-only prompting;
 - explicit-number requirement;
-- stable snapshot/global selector requirement;
+- snapshot-local number and durable-prefix requirements;
 - non-interactive error behavior;
 - test and documentation acceptance criteria.
 
@@ -91,7 +91,7 @@ export function eligibleSessionChoices(command: SessionCommand, choices: Session
 
 Extract existing explicit index/ID/prefix matching into `resolveSessionChoice(requestedId, choices)` without changing semantics. Preserve `formatSessionNotFound()` evidence scope wording.
 
-Stable selectors must remain the original global `bashguard sessions` indexes even when attach filters to active candidates. Do not renumber the active subset.
+Within a discovery snapshot, numeric selectors must retain their global `bashguard sessions` positions even when attach filters to active candidates. Do not renumber the active subset. Do not treat those positions as durable after discovery ordering changes.
 
 **Step 4: Run focused and full unit tests**
 
@@ -127,7 +127,7 @@ Create `src/session-picker.test.ts` using `PassThrough` streams and the proposed
 
 Cover:
 
-- displays stable selectors and distinguishing session columns;
+- displays snapshot-local numeric selectors and distinguishing session columns;
 - input `2\n` returns the choice whose global selector is 2;
 - blank, non-number, and unavailable selector print guidance and retry;
 - Enter does not select a default;
@@ -222,7 +222,7 @@ Cover:
 - attach with no active sessions passes completed choices;
 - inspect/debrief pass all sessions;
 - multiple candidates with either non-TTY stream reject without invoking prompt;
-- non-interactive error lists stable selectors and a copyable command for the invoking command;
+- non-interactive error lists snapshot-local numbers and a copyable globally unique prefix command for the invoking command;
 - discovery occurs once (inject or observe one snapshot, not a second read).
 
 **Step 2: Run tests and verify RED**
@@ -248,7 +248,7 @@ Implement `selectSessionForCommand()`:
 7. require `input.isTTY === true && output.isTTY === true` before prompting;
 8. otherwise throw a formatted ambiguity error.
 
-The non-interactive message should state that more than one eligible session exists, render stable global selectors, and include a copyable command such as `bashguard attach 2`. It must not silently select the newest session.
+The non-interactive message should state that more than one eligible session exists, render snapshot-local global positions, and include copyable commands using each choice's globally unique ID prefix, such as `bashguard attach 019fc93a-1`. It must not silently select the newest session.
 
 Keep `chooseSession()` as a compatibility wrapper for existing exported API/tests if useful, but route command execution through the shared selector.
 
@@ -293,11 +293,11 @@ Cover:
 - selector-less debrief with one session auto-selects and renders debrief;
 - selector-less attach with one active session auto-selects;
 - selector-less inspect/debrief with multiple sessions and piped stdio exit non-zero, never print a prompt, and list copyable selectors;
-- selector-less attach with multiple active sessions and piped stdio exits non-zero and lists only eligible active choices with stable global selectors;
+- selector-less attach with multiple active sessions and piped stdio exits non-zero and lists only eligible active choices with snapshot-local numbers and durable prefix commands;
 - explicit `attach 2`, `inspect 2`, and `debrief 2` remain non-interactive and unchanged;
 - `inspect --activity list` remains session-independent and does not invoke selection.
 
-A subprocess pipe is intentionally non-TTY; assert it never hangs and never writes `Select a session`.
+A subprocess pipe is intentionally non-TTY; assert it never hangs and never writes `Select a session`. Do not generalize this to automation that allocates a PTY, which is interactive by contract and must use an explicit selector to avoid prompting.
 
 **Step 2: Run tests and verify RED**
 
@@ -356,7 +356,7 @@ git commit -m "feat: use session picker across CLI commands"
 
 **Step 1: Clarify stable selector semantics in the design**
 
-Add that filtered picker candidates retain their original `bashguard sessions` numeric selectors. This ensures displayed choices are copyable and explicit selector behavior remains unchanged.
+Add that filtered picker candidates retain their `bashguard sessions` numeric positions within the displayed snapshot. Numbers can drift after ordering changes, while globally unique ID prefixes are the durable copyable selectors; explicit numeric behavior against current discovery order remains unchanged.
 
 **Step 2: Document command behavior**
 
@@ -367,7 +367,7 @@ Document:
 - one-candidate auto-selection;
 - TTY-only picker;
 - explicit number requirement;
-- stable global selectors;
+- snapshot-local numbers and durable unique-prefix selectors;
 - non-interactive errors rather than prompts;
 - cancellation and later-restart boundaries;
 - no full-screen TUI yet.
@@ -376,7 +376,7 @@ Use evidence-qualified wording and keep install examples pinned to v0.3.0 until 
 
 **Step 3: Update testing/release checks and bundled skill**
 
-Add simultaneous active-session smoke steps and scripted non-prompt assertions. Teach the skill that omitted selectors may auto-select or prompt only in a TTY, and explicit selectors remain safest for automation.
+Add simultaneous active-session smoke steps and non-TTY scripted non-prompt assertions. Teach the skill that PTY-allocating automation is interactive by contract and that explicit selectors are required to avoid prompting and recommended for all automation.
 
 **Step 4: Validate docs and tests**
 
@@ -427,7 +427,7 @@ Pipe or redirect selector-less commands with multiple sessions and verify:
 
 - no prompt;
 - non-zero exit;
-- stable eligible selectors and copyable commands;
+- snapshot-local eligible numbers and copyable unique-prefix commands;
 - no stack trace.
 
 **Step 3: Run complete verification**
@@ -449,7 +449,7 @@ Expected: all tests pass, TypeScript passes, zero known audit vulnerabilities, b
 
 Review `origin/main..HEAD` for:
 
-- selector/index stability;
+- selector/index snapshot boundaries and durable prefix remediation;
 - TTY detection and cancellation;
 - scriptability/no hangs;
 - one-snapshot behavior;

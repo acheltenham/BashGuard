@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { waitForExit } from "./test-process.ts";
+
 function event(sequence: number, id: string, type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     schemaVersion: 1,
@@ -53,7 +55,7 @@ test("attach completes an event whose JSONL line was partial at the startup boun
     liveLine.subarray(splitAt),
     Buffer.from(`\n${JSON.stringify(event(3, "shutdown", "session.shutdown"))}\n`),
   ]));
-  await new Promise<void>((resolve, reject) => child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`attach exited ${code}: ${stderr}`))));
+  assert.equal(await waitForExit(child, () => ({ stdout, stderr })), 0, stderr);
   assert.match(stdout, /café-boundary/);
   assert.doesNotMatch(stdout, /�/);
   assert.match(stdout, /Pi session ended/);
@@ -86,7 +88,7 @@ test("attach preserves UTF-8 split across live polling cycles", async (t) => {
   await new Promise((resolve) => setTimeout(resolve, 400));
   await appendFile(eventsFile, Buffer.concat([liveLine.subarray(splitAt), Buffer.from(`\n${JSON.stringify(event(3, "shutdown", "session.shutdown"))}\n`)]));
 
-  await new Promise<void>((resolve, reject) => child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`attach exited ${code}: ${stderr}`))));
+  assert.equal(await waitForExit(child, () => ({ stdout, stderr })), 0, stderr);
   assert.match(stdout, /café-live/);
   assert.doesNotMatch(stdout, /�/);
 });
@@ -115,11 +117,11 @@ test("attach drains a final append observed after the followed process exits", a
   assert.match(stdout, /Following live events/);
 
   owner.kill("SIGKILL");
-  await new Promise((resolve) => owner.once("exit", resolve));
+  await waitForExit(owner, () => ({ stdout: "", stderr: "" }));
   await new Promise((resolve) => setTimeout(resolve, 100));
   await appendFile(eventsFile, `${JSON.stringify(event(2, "final001", "bash.user_requested", { command: "echo final-append" }))}\n${JSON.stringify(event(3, "shutdown", "session.shutdown"))}\n`);
 
-  await new Promise<void>((resolve, reject) => child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`attach exited ${code}: ${stderr}`))));
+  assert.equal(await waitForExit(child, () => ({ stdout, stderr })), 0, stderr);
   assert.match(stdout, /final-append/);
   assert.match(stdout, /Pi session ended/);
 });
@@ -150,12 +152,14 @@ test("attach follows replacement recorder events appended after shutdown", async
 
   await appendFile(eventsFile, `${JSON.stringify(event(2, "oldstop", "session.shutdown"))}\n`);
   await writeFile(join(directory, "session.json"), `${JSON.stringify({ schemaVersion: 1, sessionId, processId: replacement.pid, startedAt: "2026-08-13T12:02:00.000Z" })}\n`);
+  for (let attempt = 0; attempt < 100 && !stdout.includes("oldstop"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.match(stdout, /oldstop/);
   await appendFile(eventsFile, `${JSON.stringify(event(1, "newstart", "session.started"))}\n${JSON.stringify(event(2, "newwork1", "bash.user_requested", { command: "echo replacement-work" }))}\n`);
   for (let attempt = 0; attempt < 100 && !stdout.includes("replacement-work"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
   assert.match(stdout, /replacement-work/);
   await appendFile(eventsFile, `${JSON.stringify(event(3, "newstop1", "session.shutdown"))}\n`);
 
-  await new Promise<void>((resolve, reject) => child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`attach exited ${code}: ${stderr}`))));
+  assert.equal(await waitForExit(child, () => ({ stdout, stderr })), 0, stderr);
 });
 
 test("attach bounds startup history but streams every new narrated event", async (t) => {
@@ -219,9 +223,7 @@ test("attach bounds startup history but streams every new narrated event", async
   await appendFile(eventsFile, `${JSON.stringify(event(8, "live0002", "bash.user_requested", { command: "echo live-two" }))}\n`);
   await appendFile(eventsFile, `${JSON.stringify(event(9, "shutdown", "session.shutdown"))}\n`);
 
-  await new Promise<void>((resolve, reject) => {
-    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`attach exited ${code}: ${stderr}`)));
-  });
+  assert.equal(await waitForExit(child, () => ({ stdout, stderr })), 0, stderr);
   assert.match(stdout, /live-one/);
   assert.match(stdout, /live-two/);
   assert.match(stdout, /Pi session ended/);

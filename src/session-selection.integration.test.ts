@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+
+import { waitForExit } from "./test-process.ts";
 
 const cliArgs = ["--experimental-strip-types", "src/cli.ts"];
 
@@ -78,13 +80,6 @@ function combined(result: ReturnType<typeof run>): string {
   return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 }
 
-function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("exit", resolve);
-  });
-}
-
 test("selector-less inspect auto-selects one session and renders its events with a copyable selector", async (t) => {
   const id = "inspect-single-019fc93a";
   const root = await store(t, [{ id, command: "echo inspect-auto-selected" }]);
@@ -137,7 +132,7 @@ test("selector-less attach auto-selects its only active session and uses its uni
   assert.doesNotMatch(stdout, new RegExp(`bashguard inspect ${id} --event`));
   assert.doesNotMatch(stdout, /undefined|Select a session/);
   await appendFile(join(root, id, "events.jsonl"), `${JSON.stringify(event(id, 4, "session.shutdown"))}\n`);
-  assert.equal(await waitForExit(child), 0, stderr);
+  assert.equal(await waitForExit(child, () => ({ stdout, stderr })), 0, stderr);
 });
 
 test("piped selector-less commands fail without prompting and print stable copyable choices", async (t) => {
@@ -168,6 +163,27 @@ test("piped selector-less commands fail without prompting and print stable copya
   assert.match(output, /bashguard attach 1/);
   assert.match(output, /bashguard attach 2/);
   assert.doesNotMatch(output, /^3\s+active\s+/m);
+});
+
+test("attach choices render prefixes unique against hidden completed sessions", async (t) => {
+  const now = Date.now();
+  const activeId = "shared-prefix-active";
+  const root = await store(t, [
+    { id: activeId, active: true, modifiedAt: now },
+    { id: "other-active-session", active: true, modifiedAt: now - 1_000 },
+    { id: "shared-prefix-completed", modifiedAt: now - 2_000 },
+  ]);
+
+  const attach = run(root, ["attach"]);
+  const output = combined(attach);
+  assert.notEqual(attach.status, 0);
+  assert.match(output, /^1\s+active\s+shared-prefix-a\s+/m);
+  assert.doesNotMatch(output, /^1\s+active\s+shared-p\s+/m);
+  assert.doesNotMatch(output, /shared-prefix-completed/);
+
+  const inspect = run(root, ["inspect", "shared-prefix-a"]);
+  assert.equal(inspect.status, 0, inspect.stderr);
+  assert.match(inspect.stdout, new RegExp(activeId));
 });
 
 test("global session order is active-first and newest-first within each state", async (t) => {
@@ -237,6 +253,85 @@ test("explicit ID prefixes still resolve without interaction", async (t) => {
     const result = run(root, [command, "prefix-target"]);
     assert.equal(result.status, 0, result.stderr);
     assert.doesNotMatch(combined(result), /Select a session/);
+  }
+});
+
+test("bare --session and option-valued --session fail before selection", async (t) => {
+  const root = await store(t, [
+    { id: "first-session" },
+    { id: "second-session" },
+  ]);
+
+  for (const command of ["attach", "inspect", "debrief"] as const) {
+    for (const suffix of [["--session"], ["--session", "--activity"]]) {
+      const result = run(root, [command, ...suffix]);
+      const output = combined(result);
+      assert.notEqual(result.status, 0);
+      assert.match(output, /`--session` requires a value/);
+      assert.doesNotMatch(output, /Select a session|More than one eligible session|No BashGuard sessions/);
+    }
+  }
+});
+
+test("unknown inspect activity wins over non-TTY session ambiguity", async (t) => {
+  const root = await store(t, [
+    { id: "first-session" },
+    { id: "second-session" },
+  ]);
+
+  const result = run(root, ["inspect", "--activity", "not-real"]);
+  const output = combined(result);
+
+  assert.notEqual(result.status, 0);
+  assert.match(output, /Unknown activity: not-real\. Run `bashguard inspect --activity list`\./);
+  assert.doesNotMatch(output, /Select a session|More than one eligible session/);
+});
+
+test("real PTY selection through bin/bashguard honors a non-default global selector", async (t) => {
+  const lookup = spawnSync("/bin/sh", ["-c", "command -v script"], { encoding: "utf8" });
+  if (lookup.status !== 0 || !lookup.stdout.trim()) {
+    t.skip("system script utility is unavailable");
+    return;
+  }
+
+  const now = Date.now();
+  const root = await store(t, [
+    { id: "pty-first-session", modifiedAt: now, command: "echo pty-first" },
+    { id: "pty-selected-session", modifiedAt: now - 1_000, command: "echo pty-selected" },
+  ]);
+  const bin = join(process.cwd(), "bin", "bashguard");
+  const script = lookup.stdout.trim();
+
+  for (const command of ["inspect", "debrief"] as const) {
+    const result = process.platform === "darwin"
+      ? spawnSync("/usr/bin/expect", ["-c", [
+        "set timeout 5",
+        "spawn -noecho $env(BG_SCRIPT) -q /dev/null $env(BG_BIN) $env(BG_COMMAND)",
+        "after 100",
+        "send -- \"2\\r\"",
+        "expect eof",
+        "set status [wait]",
+        "exit [lindex $status 3]",
+      ].join("\n")], {
+        cwd: process.cwd(),
+        env: { ...process.env, BASHGUARD_DATA_DIR: root, BG_SCRIPT: script, BG_BIN: bin, BG_COMMAND: command },
+        encoding: "utf8",
+        timeout: 5_000,
+      })
+      : spawnSync(script, ["-q", "-c", `\"${bin.replaceAll('"', '\\"')}\" ${command}`, "/dev/null"], {
+        cwd: process.cwd(),
+        env: { ...process.env, BASHGUARD_DATA_DIR: root },
+        encoding: "utf8",
+        input: "2\n",
+        timeout: 5_000,
+      });
+    const output = combined(result);
+    assert.equal(result.status, 0, output);
+    assert.match(output, /Select a session \[1, 2\]:/);
+    assert.match(output, /bashguard inspect pty-sele --event/);
+    if (command === "inspect") assert.match(output, /pty-selected/);
+    else assert.match(output, /Session complete/);
+    assert.doesNotMatch(output, /pty-first-event-2/);
   }
 });
 

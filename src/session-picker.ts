@@ -2,14 +2,13 @@ import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import type { SessionChoice } from "./cli.ts";
-import { uniqueSessionIdPrefixes } from "./session-format.ts";
 
 export type SessionPromptStreams = {
   input: NodeJS.ReadableStream;
   output: NodeJS.WritableStream;
 };
 
-function renderChoice(choice: SessionChoice, sessionIdPrefix: string): string {
+function renderChoice(choice: SessionChoice): string {
   const { metadata } = choice.session;
   const name = metadata.name ?? metadata.title ?? metadata.sessionName ?? "-";
   const repository = metadata.repository ?? basename(metadata.cwd ?? "unknown");
@@ -17,7 +16,7 @@ function renderChoice(choice: SessionChoice, sessionIdPrefix: string): string {
   const updated = Number.isFinite(choice.session.modifiedAt)
     ? new Date(choice.session.modifiedAt).toISOString()
     : "unknown";
-  return `${choice.selector}  ${sessionIdPrefix}  ${name}  ${repository}  ${state}  updated ${updated}`;
+  return `${choice.selector}  ${choice.sessionIdPrefix}  ${name}  ${repository}  ${state}  updated ${updated}`;
 }
 
 function validateChoices(choices: readonly SessionChoice[]): void {
@@ -39,9 +38,8 @@ export async function promptForSessionChoice(
   const selectors = choices.map((choice) => String(choice.selector));
   const selectorList = selectors.join(", ");
   const choicesBySelector = new Map(choices.map((choice) => [String(choice.selector), choice]));
-  const prefixes = uniqueSessionIdPrefixes(choices.map((choice) => choice.session.metadata.sessionId));
 
-  output.write(`${choices.map((choice, index) => renderChoice(choice, prefixes[index]!)).join("\n")}\n`);
+  output.write(`${choices.map(renderChoice).join("\n")}\n`);
   const readline = createInterface({ input, output });
   let interrupted = false;
   const onInterrupt = (): void => {

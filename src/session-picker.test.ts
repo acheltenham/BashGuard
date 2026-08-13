@@ -13,6 +13,7 @@ function choice(
   const { name, repository, ...summary } = options;
   return {
     selector,
+    sessionIdPrefix: sessionId.slice(0, Math.min(8, sessionId.length)),
     session: {
       metadata: { sessionId, name, repository },
       directory: `/tmp/${sessionId}`,
@@ -59,11 +60,11 @@ test("renders distinguishing context and the available stable selectors", async 
   assert.match(output, /Select a session \[1, 3\]: $/);
 });
 
-test("renders uniquely distinguishing session ID prefixes", async () => {
+test("renders globally distinguishing session ID prefixes carried by each choice", async () => {
   const io = streams();
   const choices = [
-    choice(1, "019fc93a-1111-2222-3333-abcdefaaaaaa"),
-    choice(3, "019fc93a-2222-3333-4444-abcdefbbbbbb"),
+    { ...choice(1, "019fc93a-1111-2222-3333-abcdefaaaaaa"), sessionIdPrefix: "019fc93a-1" },
+    { ...choice(3, "019fc93a-2222-3333-4444-abcdefbbbbbb"), sessionIdPrefix: "019fc93a-2" },
   ];
 
   const selected = promptForSessionChoice(choices, io);

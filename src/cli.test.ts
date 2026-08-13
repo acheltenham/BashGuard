@@ -109,15 +109,16 @@ function sessionSummary(sessionId: string, active: boolean): SessionSummary {
   };
 }
 
-test("session choices retain global selectors when attach filters to active sessions", () => {
+test("session choices retain global selectors and prefixes when attach filters to active sessions", () => {
   const choices = indexSessionChoices([
-    sessionSummary("completed", false),
-    sessionSummary("active-a", true),
-    sessionSummary("active-b", true),
+    sessionSummary("shared-prefix-active", true),
+    sessionSummary("other-active-session", true),
+    sessionSummary("shared-prefix-completed", false),
   ]);
 
   assert.deepEqual(choices.map((choice) => choice.selector), [1, 2, 3]);
-  assert.deepEqual(eligibleSessionChoices("attach", choices).map((choice) => choice.selector), [2, 3]);
+  assert.deepEqual(choices.map((choice) => choice.sessionIdPrefix), ["shared-prefix-a", "other-ac", "shared-prefix-c"]);
+  assert.deepEqual(eligibleSessionChoices("attach", choices).map((choice) => choice.selector), [1, 2]);
   assert.deepEqual(eligibleSessionChoices("inspect", choices).map((choice) => choice.selector), [1, 2, 3]);
   assert.deepEqual(eligibleSessionChoices("debrief", choices).map((choice) => choice.selector), [1, 2, 3]);
 });
@@ -502,6 +503,10 @@ test("parseCommandArgs accepts positional and --session selectors", () => {
 });
 
 test("parseCommandArgs rejects missing filter values and unknown options", () => {
+  for (const command of ["attach", "inspect", "debrief"]) {
+    assert.throws(() => parseCommandArgs([command, "--session"]), new Error("`--session` requires a value"));
+    assert.throws(() => parseCommandArgs([command, "--session", "--activity"]), new Error("`--session` requires a value"));
+  }
   assert.throws(() => parseCommandArgs(["inspect", "1", "--activity"]), /`--activity` requires a value/);
   assert.throws(() => parseCommandArgs(["inspect", "1", "--grep"]), /`--grep` requires a value/);
   assert.throws(() => parseCommandArgs(["inspect", "1", "--unknown"]), /Unknown option: --unknown/);

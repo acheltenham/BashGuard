@@ -59,6 +59,7 @@ export type SessionCommand = "attach" | "inspect" | "debrief";
 
 export type SessionChoice = {
   selector: number;
+  sessionIdPrefix: string;
   session: SessionSummary;
 };
 
@@ -175,7 +176,9 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       return parsed;
     }
     if (arg === "--session") {
-      sessionId = args[++index];
+      const requestedSession = args[++index];
+      if (!requestedSession || requestedSession.startsWith("--")) throw new Error("`--session` requires a value");
+      sessionId = requestedSession;
       continue;
     }
     if (arg === "--event") {
@@ -375,7 +378,8 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
 }
 
 export function indexSessionChoices(sessions: SessionSummary[]): SessionChoice[] {
-  return sessions.map((session, index) => ({ selector: index + 1, session }));
+  const prefixes = uniqueSessionIdPrefixes(sessions.map((session) => session.metadata.sessionId));
+  return sessions.map((session, index) => ({ selector: index + 1, sessionIdPrefix: prefixes[index]!, session }));
 }
 
 export function eligibleSessionChoices(command: SessionCommand, choices: SessionChoice[]): SessionChoice[] {
@@ -1569,18 +1573,17 @@ function formatSessionNotFound(
 }
 
 function formatNonInteractiveSessionChoices(command: SessionCommand, choices: readonly SessionChoice[]): string {
-  const prefixes = uniqueSessionIdPrefixes(choices.map((choice) => choice.session.metadata.sessionId));
   const lines = [
     `More than one eligible session exists for \`bashguard ${command}\`.`,
     "Choose one explicitly:",
   ];
 
-  for (const [index, choice] of choices.entries()) {
+  for (const choice of choices) {
     const { metadata } = choice.session;
     const state = choice.session.active ? "active" : "complete";
     const name = sessionDisplayName(metadata);
     const repository = metadata.repository ?? basename(metadata.cwd ?? "unknown");
-    lines.push(`${choice.selector}  ${state}  ${prefixes[index]}  ${name}  ${repository}`);
+    lines.push(`${choice.selector}  ${state}  ${choice.sessionIdPrefix}  ${name}  ${repository}`);
   }
 
   lines.push("", "Run one of:");
@@ -1618,7 +1621,7 @@ export async function selectSessionForCommandResult(
     }
   }
 
-  const selector = requestedId ?? uniqueSessionIdPrefixes(sessions.map((session) => session.metadata.sessionId))[selected.selector - 1]!;
+  const selector = requestedId ?? selected.sessionIdPrefix;
   return { session: selected.session, selector };
 }
 
@@ -1658,8 +1661,8 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
   }
 
   const unknownActivities = (options.activities ?? []).filter((activity) => !Object.hasOwn(ACTIVITY_DESCRIPTIONS, activity));
-  if (requestedId !== undefined && unknownActivities.length > 0) {
-    throw new Error(`Unknown activity: ${unknownActivities.join(", ")}. Run \`bashguard inspect ${requestedId} --activity list\`.`);
+  if (unknownActivities.length > 0) {
+    throw new Error(`Unknown activity: ${unknownActivities.join(", ")}. Run \`bashguard inspect --activity list\`.`);
   }
   if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1)) throw new Error("`--limit` must be a positive integer");
   if (options.limit !== undefined && options.all) throw new Error("`--limit` and `--all` cannot be combined");
@@ -1670,7 +1673,6 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
 
   const selection = await selectSessionForCommandResult("inspect", requestedId, { input: process.stdin, output: process.stdout });
   const { session, selector: effectiveSelector } = selection;
-  if (unknownActivities.length > 0) throw new Error(`Unknown activity: ${unknownActivities.join(", ")}. Run \`bashguard inspect ${effectiveSelector} --activity list\`.`);
   const events = await readExistingEvents(session.eventsFile);
 
   if (hasFilters) {
@@ -1831,9 +1833,9 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const options = parseCommandArgs(process.argv.slice(2));
-  const { command, setupSubject, setupScope } = options;
   try {
+    const options = parseCommandArgs(process.argv.slice(2));
+    const { command, setupSubject, setupScope } = options;
     if (command === "sessions") return await listSessions();
     if (command === "doctor") return await doctor();
     if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);

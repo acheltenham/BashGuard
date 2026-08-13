@@ -12,6 +12,13 @@ test("package manifest loads BashGuard extension and skill as a Pi package", asy
   assert.match(skill, /^description: .+\n---\n/m);
 });
 
+test("package development dependency stays installable on the Pi 0.84.0 baseline", async () => {
+  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+
+  assert.equal(packageJson.peerDependencies?.["@earendil-works/pi-coding-agent"], "*");
+  assert.equal(packageJson.devDependencies?.["@earendil-works/pi-coding-agent"], "0.84.0");
+});
+
 test("package exposes a shell-friendly bashguard bin wrapper", async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
   assert.equal(packageJson.bin?.bashguard, "./bin/bashguard");

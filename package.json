@@ -33,7 +33,7 @@
     "sessions": "node --experimental-strip-types src/cli.ts sessions"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.0",
     "@types/node": "latest",
     "typescript": "latest"
   }

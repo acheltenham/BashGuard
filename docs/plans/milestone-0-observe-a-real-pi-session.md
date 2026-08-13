@@ -1,7 +1,7 @@
 # Milestone 0: Observe a Real Pi Session
 
-**Status:** Foundation implemented; final validation in progress  
-**Last updated:** August 3, 2026
+**Status:** Validation complete; ready to close after baseline PR merge
+**Last updated:** August 13, 2026
 
 ## Objective
 
@@ -200,10 +200,12 @@ Completed foundation work:
 7. Session completion is detected from recorded `session.shutdown`, avoiding PID-only liveness claims.
 8. Capture-completeness metadata covers missing, redacted, truncated, and capture-gap evidence.
 
-Next implementation order:
+Final validation completed:
 
-1. Run a final Milestone 0 manual session using current `sessions`, `attach`, `inspect`, and `debrief` commands.
-2. Decide whether the first interactive TUI enhancement is required before closing Milestone 0, or whether it becomes the next milestone.
+1. Reproducible append-to-attach latency and representative storage baselines are implemented in `scripts/milestone-0-baseline.ts` and documented in `docs/testing/milestone-0-validation-baseline.md`.
+2. A fresh controlled Pi session passed discovery, active attach, event inspection, evidence filtering, JSONL export, debrief, Git snapshot, and inside-Pi skill checks.
+3. Recorder/storage failures remained visible and did not prevent Pi from completing tested work; entirely unusable storage cannot persist its own capture-gap event and is documented as missing evidence.
+4. The split-pane TUI is not required for Milestone 0 correctness and moves to Phase 1.
 
 Current hardening branch status:
 

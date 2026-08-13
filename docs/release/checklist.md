@@ -23,12 +23,16 @@ From the repository root:
 npm install
 npm test
 npm run check
+npm audit
+npm run baseline:milestone-0 -- --samples 25
 ```
 
 Expected result:
 
 - all tests pass;
-- TypeScript check passes.
+- TypeScript check passes;
+- dependency audit reports no known vulnerabilities;
+- the Milestone 0 baseline prints latency and storage results without errors.
 
 ## 3. Run CLI smoke checks
 

@@ -338,6 +338,7 @@ BashGuard can only attach to sessions recorded while the BashGuard extension was
 npm install
 npm test
 npm run check
+npm run baseline:milestone-0 -- --samples 25
 ```
 
 Manual attach test:
@@ -355,11 +356,12 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.t
 BASHGUARD_DATA_DIR=/tmp/bashguard-test node --experimental-strip-types src/cli.ts debrief 1
 ```
 
-See [Milestone 0 Smoke Checklist](docs/testing/milestone-0-smoke-checklist.md) and [Separate-Terminal Attach Test](docs/testing/separate-terminal-attach.md).
+See [Milestone 0 Smoke Checklist](docs/testing/milestone-0-smoke-checklist.md), [Milestone 0 Validation Baseline](docs/testing/milestone-0-validation-baseline.md), and [Separate-Terminal Attach Test](docs/testing/separate-terminal-attach.md).
 
 ## Documents
 
 - [Evidence Filtering and Export](docs/cli/evidence-filtering.md)
+- [Milestone 0 Validation Baseline](docs/testing/milestone-0-validation-baseline.md)
 - [The BashGuard Experience](docs/vision/the-bashguard-experience.md)
 - [Terminal UX](docs/vision/terminal-ux.md)
 - [Event Model](docs/architecture/event-model.md)

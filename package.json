@@ -27,6 +27,7 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "scripts": {
+    "baseline:milestone-0": "node --experimental-strip-types scripts/milestone-0-baseline.ts",
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/**/*.test.ts",
     "sessions": "node --experimental-strip-types src/cli.ts sessions"

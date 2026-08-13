@@ -95,6 +95,8 @@ export type ParsedCommandArgs = {
   limit?: number;
   all?: boolean;
   format?: EvidenceFormat;
+  attachHistory?: number;
+  allHistory?: boolean;
   setupSubject?: string;
   setupScope?: "global" | "local";
 };
@@ -116,7 +118,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id]\n  bashguard attach --session <session-id>\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect <session-id> --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect <session-id> --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect <session-id> --activity list\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session <session-id> [--history <n>|--all-history]\n  bashguard inspect <session-id> --event <event-id-or-sequence>\n  bashguard inspect <session-id> --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect <session-id> --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect <session-id> --activity list\n  bashguard inspect --session <session-id> --event <event-id-or-sequence>\n  bashguard debrief <session-id>\n  bashguard debrief --session <session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -131,6 +133,8 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   let limit: number | undefined;
   let all = false;
   let format: EvidenceFormat | undefined;
+  let attachHistory: number | undefined;
+  let allHistory = false;
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -181,6 +185,16 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       all = true;
       continue;
     }
+    if (arg === "--history") {
+      const rawHistory = args[++index];
+      if (!rawHistory || rawHistory.startsWith("--")) throw new Error("`--history` requires a value");
+      attachHistory = Number(rawHistory);
+      continue;
+    }
+    if (arg === "--all-history") {
+      allHistory = true;
+      continue;
+    }
     if (arg === "--format") {
       const rawFormat = args[++index];
       if (!rawFormat || rawFormat.startsWith("--")) throw new Error("`--format` requires a value");
@@ -203,6 +217,9 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   if (limit !== undefined) parsed.limit = limit;
   if (all) parsed.all = true;
   if (format !== undefined) parsed.format = format;
+  if (attachHistory !== undefined) parsed.attachHistory = attachHistory;
+  if (allHistory) parsed.allHistory = true;
+  if (command !== "attach" && (attachHistory !== undefined || allHistory)) throw new Error("attach history options can only be used with `bashguard attach`");
   return parsed;
 }
 
@@ -569,15 +586,37 @@ export function formatInspectableEvents(sessionSelector: string, events: BashGua
   return `${lines.join("\n")}\n`;
 }
 
-export function formatAttachGuidance(sessionSelector: string, events: BashGuardEvent[], active: boolean): string {
-  const renderedCount = events.map(formatTimelineEvent).filter((line): line is string => line !== undefined).length;
-  const lines = [
-    "",
-    "Timeline status",
-    `- ${renderedCount} narrated event${renderedCount === 1 ? "" : "s"} currently recorded; attach shows all narrated events available at startup.`,
-  ];
-  if (events.length > renderedCount) {
-    lines.push(`- ${events.length - renderedCount} recorded event${events.length - renderedCount === 1 ? " has" : "s have"} no default timeline narration; use inspect for raw event evidence.`);
+export type AttachHistorySelection = {
+  visible: BashGuardEvent[];
+  narratedTotal: number;
+  seenEventIds: Set<string>;
+};
+
+export function selectAttachHistory(events: BashGuardEvent[], history: number, allHistory: boolean): AttachHistorySelection {
+  const narrated = events.filter((event) => renderEvent(event) !== undefined);
+  return {
+    visible: allHistory ? narrated : history === 0 ? [] : narrated.slice(-history),
+    narratedTotal: narrated.length,
+    seenEventIds: new Set(events.map((event) => event.id)),
+  };
+}
+
+export function formatAttachGuidance(sessionSelector: string, input: { recordedTotal: number; narratedTotal: number; narratedShown: number; active: boolean }): string {
+  const { recordedTotal, narratedTotal, narratedShown, active } = input;
+  const lines = ["", "Timeline status"];
+  if (narratedTotal === 0) {
+    lines.push("- No narrated historical events were recorded.");
+  } else if (narratedShown === 0) {
+    lines.push(`- Historical narration skipped (0 of ${narratedTotal} shown).`);
+    lines.push("- Re-run with `--all-history` to show all historical narration before following.");
+  } else if (narratedShown < narratedTotal) {
+    lines.push(`- Showing latest ${narratedShown} of ${narratedTotal} narrated historical events.`);
+    lines.push("- Re-run with `--all-history` to show all historical narration before following.");
+  } else {
+    lines.push(`- Showing all ${narratedTotal} narrated historical event${narratedTotal === 1 ? "" : "s"}.`);
+  }
+  if (recordedTotal > narratedTotal) {
+    lines.push(`- ${recordedTotal - narratedTotal} recorded event${recordedTotal - narratedTotal === 1 ? " has" : "s have"} no default timeline narration; use inspect for raw event evidence.`);
   }
   lines.push(
     "",
@@ -586,9 +625,7 @@ export function formatAttachGuidance(sessionSelector: string, events: BashGuardE
     `  bashguard inspect ${sessionSelector} --event <sequence-or-event-id-prefix>` + "  # inspect one event",
     `  bashguard debrief ${sessionSelector}` + "  # summarize the session",
   );
-  if (active) {
-    lines.push("", "Following live events. Ctrl-C to detach.");
-  }
+  if (active) lines.push("", "Following live events. Every new narrated event will be shown. Ctrl-C to detach.");
   return `${lines.join("\n")}\n`;
 }
 
@@ -1444,7 +1481,11 @@ async function debrief(sessionId: string | undefined): Promise<void> {
   process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: sessionId, sessionState: session.active ? "active" : "complete" }));
 }
 
-async function attach(requestedId?: string): Promise<void> {
+async function attach(options: ParsedCommandArgs): Promise<void> {
+  const requestedId = options.sessionId;
+  if (options.attachHistory !== undefined && (!Number.isInteger(options.attachHistory) || options.attachHistory < 0)) throw new Error("`--history` must be a non-negative integer");
+  if (options.attachHistory !== undefined && options.allHistory) throw new Error("`--history` and `--all-history` cannot be combined");
+  const history = options.attachHistory ?? 50;
   const session = await chooseSession(requestedId);
   const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
 
@@ -1456,11 +1497,10 @@ async function attach(requestedId?: string): Promise<void> {
 
   let offset = 0;
   let remainder = "";
-  const seenEventIds = new Set<string>();
-
   const existing = await readExistingEvents(session.eventsFile);
-  for (const event of existing) {
-    seenEventIds.add(event.id);
+  const historySelection = selectAttachHistory(existing, history, options.allHistory ?? false);
+  const seenEventIds = historySelection.seenEventIds;
+  for (const event of historySelection.visible) {
     const rendered = formatTimelineEvent(event);
     if (rendered) process.stdout.write(`${rendered}\n`);
   }
@@ -1472,13 +1512,23 @@ async function attach(requestedId?: string): Promise<void> {
   }
 
   const sessionSelector = requestedId ?? session.metadata.sessionId.slice(0, 8);
-  process.stdout.write("─".repeat(60) + "\n");
+  if (historySelection.visible.length > 0) process.stdout.write("─".repeat(60) + "\n");
   if (!session.active) {
-    process.stdout.write(formatAttachGuidance(sessionSelector, existing, false));
+    process.stdout.write(formatAttachGuidance(sessionSelector, {
+      recordedTotal: existing.length,
+      narratedTotal: historySelection.narratedTotal,
+      narratedShown: historySelection.visible.length,
+      active: false,
+    }));
     return;
   }
 
-  process.stdout.write(formatAttachGuidance(sessionSelector, existing, true));
+  process.stdout.write(formatAttachGuidance(sessionSelector, {
+    recordedTotal: existing.length,
+    narratedTotal: historySelection.narratedTotal,
+    narratedShown: historySelection.visible.length,
+    active: true,
+  }));
 
   while (true) {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
@@ -1537,7 +1587,7 @@ async function main(): Promise<void> {
     if (command === "sessions") return await listSessions();
     if (command === "doctor") return await doctor();
     if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);
-    if (command === "attach") return await attach(sessionId);
+    if (command === "attach") return await attach(options);
     if (command === "inspect") return await inspect(options);
     if (command === "debrief") return await debrief(sessionId);
     usage();

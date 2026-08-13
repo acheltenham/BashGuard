@@ -12,7 +12,7 @@ When the BashGuard Pi extension is loaded before a session starts:
 - stores the event stream locally as append-only JSONL;
 - uses a per-session ownership lock so redundant BashGuard extension instances do not record duplicate events;
 - discovers active and completed BashGuard-recorded sessions;
-- follows a session from another terminal with `bashguard attach`;
+- follows a session from another terminal with `bashguard attach`, using bounded narrated startup history while continuing to show every new narrated event;
 - inspects individual events by sequence or event ID prefix;
 - filters recorded evidence by activity category, exact event type, and case-insensitive text search, with latest-N/all controls and JSONL export;
 - reports missing, redacted, truncated, and capture-gap evidence;

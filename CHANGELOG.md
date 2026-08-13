@@ -4,6 +4,10 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
+### Added
+
+- `bashguard attach` now defaults to the latest 50 narrated historical events, supports `--history N`, `--history 0`, and `--all-history`, and continues to display every new narrated event.
+
 ## 0.2.0 - 2026-08-13
 
 ### Added

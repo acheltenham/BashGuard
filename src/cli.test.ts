@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent } from "./cli.ts";
+import { buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, selectAttachHistory } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -98,6 +98,9 @@ test("parseCommandArgs accepts positional and --session selectors", () => {
   assert.deepEqual(parseCommandArgs(["session", "list"]), { command: "sessions" });
   assert.deepEqual(parseCommandArgs(["attach", "1"]), { command: "attach", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["attach", "--session", "1"]), { command: "attach", sessionId: "1" });
+  assert.deepEqual(parseCommandArgs(["attach", "1", "--history", "100"]), { command: "attach", sessionId: "1", attachHistory: 100 });
+  assert.deepEqual(parseCommandArgs(["attach", "1", "--history", "0"]), { command: "attach", sessionId: "1", attachHistory: 0 });
+  assert.deepEqual(parseCommandArgs(["attach", "1", "--all-history"]), { command: "attach", sessionId: "1", allHistory: true });
   assert.deepEqual(parseCommandArgs(["inspect", "--session", "1", "--event", "evt-1"]), { command: "inspect", sessionId: "1", eventId: "evt-1" });
   assert.deepEqual(parseCommandArgs(["inspect", "1", "list", "events"]), { command: "inspect", sessionId: "1" });
   assert.deepEqual(parseCommandArgs(["inspect", "1", "--activity", "shell", "--activity", "risk", "--type", "capture.gap", "--grep", "deploy", "--limit", "200", "--format", "jsonl"]), {
@@ -120,6 +123,8 @@ test("parseCommandArgs rejects missing filter values and unknown options", () =>
   assert.throws(() => parseCommandArgs(["inspect", "1", "--activity"]), /`--activity` requires a value/);
   assert.throws(() => parseCommandArgs(["inspect", "1", "--grep"]), /`--grep` requires a value/);
   assert.throws(() => parseCommandArgs(["inspect", "1", "--unknown"]), /Unknown option: --unknown/);
+  assert.throws(() => parseCommandArgs(["attach", "1", "--history"]), /`--history` requires a value/);
+  assert.throws(() => parseCommandArgs(["inspect", "1", "--history", "2"]), /attach history options can only be used with `bashguard attach`/);
 });
 
 test("parsePiListPackages keeps configured sources and ignores resolved checkout paths", () => {
@@ -386,15 +391,35 @@ test("formatTimelineEvent prefixes rendered events with sequence and event-id pr
   );
 });
 
-test("formatAttachGuidance explains attach output and next CLI actions", () => {
-  const output = formatAttachGuidance("2", [
-    event(1, "session.started"),
-    event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "npm test" } } }),
-    event(3, "message.created"),
-  ], true);
+test("selectAttachHistory bounds only narrated startup events and preserves all event IDs", () => {
+  const events = [
+    event(1, "session.started", { id: "evt-1" }),
+    event(2, "message.started", { id: "evt-2" }),
+    event(3, "tool.requested", { id: "evt-3", toolName: "read", payload: { input: { path: "one.md" } } }),
+    event(4, "message.ended", { id: "evt-4" }),
+    event(5, "tool.requested", { id: "evt-5", toolName: "read", payload: { input: { path: "two.md" } } }),
+  ];
 
-  assert.match(output, /2 narrated events currently recorded/);
-  assert.match(output, /1 recorded event has no default timeline narration/);
+  const bounded = selectAttachHistory(events, 2, false);
+  assert.deepEqual(bounded.visible.map((item) => item.id), ["evt-3", "evt-5"]);
+  assert.equal(bounded.narratedTotal, 3);
+  assert.deepEqual([...bounded.seenEventIds], ["evt-1", "evt-2", "evt-3", "evt-4", "evt-5"]);
+
+  assert.deepEqual(selectAttachHistory(events, 0, false).visible, []);
+  assert.deepEqual(selectAttachHistory(events, 50, true).visible.map((item) => item.id), ["evt-1", "evt-3", "evt-5"]);
+});
+
+test("formatAttachGuidance explains bounded history and next CLI actions", () => {
+  const output = formatAttachGuidance("2", {
+    recordedTotal: 103,
+    narratedTotal: 78,
+    narratedShown: 50,
+    active: true,
+  });
+
+  assert.match(output, /Showing latest 50 of 78 narrated historical events/);
+  assert.match(output, /25 recorded events have no default timeline narration/);
+  assert.match(output, /--all-history/);
   assert.match(output, /bashguard inspect 2 list events/);
   assert.match(output, /bashguard inspect 2 --event <sequence-or-event-id-prefix>/);
   assert.match(output, /bashguard debrief 2/);

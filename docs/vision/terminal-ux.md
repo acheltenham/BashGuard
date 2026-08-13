@@ -23,7 +23,8 @@ bashguard attach [session-id]
 
 Purpose:
 
-- follow a running Pi session;
+- show a bounded recent narrated history, defaulting to the latest 50 events;
+- follow every new narrated event in a running Pi session;
 - narrate meaningful activity;
 - surface warnings and approval context;
 - show current state and capture completeness;
@@ -45,7 +46,7 @@ Footer
   commands · files · warnings · checkpoints · capture completeness
 ```
 
-Live Mode should avoid raw payloads, noisy lifecycle events, and continuously scrolling command output.
+Live Mode should avoid raw payloads, noisy lifecycle events, full-history terminal floods, and continuously scrolling command output. Users can request a custom startup history, no startup history, or explicit full history; complete evidence remains available through inspect and JSONL export.
 
 ### Open Mode
 

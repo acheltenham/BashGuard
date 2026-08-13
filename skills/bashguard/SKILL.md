@@ -24,6 +24,9 @@ Attach to a session timeline:
 
 ```bash
 bashguard attach <session-selector>
+bashguard attach <session-selector> --history 100
+bashguard attach <session-selector> --history 0
+bashguard attach <session-selector> --all-history
 bashguard attach --session <session-selector>
 ```
 
@@ -108,6 +111,8 @@ pi install -l git:github.com/acheltenham/BashGuard
 `bashguard doctor` is read-only. Use it to troubleshoot CLI availability, session storage, installed Pi package source, update commands, and next steps before suggesting install/update changes.
 
 BashGuard may surface non-blocking risk notices for a small explicit set of risky shell command patterns. Debriefs include a `Risk notices` count, and risk notes can include event sequence, cwd, command-result evidence, a plain-language risk explanation, and an `--event` inspect hint. Debriefs can also include a `Next inspect commands` section that collects useful follow-up `bashguard inspect` commands for recorded events. Debriefs can include a `GitHub activity` section for observed recorded shell commands such as `git push`, `gh pr create`, `gh pr merge`, and `gh run watch/view`; treat these as recorded command/output evidence, not live GitHub state. Debriefs can also include an `Observed shell activity` section containing provider-neutral recorded BashGuard command/output pairs. This can cover arbitrary platforms and technology stacks; treat it as recorded evidence, not live remote state or proof that a command caused a change. Debriefs can also include Git status before/after snapshots and `File tool activity` for observed read, edit, and write-tool events; `inspect` shows the same file-tool meanings for individual events and Git snapshot details for Git status events. Treat file activity as tool evidence only: `write tool` may create, overwrite, or leave content unchanged, and BashGuard should not claim create/overwrite/delete impact without before/after filesystem or Git evidence. Treat Git status snapshots as session-level before/after evidence. They may include branch, worktree path, changed-file status, line counts, changed line ranges, an observed matching file-tool event when a recorded edit/write-tool path matches a changed Git path, and a correlation confidence label such as `direct path match`. Debriefs may also note that risky shell commands occurred before a shutdown Git snapshot that showed changes with `Correlation confidence: temporal proximity only`. Because agent sessions may use separate Git worktrees rather than only branches, include worktree context when explaining snapshots. Do not treat a snapshot, matching file-tool event, or temporal proximity note as proof that a specific event caused a specific diff. Treat risk notices as observation-only review notes, not as evidence that BashGuard warned, approved, blocked, or interrupted execution.
+
+Attach defaults to the latest 50 narrated historical events and then follows every new narrated event. `--history N` changes only startup history, `--history 0` follows from now, and `--all-history` restores full historical narration. Complete recorded evidence remains available through inspect/JSONL.
 
 Prefer session `#` selectors from `bashguard sessions` when available. Unique session prefixes are also acceptable. If `sessions` shows a `NAME` column, use it only as human context; selectors and prefixes remain the command inputs. Do not ask users to copy middle-truncated display IDs.
 

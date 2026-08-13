@@ -14,6 +14,7 @@ When the BashGuard Pi extension is loaded before a session starts:
 - discovers active and completed BashGuard-recorded sessions;
 - follows a session from another terminal with `bashguard attach`;
 - inspects individual events by sequence or event ID prefix;
+- filters recorded evidence by activity category, exact event type, and case-insensitive text search, with latest-N/all controls and JSONL export;
 - reports missing, redacted, truncated, and capture-gap evidence;
 - produces active or completed-session debriefs;
 - provides a complementary Pi skill so users can ask Pi to list, inspect, and debrief the recorded evidence from inside a Pi session;

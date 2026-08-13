@@ -96,6 +96,9 @@ bashguard doctor
 bashguard attach 1
 bashguard inspect 1
 bashguard inspect 1 --event 1
+bashguard inspect 1 --activity shell
+bashguard inspect 1 --activity shell --grep test
+bashguard inspect 1 --all --format jsonl
 bashguard debrief 1
 ```
 
@@ -181,6 +184,18 @@ Confirm:
 - inspectable events are listed;
 - the footer says `Inspect by sequence or event ID prefix`;
 - both a sequence example and event ID prefix example are shown.
+
+### `bashguard inspect 1 --activity <kind>`
+
+Confirm:
+
+- `--activity list` shows all documented categories;
+- the default displays the latest 50 matches and reports the total;
+- `--grep` searches recorded event evidence case-insensitively;
+- `--limit` changes the latest-match count and `--all` returns all matches;
+- `--format jsonl` emits one parseable normalized event per line without headings or footers;
+- `--type` filters exact recorded event types;
+- unknown activities and incompatible options produce actionable errors.
 
 ### `bashguard inspect 1 --event <selector>`
 

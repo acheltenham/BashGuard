@@ -62,6 +62,8 @@ Exit criteria:
 
 ## Phase 2: Investigation and Debrief
 
+**Implemented foundation:** individual event inspection, evidence completeness, debrief review sections, activity/type filters, case-insensitive recorded-evidence search, latest-N/all controls, and JSONL export. Interactive timeline browsing and expandable details remain planned.
+
 Goal: make a Pi session understandable after it happens.
 
 - `bashguard open <session-id>`;

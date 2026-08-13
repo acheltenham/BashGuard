@@ -6,6 +6,7 @@ All notable project changes will be recorded here.
 
 ### Added
 
+- `bashguard inspect` now supports provider-neutral evidence filtering by activity category, exact event type, and case-insensitive search, with latest-N/all controls and clean JSONL export.
 - Added the MIT `LICENSE`, public security boundaries in `SECURITY.md`, and README links for public-repository readiness.
 - README now documents using the bundled BashGuard skill from inside Pi as well as using the CLI from a second terminal.
 - `bashguard debrief` now includes an evidence-based `GitHub activity` section for observed `git push`, `gh pr create`, `gh pr merge`, and `gh run watch/view` commands recorded in the session.

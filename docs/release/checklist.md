@@ -63,11 +63,12 @@ Confirm:
 - `doctor` reports CLI path, package root, data dir, Pi package status, and next steps;
 - `sessions` output includes `#`, `SESSION`, `NAME`, `REPOSITORY`, and `UPDATED`;
 - with two simultaneous active sessions in an actual TTY, selector-less attach shows an active-only structured-text picker and accepts a non-first displayed global number; selector-less inspect/debrief show all discovered recorded sessions;
-- selector-less commands auto-select a sole eligible session, while explicit numeric, exact-ID, and unique-prefix selectors bypass the picker; exact IDs take precedence over numeric row numbers, which otherwise resolve against current discovery order;
-- piped or redirected ambiguous commands never prompt, exit nonzero, and list eligible snapshot-local numbers with durable globally unique prefix/full-ID commands; a copied command still selects the displayed session after reordering or when a numeric ID collides with another row number;
+- selector-less commands auto-select a sole eligible session, while explicit selectors bypass the picker; positional/`--session` values resolve exact ID, canonical positive decimal row, then unique prefix against the current snapshot;
+- piped or redirected ambiguous commands never prompt, exit nonzero, and list eligible snapshot-local rows with shell-quoted exact `--session-id=<full-session-id>` commands; a copied command still selects the displayed session after reordering and future prefix collisions, but fails not-found after target removal;
 - PTY-allocating automation is treated as interactive and uses an explicit selector to avoid prompting; explicit selectors are used for all automation;
 - Enter has no default, invalid input retries, and EOF/`Ctrl+C` cancels concisely, with no prompt timeout;
-- unknown inspect activity and missing `--session` or `--event` values fail before session selection;
+- unknown inspect activity, missing `--session`, `--session-id`, or `--event` values, and mixed exact/snapshot selectors fail before session selection;
+- rows and attach headers contain no raw C0/C1 or Unicode format controls while preserving ordinary Unicode letters and emoji;
 - `attach 1` shows an evidence-grounded state/activity/capture/freshness snapshot;
 - default `attach 1` bounds narrated startup history, `--history 0` skips it, and `--all-history` restores it;
 - `inspect 1` lists events with sequence and event ID prefix examples;

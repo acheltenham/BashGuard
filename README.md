@@ -43,6 +43,7 @@ bashguard attach 1 --history 100
 bashguard attach 1 --history 0
 bashguard attach 1 --all-history
 bashguard attach --session 1
+bashguard attach --session-id=<full-session-id>
 bashguard inspect
 bashguard inspect 1
 bashguard inspect 1 --event <event-id-prefix-or-sequence>
@@ -52,7 +53,7 @@ bashguard debrief
 bashguard debrief 1
 ```
 
-- `sessions`, `session list`, and `sessions list` list recorded sessions with a snapshot-local `#` selector, durable copyable session prefix, and a session name when Pi exposes one. Without a selector, `attach` automatically chooses its sole eligible session or, when multiple sessions are eligible and both stdin and stdout are TTYs, asks for an exact displayed number. `attach` prefers active sessions and shows only active candidates when any are active; if none are active, all discovered completed sessions are eligible. Selector-less `inspect` and `debrief` consider all discovered recorded sessions, active and completed. Exact session IDs take precedence over numeric row selectors; otherwise numeric selectors resolve against the current discovery order. Exact IDs and globally unique ID prefixes remain durable when ordering changes. All explicit forms bypass the picker. Discovery requires a valid, unique metadata session identity; every entry sharing a duplicate identity is excluded from listing and selection.
+- `sessions`, `session list`, and `sessions list` list recorded sessions with a snapshot-local `#` selector, a prefix unique within that discovery snapshot, and a session name when Pi exposes one. Without a selector, `attach` automatically chooses its sole eligible session or, when multiple sessions are eligible and both stdin and stdout are TTYs, asks for an exact displayed number. `attach` prefers active sessions and shows only active candidates when any are active; if none are active, all discovered completed sessions are eligible. Selector-less `inspect` and `debrief` consider all discovered recorded sessions, active and completed. Positional and `--session` selectors resolve exact ID first, then canonical positive decimal row number, then unique prefix against the current snapshot. `--session-id` is exact-only and bypasses row/prefix fallback. All explicit forms bypass the picker. Discovery requires a valid, unique metadata session identity; every entry sharing a duplicate identity is excluded from listing and selection.
 - `doctor` prints a read-only troubleshooting report for CLI path, session storage, installed Pi package source, update command, and next steps.
 - `attach` follows an active session or renders a completed session timeline. It begins with a grounded status snapshot covering session state, correlated current/last activity, evidence wording, capture limitations, event count, and freshness. Startup history defaults to the latest 50 narrated events; use `--history N`, `--history 0`, or `--all-history`. Every newly appended narrated event is still displayed. Raw events and complete JSONL remain available through `inspect`. Risk notices are explicitly non-blocking. See [Live attach history and status](docs/cli/live-attach.md).
 - `inspect` without `--event` lists the most recent inspectable events for a session and shows the next command. `inspect <session> list events` is accepted as an explicit list intent. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or an unambiguous sequence; repeated sequences require an event ID prefix. Activity/type/search filters default to the latest 50 matches, support `--limit` or `--all`, and can emit clean JSONL for scripts. It includes file-tool meaning for read/edit/write-tool events and Git snapshot details for Git status events. See [Evidence filtering and export](docs/cli/evidence-filtering.md).
@@ -203,11 +204,11 @@ Use BashGuard to inspect the failed shell command and explain what evidence is a
 Use BashGuard to debrief session 1 and list anything worth reviewing.
 ```
 
-Pi can use the same local CLI and recorded session store to answer those questions. The answers remain limited to evidence BashGuard recorded; they do not recover older unrecorded sessions or query GitHub/deployment providers live. Use an explicit selector for all automation and agent-driven commands; prefer the copyable unique ID prefix from `bashguard sessions` when the command may run after discovery ordering changes.
+Pi can use the same local CLI and recorded session store to answer those questions. The answers remain limited to evidence BashGuard recorded; they do not recover older unrecorded sessions or query GitHub/deployment providers live. Use an explicit selector for all automation and agent-driven commands. Use `--session-id=<full-session-id>` when the command must retain its identity across later discovery, reordering, or newly colliding sessions; list numbers and prefixes describe the current discovery snapshot.
 
 ### Use BashGuard from a second terminal
 
-In another terminal, list and inspect recorded BashGuard sessions. Selector-less `attach`, `inspect`, and `debrief` auto-select a sole eligible session. With multiple eligible sessions, they open a structured-text numbered picker only when both stdin and stdout are TTYs. Enter has no default: enter an exact displayed number; invalid input retries, while EOF or `Ctrl+C` cancels concisely. Non-TTY scripts, pipes, and redirected output never prompt; they exit nonzero with eligible rows and copyable globally unique prefix/full-ID commands. Automation that allocates a PTY is interactive by contract and can wait for input, so all automation should pass an explicit selector. With no recorded sessions, the CLI instead reports its existing no-sessions error. Picker numbers retain their global positions within the single displayed discovery snapshot and are not locally renumbered, but can change after metadata or ordering changes; an explicit number resolves against the current discovery order unless it exactly matches a session ID. Displayed ID prefixes remain globally unique against the full snapshot, including completed sessions hidden from an active-only attach picker, and a globally unique prefix or full ID is the durable copyable remediation. Candidate rows sanitize untrusted fields to one line, while remediation commands preserve and shell-escape the raw selector for Bash/Zsh.
+In another terminal, list and inspect recorded BashGuard sessions. Selector-less `attach`, `inspect`, and `debrief` auto-select a sole eligible session. With multiple eligible sessions, they open a structured-text numbered picker only when both stdin and stdout are TTYs. Enter has no default: enter an exact displayed number; invalid input retries, while EOF or `Ctrl+C` cancels concisely. Non-TTY scripts, pipes, and redirected output never prompt; they exit nonzero with eligible rows and shell-quoted `--session-id=<full-session-id>` commands. Automation that allocates a PTY is interactive by contract and can wait for input, so all automation should pass an explicit selector. With no recorded sessions, the CLI instead reports its existing no-sessions error. Picker numbers retain their global positions within the single displayed discovery snapshot and are not locally renumbered, but can change after metadata or ordering changes; an explicit number resolves against the current discovery order unless it exactly matches a session ID. Displayed ID prefixes are unique against the full current snapshot, including completed sessions hidden from an active-only attach picker, but future sessions can collide with them. Generated remediation instead uses exact-only `--session-id` with the complete raw ID, shell-quoted as one Bash/Zsh argument; removing that exact session makes the command fail rather than selecting a prefix match. Candidate rows and headers sanitize C0/C1 and Unicode format controls to preserve one-line terminal structure while retaining ordinary Unicode.
 
 If the `bashguard` CLI is on your `PATH`, use:
 
@@ -274,12 +275,16 @@ npm exec -- node --experimental-strip-types src/cli.ts inspect 1 --event <event-
 npm exec -- node --experimental-strip-types src/cli.ts debrief 1
 ```
 
-Explicit positional IDs and prefixes remain supported. The `--session` forms are also available; use the single-argument `--session=<value>` form for IDs or prefixes that begin with `--` or equal the inspect aliases `list` or `events`:
+Explicit positional IDs and prefixes remain supported. Positional and `--session` values resolve against the current discovery snapshot: exact ID first, then a canonical positive decimal row number, then a unique prefix. Forms such as `+1`, `01`, and `1e3` are not row numbers. Use the single-argument `--session=<value>` form for IDs or prefixes that begin with `--` or equal the inspect aliases `list` or `events`.
+
+For durable exact identity, use `--session-id=<full-session-id>`. It performs only a full metadata ID match—never row or prefix fallback—and cannot be combined with a positional or `--session` selector. The equals form can carry raw IDs beginning with `--`; generated non-TTY remediation shell-quotes the whole argument when needed:
 
 ```bash
 bashguard attach --session 1
 bashguard inspect --session=--example-session --event <event-id-prefix-or-sequence>
 bashguard debrief --session=events
+bashguard inspect --session-id=<full-session-id>
+bashguard attach --session-id=--example-session
 ```
 
 Check installed Pi packages with:

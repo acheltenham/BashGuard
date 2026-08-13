@@ -2,13 +2,37 @@
 
 `bashguard attach` is the second-terminal live companion for a BashGuard-recorded Pi session.
 
-By default it shows the latest 50 narrated events that already exist when attach starts, then displays every new narrated event as it is appended.
+Attach begins with an evidence-grounded status snapshot. By default it then shows the latest 50 narrated events that already exist when attach starts and displays every new narrated event as it is appended.
 
 ```bash
 bashguard attach 1
 ```
 
 The startup limit changes terminal presentation only. It does not remove, truncate, or rewrite recorded JSONL evidence.
+
+## Status snapshot
+
+Active sessions show:
+
+```text
+Live status
+State             active
+Current activity  Running · npm test
+Evidence          request recorded; completion not recorded yet
+Capture           No recorded capture limitations
+Events            42
+Last observed     2s ago
+```
+
+`Current activity` appears only when BashGuard recorded a tool request with a `toolCallId` and has not recorded a later matching completion in the latest recorded session lifecycle segment. It means completion evidence is absent; it does not prove the tool is still executing. Older requests before a later `session.started` event are not treated as current.
+
+If there is no correlated outstanding request, attach shows `Last activity` from the latest narrated event and labels it `recorded event`. Completed sessions always use `Last activity` and a `Session status` heading; activity projection stops at the latest shutdown in the current lifecycle segment so post-shutdown legacy appends do not masquerade as completed-session activity.
+
+Capture is summarized from recorded `capture.gap` events and event-level missing, redacted, and truncated metadata. Empty sessions say `No capture metadata recorded`. Freshness uses the latest event timestamp and falls back to `unknown` when unavailable or malformed.
+
+Long or multiline activity is compacted to one bounded status line; inspect/JSONL retains the fuller recorded evidence subject to original capture limits.
+
+The snapshot is calculated when attach starts. This first Phase 1 slice does not redraw the block while new events arrive; the timeline remains the live-updating surface. Attach drains final recorded appends and follows a replacement recorder when replacement evidence is visible during shutdown confirmation. An authoritative shutdown otherwise ends attach; a later restart requires running attach again.
 
 ## History options
 

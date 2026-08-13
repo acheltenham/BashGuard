@@ -59,6 +59,7 @@ Confirm:
 
 - `doctor` reports CLI path, package root, data dir, Pi package status, and next steps;
 - `sessions` output includes `#`, `SESSION`, `NAME`, `REPOSITORY`, and `UPDATED`;
+- `attach 1` shows an evidence-grounded state/activity/capture/freshness snapshot;
 - default `attach 1` bounds narrated startup history, `--history 0` skips it, and `--all-history` restores it;
 - `inspect 1` lists events with sequence and event ID prefix examples;
 - `debrief 1` renders evidence completeness and next inspect commands when applicable.

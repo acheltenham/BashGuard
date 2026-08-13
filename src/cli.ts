@@ -5,6 +5,7 @@ import { createReadStream, existsSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 export type SessionMetadata = {
@@ -278,8 +279,41 @@ async function readExistingEvents(eventsFile: string): Promise<BashGuardEvent[]>
   }
 }
 
-function sessionHasShutdown(events: BashGuardEvent[]): boolean {
-  return events.some((event) => event.type === "session.shutdown");
+async function readAttachSnapshot(eventsFile: string): Promise<{ events: BashGuardEvent[]; offset: number; remainder: string }> {
+  try {
+    const bytes = await readFile(eventsFile);
+    const finalNewline = bytes.lastIndexOf(0x0a);
+    const completeByteLength = finalNewline + 1;
+    const completeText = bytes.subarray(0, completeByteLength).toString("utf8");
+    return {
+      events: parseJsonlEvents(completeText),
+      offset: completeByteLength,
+      remainder: "",
+    };
+  } catch {
+    return { events: [], offset: 0, remainder: "" };
+  }
+}
+
+function latestSessionLifecycle(events: BashGuardEvent[]): BashGuardEvent | undefined {
+  return [...events].reverse().find((event) => event.type === "session.started" || event.type === "session.shutdown");
+}
+
+function latestSessionLifecycleIsShutdown(events: BashGuardEvent[]): boolean {
+  return latestSessionLifecycle(events)?.type === "session.shutdown";
+}
+
+function metadataProvesRestartAfterShutdown(metadata: SessionMetadata, events: BashGuardEvent[]): boolean {
+  const lifecycle = latestSessionLifecycle(events);
+  if (lifecycle?.type !== "session.shutdown") return false;
+  const metadataStart = Date.parse(metadata.startedAt ?? "");
+  const shutdownAt = Date.parse(lifecycle.timestamp);
+  return Number.isFinite(metadataStart) && Number.isFinite(shutdownAt) && metadataStart > shutdownAt;
+}
+
+function sessionSnapshotIsActive(metadata: SessionMetadata, events: BashGuardEvent[]): boolean {
+  if (!processIsAlive(metadata.processId)) return false;
+  return !latestSessionLifecycleIsShutdown(events) || metadataProvesRestartAfterShutdown(metadata, events);
 }
 
 export async function discoverSessions(root = getDataRoot()): Promise<SessionSummary[]> {
@@ -300,13 +334,12 @@ export async function discoverSessions(root = getDataRoot()): Promise<SessionSum
     try {
       const info = await stat(eventsFile);
       const events = await readExistingEvents(eventsFile);
-      const shutdownRecorded = sessionHasShutdown(events);
       return {
         metadata,
         directory,
         eventsFile,
         modifiedAt: info.mtimeMs,
-        active: !shutdownRecorded && processIsAlive(metadata.processId),
+        active: sessionSnapshotIsActive(metadata, events),
       };
     } catch {
       return undefined;
@@ -584,6 +617,93 @@ export function formatInspectableEvents(sessionSelector: string, events: BashGua
   lines.push(`  bashguard inspect ${sessionSelector} --event ${firstSelector ?? "<sequence-or-event-id-prefix>"}`);
   if (firstSelector !== firstEventId) lines.push(`  bashguard inspect ${sessionSelector} --event ${firstEventId ?? "<event-id-prefix>"}`);
   return `${lines.join("\n")}\n`;
+}
+
+export type AttachStatus = {
+  state: "active" | "complete";
+  activityLabel: "Current activity" | "Last activity";
+  activity: string;
+  evidence: string;
+  capture: string;
+  eventCount: number;
+  lastObserved: string;
+};
+
+function relativeEventAge(timestamp: string | undefined, now: number): string {
+  if (!timestamp) return "unknown";
+  const observedAt = Date.parse(timestamp);
+  if (!Number.isFinite(observedAt)) return "unknown";
+  const seconds = Math.max(0, Math.round((now - observedAt) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.round(minutes / 60)}h ago`;
+}
+
+function formatCaptureIssue(count: number, singular: string, plural = `${singular}s`): string | undefined {
+  return count > 0 ? `${count} ${count === 1 ? singular : plural}` : undefined;
+}
+
+export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now = Date.now()): AttachStatus {
+  const normalized = events.map(normalizeEvent);
+  const latestStartIndex = normalized.findLastIndex((event) => event.type === "session.started");
+  const currentSessionTail = latestStartIndex >= 0 ? normalized.slice(latestStartIndex) : normalized;
+  const latestShutdownIndex = currentSessionTail.findLastIndex((event) => event.type === "session.shutdown");
+  const restartPending = active && latestSessionLifecycle(currentSessionTail)?.type === "session.shutdown";
+  const currentSessionEvents = restartPending
+    ? currentSessionTail.slice(latestShutdownIndex)
+    : !active && latestShutdownIndex >= 0
+      ? currentSessionTail.slice(0, latestShutdownIndex + 1)
+      : currentSessionTail;
+  const outstanding = new Map<string, BashGuardEvent>();
+  for (const event of currentSessionEvents) {
+    const toolCallId = toolCallIdFor(event);
+    if (!toolCallId) continue;
+    if (event.type === "tool.requested") outstanding.set(toolCallId, event);
+    if (event.type === "tool.completed") outstanding.delete(toolCallId);
+  }
+
+  const currentRequest = active ? Array.from(outstanding.values()).at(-1) : undefined;
+  const lastNarrated = [...currentSessionEvents].reverse().find((event) => renderEvent(event) !== undefined);
+  const activityEvent = currentRequest ?? lastNarrated;
+  const captureGaps = normalized.filter((event) => event.type === "capture.gap").length;
+  const nonGapEvents = normalized.filter((event) => event.type !== "capture.gap");
+  const missingEvents = nonGapEvents.filter((event) => (event.capture?.missing.length ?? 0) > 0).length;
+  const redactedEvents = normalized.filter((event) => (event.capture?.redacted.length ?? 0) > 0).length;
+  const truncatedEvents = normalized.filter((event) => (event.capture?.truncated.length ?? 0) > 0).length;
+  const captureIssues = [
+    formatCaptureIssue(captureGaps, "capture gap"),
+    formatCaptureIssue(missingEvents, "event with missing fields", "events with missing fields"),
+    formatCaptureIssue(redactedEvents, "redacted event"),
+    formatCaptureIssue(truncatedEvents, "truncated event"),
+  ].filter((item): item is string => Boolean(item));
+
+  return {
+    state: active ? "active" : "complete",
+    activityLabel: currentRequest ? "Current activity" : "Last activity",
+    activity: activityEvent ? renderEvent(activityEvent) ?? activityEvent.type : "No narrated activity recorded",
+    evidence: currentRequest ? "request recorded; completion not recorded yet" : activityEvent ? "recorded event" : "no narrated event evidence",
+    capture: normalized.length === 0 ? "No capture metadata recorded" : captureIssues.length > 0 ? `Partial · ${captureIssues.join(" · ")}` : "No recorded capture limitations",
+    eventCount: normalized.length,
+    lastObserved: relativeEventAge(normalized.at(-1)?.timestamp, now),
+  };
+}
+
+function compactStatusValue(value: string): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > 180 ? `${compact.slice(0, 179)}…` : compact;
+}
+
+export function formatAttachStatus(status: AttachStatus): string {
+  return `${[
+    status.state === "active" ? "Live status" : "Session status",
+    formatField("State", status.state),
+    formatField(status.activityLabel, compactStatusValue(status.activity)),
+    formatField("Evidence", status.evidence),
+    formatField("Capture", status.capture),
+    formatField("Events", status.eventCount),
+    formatField("Last observed", status.lastObserved),
+  ].filter((line): line is string => Boolean(line)).join("\n")}\n`;
 }
 
 export type AttachHistorySelection = {
@@ -1488,37 +1608,36 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
   const history = options.attachHistory ?? 50;
   const session = await chooseSession(requestedId);
   const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
+  const snapshot = await readAttachSnapshot(session.eventsFile);
+  const existing = snapshot.events;
+  const active = sessionSnapshotIsActive(session.metadata, existing);
 
-  process.stdout.write(`BashGuard · ${session.active ? "live" : "completed"}\n`);
+  process.stdout.write(`BashGuard · ${active ? "live" : "completed"}\n`);
   process.stdout.write(`Session ${session.metadata.sessionId}\n`);
   process.stdout.write(`Repo    ${repo}\n`);
   if (session.metadata.cwd) process.stdout.write(`Cwd     ${session.metadata.cwd}\n`);
   process.stdout.write("─".repeat(60) + "\n");
 
-  let offset = 0;
-  let remainder = "";
-  const existing = await readExistingEvents(session.eventsFile);
+  let offset = snapshot.offset;
+  let remainder = snapshot.remainder;
+  let decoder = new StringDecoder("utf8");
   const historySelection = selectAttachHistory(existing, history, options.allHistory ?? false);
   const seenEventIds = historySelection.seenEventIds;
+  process.stdout.write(formatAttachStatus(buildAttachStatus(existing, active)));
+  process.stdout.write("─".repeat(60) + "\n");
   for (const event of historySelection.visible) {
     const rendered = formatTimelineEvent(event);
     if (rendered) process.stdout.write(`${rendered}\n`);
   }
 
-  try {
-    offset = (await stat(session.eventsFile)).size;
-  } catch {
-    offset = 0;
-  }
-
   const sessionSelector = requestedId ?? session.metadata.sessionId.slice(0, 8);
   if (historySelection.visible.length > 0) process.stdout.write("─".repeat(60) + "\n");
-  if (!session.active) {
+  if (!active) {
     process.stdout.write(formatAttachGuidance(sessionSelector, {
       recordedTotal: existing.length,
       narratedTotal: historySelection.narratedTotal,
       narratedShown: historySelection.visible.length,
-      active: false,
+      active,
     }));
     return;
   }
@@ -1527,9 +1646,10 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     recordedTotal: existing.length,
     narratedTotal: historySelection.narratedTotal,
     narratedShown: historySelection.visible.length,
-    active: true,
+    active,
   }));
 
+  let followedProcessId = session.metadata.processId;
   while (true) {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
 
@@ -1543,32 +1663,45 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     if (info.size < offset) {
       offset = 0;
       remainder = "";
+      decoder = new StringDecoder("utf8");
     }
     if (info.size === offset) {
-      if (!processIsAlive(session.metadata.processId)) {
+      if (!processIsAlive(followedProcessId)) {
+        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+        const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
+        if (replacementMetadata && processIsAlive(replacementMetadata.processId)) {
+          followedProcessId = replacementMetadata.processId;
+          continue;
+        }
+        try {
+          if ((await stat(session.eventsFile)).size !== offset) continue;
+        } catch {
+          continue;
+        }
         process.stdout.write("Pi session ended.\n");
         return;
       }
       continue;
     }
 
-    const stream = createReadStream(session.eventsFile, { start: offset, end: info.size - 1, encoding: "utf8" });
+    const stream = createReadStream(session.eventsFile, { start: offset, end: info.size - 1 });
     let chunk = "";
-    for await (const piece of stream) chunk += piece;
+    for await (const piece of stream) chunk += decoder.write(piece as Buffer);
     offset = info.size;
 
     const combined = remainder + chunk;
     const lines = combined.split("\n");
     remainder = lines.pop() ?? "";
 
-    let shutdownSeen = false;
+    let latestLifecycleInBatch: "started" | "shutdown" | undefined;
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as BashGuardEvent;
         if (seenEventIds.has(event.id)) continue;
         seenEventIds.add(event.id);
-        if (event.type === "session.shutdown") shutdownSeen = true;
+        if (event.type === "session.started") latestLifecycleInBatch = "started";
+        if (event.type === "session.shutdown") latestLifecycleInBatch = "shutdown";
         const rendered = formatTimelineEvent(event);
         if (rendered) process.stdout.write(`${rendered}\n`);
       } catch {
@@ -1576,7 +1709,20 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
       }
     }
 
-    if (shutdownSeen) return;
+    if (latestLifecycleInBatch === "shutdown") {
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
+      if (replacementMetadata && replacementMetadata.processId !== followedProcessId && processIsAlive(replacementMetadata.processId)) {
+        followedProcessId = replacementMetadata.processId;
+        continue;
+      }
+      try {
+        if ((await stat(session.eventsFile)).size !== offset) continue;
+      } catch {
+        continue;
+      }
+      return;
+    }
   }
 }
 

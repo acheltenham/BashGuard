@@ -51,7 +51,7 @@ bashguard debrief 1
 
 - `sessions`, `session list`, and `sessions list` list recent and active recorded sessions with a `#` selector, copyable session prefix, and a session name when Pi exposes one.
 - `doctor` prints a read-only troubleshooting report for CLI path, session storage, installed Pi package source, update command, and next steps.
-- `attach` follows an active session or renders a completed session timeline. It accepts a session number, full session ID, unique session prefix, or `--session`. Startup history defaults to the latest 50 narrated events; use `--history N`, `--history 0`, or `--all-history`. Every newly appended narrated event is still displayed. The footer explains what was shown and points to inspect/debrief; raw events and complete JSONL remain available through `inspect`. Risk notices are explicitly non-blocking. See [Live attach history](docs/cli/live-attach.md).
+- `attach` follows an active session or renders a completed session timeline. It begins with a grounded status snapshot covering session state, correlated current/last activity, evidence wording, capture limitations, event count, and freshness. Startup history defaults to the latest 50 narrated events; use `--history N`, `--history 0`, or `--all-history`. Every newly appended narrated event is still displayed. Raw events and complete JSONL remain available through `inspect`. Risk notices are explicitly non-blocking. See [Live attach history and status](docs/cli/live-attach.md).
 - `inspect` without `--event` lists the most recent inspectable events for a session and shows the next command. `inspect <session> list events` is accepted as an explicit list intent. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or an unambiguous sequence; repeated sequences require an event ID prefix. Activity/type/search filters default to the latest 50 matches, support `--limit` or `--all`, and can emit clean JSONL for scripts. It includes file-tool meaning for read/edit/write-tool events and Git snapshot details for Git status events. See [Evidence filtering and export](docs/cli/evidence-filtering.md).
 - `debrief` summarizes an active or completed session with evidence-based review notes, including evidence completeness, Git status before/after when available, observed GitHub activity, observed shell activity, a risk-notice count, non-blocking risky-command notes, correlation confidence for direct path matches, temporal-only risk/Git correlation notes, next inspect commands, and a `File tool activity` section for observed read/edit/write-tool events.
 
@@ -363,7 +363,7 @@ See [Milestone 0 Smoke Checklist](docs/testing/milestone-0-smoke-checklist.md), 
 
 ## Documents
 
-- [Live Attach History](docs/cli/live-attach.md)
+- [Live Attach History and Status](docs/cli/live-attach.md)
 - [Evidence Filtering and Export](docs/cli/evidence-filtering.md)
 - [Milestone 0 Validation Baseline](docs/testing/milestone-0-validation-baseline.md)
 - [The BashGuard Experience](docs/vision/the-bashguard-experience.md)

@@ -4,6 +4,11 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
+### Added
+
+- Selector-less `attach`, `inspect`, and `debrief` now auto-select a sole eligible session or show a structured-text numbered picker when multiple candidates and interactive stdin/stdout TTYs are available. Active sessions take priority for selector-less attach; inspect and debrief consider all recent sessions.
+- Non-interactive ambiguous selection now exits nonzero without prompting and prints stable global selectors with copyable commands. Explicit numeric selectors, exact session IDs, and unique ID prefixes continue to bypass interaction.
+
 ## 0.3.0 - 2026-08-13
 
 ### Added

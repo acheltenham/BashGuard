@@ -48,10 +48,13 @@ From the repository root:
 If there is at least one recorded session:
 
 ```bash
+./bin/bashguard attach
 ./bin/bashguard attach 1
 ./bin/bashguard attach 1 --history 0
 ./bin/bashguard attach 1 --all-history
+./bin/bashguard inspect
 ./bin/bashguard inspect 1
+./bin/bashguard debrief
 ./bin/bashguard debrief 1
 ```
 
@@ -59,6 +62,11 @@ Confirm:
 
 - `doctor` reports CLI path, package root, data dir, Pi package status, and next steps;
 - `sessions` output includes `#`, `SESSION`, `NAME`, `REPOSITORY`, and `UPDATED`;
+- with two simultaneous active sessions in an actual TTY, selector-less attach shows an active-only structured-text picker and accepts a non-default displayed global number; selector-less inspect/debrief show all recent sessions;
+- selector-less commands auto-select a sole eligible session, while explicit numeric, exact-ID, and unique-prefix selectors bypass the picker;
+- piped or redirected ambiguous commands never prompt, exit nonzero, and list eligible stable global numbers with copyable commands; picker prefixes remain unique against the full discovery snapshot even when completed rows are hidden;
+- Enter has no default, invalid input retries, and EOF/`Ctrl+C` cancels concisely;
+- unknown inspect activity and a missing `--session` value fail before session selection;
 - `attach 1` shows an evidence-grounded state/activity/capture/freshness snapshot;
 - default `attach 1` bounds narrated startup history, `--history 0` skips it, and `--all-history` restores it;
 - `inspect 1` lists events with sequence and event ID prefix examples;
@@ -121,7 +129,7 @@ Follow the full Milestone 0 checklist:
 docs/testing/milestone-0-smoke-checklist.md
 ```
 
-Confirm debrief language remains evidence-based:
+Confirm debrief language remains evidence-based and the capture architecture remains unchanged by session selection:
 
 - no causality claims for Git/file correlations;
 - risk notices are non-blocking;

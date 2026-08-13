@@ -14,8 +14,8 @@ Make selector-less `attach`, `inspect`, and `debrief` convenient in an interacti
 
 - one active session selects automatically;
 - multiple active sessions show a picker containing active sessions only;
-- no active sessions show a picker containing recent completed sessions;
-- one eligible completed session selects automatically.
+- with no active sessions, recent completed sessions become the candidates;
+- any sole eligible session, active or completed, selects automatically; multiple completed candidates require the same TTY picker policy.
 
 `bashguard inspect` and `bashguard debrief` without a selector consider all recent active and completed sessions. One eligible session selects automatically; multiple sessions require a picker.
 
@@ -23,7 +23,7 @@ Explicit list indexes, exact session IDs, and unique ID prefixes retain their cu
 
 ## Architecture and data flow
 
-Session discovery produces one stable, ordered snapshot for a selection operation. A pure policy function derives eligible candidates by command. Existing explicit-selector resolution works against that same snapshot.
+Session discovery produces one stable, ordered snapshot for a selection operation. A pure policy function derives eligible candidates by command. Existing explicit-selector resolution works against that same full snapshot. Numeric selectors are assigned before command-specific filtering, so an active-only attach picker retains the global `bashguard sessions` numbers rather than renumbering its subset. Session ID prefixes are also derived against every session in the snapshot, including completed sessions hidden from that picker, so displayed prefixes remain globally unique and copyable.
 
 A shared asynchronous selector then either:
 
@@ -31,9 +31,9 @@ A shared asynchronous selector then either:
 2. invokes an interactive terminal adapter for multiple candidates; or
 3. returns an actionable error when interaction is unavailable.
 
-The terminal adapter uses Node readline with injectable input and output streams. It renders the existing numbered session format, validates input, and returns the selected `SessionSummary`. This remains separate from the future split-pane TUI.
+The terminal adapter uses Node readline with injectable input and output streams. It renders numbered session rows from the supplied choices, validates input, and returns the selected choice and its stable selector. This remains separate from the future split-pane TUI.
 
-`attach`, `inspect`, and `debrief` call the shared selector. `inspect` and `debrief` no longer reject an omitted selector before selection. The selected snapshot is passed directly to command execution; discovery is not repeated after rendering the picker.
+`attach`, `inspect`, and `debrief` call the shared selector. `inspect` and `debrief` no longer reject an omitted selector before selection. Argument errors that do not depend on a selected session—including an unknown inspect activity or a missing value after `--session`—are validated before selection. The selected snapshot is passed directly to command execution; discovery is not repeated after rendering the picker.
 
 ## Interactive and non-interactive behavior
 
@@ -45,7 +45,7 @@ For multiple non-interactive candidates, BashGuard exits non-zero with:
 - the numbered eligible-session list;
 - a copyable command using a numeric selector.
 
-Blank, non-numeric, and out-of-range input prints concise range guidance and prompts again. EOF cancels with a concise error. `Ctrl+C` exits cleanly without a stack trace or accidental selection.
+Only an exact displayed integer is accepted. Blank, non-numeric, whitespace-padded, and unavailable input prints concise selector guidance and prompts again; Enter has no default. EOF cancels with a concise error. `Ctrl+C` exits cleanly without a stack trace or accidental selection.
 
 Session files may change after discovery, but picker numbering and selection remain tied to the displayed snapshot. Existing degraded-file behavior applies after selection.
 
@@ -54,20 +54,18 @@ Session files may change after discovery, but picker numbering and selection rem
 The picker uses structured text and enough context to distinguish sessions:
 
 ```text
-Multiple active sessions
-
-#  SESSION   NAME       REPOSITORY      STATE   UPDATED
-1  019f…     api-work   backend         active  4s ago
-2  01a0…     ui-work    portfolio-site  active  18s ago
-
-Select a session [1-2]:
+1  019fc93a-1  api-work  backend  active  updated 2026-08-13T12:00:00.000Z
+3  019fc93a-3  ui-work  portfolio-site  active  updated 2026-08-13T11:59:46.000Z
+Select a session [1, 3]:
 ```
+
+A gap such as the hidden global selector `2`, or a longer-than-expected prefix, can be caused by a completed session that is part of the full snapshot but not eligible for the active-only attach picker.
 
 It does not rely on color, mouse input, or a full-screen terminal mode.
 
 ## Evidence and compatibility boundaries
 
-The picker changes selection only. It does not alter stored events, evidence projection, capture semantics, attach history, inspect filtering, debrief narration, or explicit selectors.
+The picker changes selection only. It does not alter stored events, evidence/capture architecture, evidence projection, capture semantics, attach history, inspect filtering, debrief narration, or explicit selectors.
 
 Plain-text and JSONL workflows remain scriptable. BashGuard never chooses among multiple candidates merely because one is newest.
 

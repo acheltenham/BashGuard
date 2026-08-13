@@ -93,14 +93,17 @@ bashguard sessions
 bashguard session list
 bashguard sessions list
 bashguard doctor
+bashguard attach
 bashguard attach 1
 bashguard attach 1 --history 0
 bashguard attach 1 --all-history
+bashguard inspect
 bashguard inspect 1
 bashguard inspect 1 --event 1
 bashguard inspect 1 --activity shell
 bashguard inspect 1 --activity shell --grep test
 bashguard inspect 1 --all --format jsonl
+bashguard debrief
 bashguard debrief 1
 ```
 
@@ -135,9 +138,12 @@ cd bashguard
 npm exec -- node --experimental-strip-types src/cli.ts sessions
 npm exec -- node --experimental-strip-types src/cli.ts session list
 npm exec -- node --experimental-strip-types src/cli.ts sessions list
+npm exec -- node --experimental-strip-types src/cli.ts attach
 npm exec -- node --experimental-strip-types src/cli.ts attach 1
+npm exec -- node --experimental-strip-types src/cli.ts inspect
 npm exec -- node --experimental-strip-types src/cli.ts inspect 1
 npm exec -- node --experimental-strip-types src/cli.ts inspect 1 --event 1
+npm exec -- node --experimental-strip-types src/cli.ts debrief
 npm exec -- node --experimental-strip-types src/cli.ts debrief 1
 ```
 
@@ -148,6 +154,29 @@ bashguard inspect 1 list events
 ```
 
 ## 6. Expected output checks
+
+### Selector-less session selection
+
+Use one isolated `BASHGUARD_DATA_DIR` and run two Pi sessions simultaneously so at least two sessions are active. If practical, retain a recent completed session whose ID shares leading characters with an active session.
+
+From an actual terminal, run `bashguard attach` without a selector and confirm:
+
+- the picker contains active sessions only, while `bashguard inspect` and `bashguard debrief` contain all recent active and completed sessions;
+- a sole eligible candidate is automatic, but multiple candidates require an exact displayed number and Enter has no default;
+- invalid numbers retry, while EOF and `Ctrl+C` cancel with concise output and no stack trace;
+- choosing a non-default displayed number attaches to that session;
+- picker numbers match the global `bashguard sessions` numbers, including gaps caused by hidden completed rows, and prefixes remain globally unique against the full discovery snapshot, including hidden completed sessions;
+- this is a structured-text prompt rather than a full-screen TUI.
+
+Exercise non-TTY behavior with multiple eligible sessions:
+
+```bash
+bashguard attach </dev/null >attach.out 2>&1; test $? -ne 0
+bashguard inspect </dev/null >inspect.out 2>&1; test $? -ne 0
+bashguard debrief </dev/null >debrief.out 2>&1; test $? -ne 0
+```
+
+Confirm none prints `Select a session`; each nonzero error lists only its eligible stable global selectors and a copyable command. Then run explicit numeric, exact-ID, and unique-prefix forms and confirm each bypasses the picker, including through a pipe or redirection. Also confirm `bashguard inspect --activity not-real` and a missing `--session` value fail before any selection prompt.
 
 ### `bashguard doctor`
 

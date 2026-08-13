@@ -12,6 +12,7 @@ When the BashGuard Pi extension is loaded before a session starts:
 - stores the event stream locally as append-only JSONL;
 - uses a per-session ownership lock so redundant BashGuard extension instances do not record duplicate events;
 - discovers active and completed BashGuard-recorded sessions;
+- selects sessions interactively for selector-less `attach`, `inspect`, and `debrief` when multiple candidates exist and both stdin and stdout are TTYs; a sole eligible session is automatic, while explicit numeric selectors, exact IDs, and unique ID prefixes bypass the picker;
 - follows a session from another terminal with `bashguard attach`, beginning with a grounded session/activity/capture snapshot, using bounded narrated startup history, and continuing to show every new narrated event;
 - inspects individual events by sequence or event ID prefix;
 - filters recorded evidence by activity category, exact event type, and case-insensitive text search, with latest-N/all controls and JSONL export;
@@ -35,7 +36,8 @@ All narrative output is grounded in recorded local events. BashGuard does not li
 - Risk notices are non-blocking review notes. BashGuard does not currently approve, block, interrupt, or sandbox commands.
 - There is no pre-execution resolved-command preview yet.
 - There is no recovery/restore workflow, event replay, browser UI, cloud service, or multi-harness support.
-- The current CLI is primarily structured text; the richer split-pane TUI is deferred to Phase 1 and remains planned.
+- The session picker and current CLI are structured text, not a full-screen split-pane TUI; the richer split-pane experience remains planned separately.
+- Selector-less attach considers active sessions first and offers only active rows when any are active; with no active sessions, recent completed sessions become candidates. Selector-less inspect and debrief consider all recent sessions. Scripts, pipes, or redirected output never prompt because both stdin and stdout must be TTYs; ambiguity exits nonzero with eligible stable selectors and copyable commands.
 - Local validation measured approximately 251 ms median append-to-attach visibility with the current 250 ms polling interval and approximately 521 JSONL bytes/event for a seven-event representative fixture. These are documented local observations, not performance or storage guarantees.
 - Provider-specific activity labels are not the core model; recorded commands and outputs are the evidence.
 

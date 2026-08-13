@@ -37,19 +37,22 @@ bashguard sessions
 bashguard session list
 bashguard sessions list
 bashguard doctor
+bashguard attach
 bashguard attach 1
 bashguard attach 1 --history 100
 bashguard attach 1 --history 0
 bashguard attach 1 --all-history
 bashguard attach --session 1
+bashguard inspect
 bashguard inspect 1
 bashguard inspect 1 --event <event-id-prefix-or-sequence>
 bashguard inspect 1 --activity shell --grep deploy
 bashguard inspect 1 --all --format jsonl
+bashguard debrief
 bashguard debrief 1
 ```
 
-- `sessions`, `session list`, and `sessions list` list recent and active recorded sessions with a `#` selector, copyable session prefix, and a session name when Pi exposes one.
+- `sessions`, `session list`, and `sessions list` list recent and active recorded sessions with a `#` selector, copyable session prefix, and a session name when Pi exposes one. Without a selector, `attach` automatically chooses its sole eligible session or, when multiple sessions are eligible and both stdin and stdout are TTYs, asks for an exact displayed number. `attach` prefers active sessions and shows only active candidates when any are active; if none are active, completed sessions are eligible. Selector-less `inspect` and `debrief` consider all recent active and completed sessions. Explicit numeric selectors, exact IDs, and unique ID prefixes bypass the picker.
 - `doctor` prints a read-only troubleshooting report for CLI path, session storage, installed Pi package source, update command, and next steps.
 - `attach` follows an active session or renders a completed session timeline. It begins with a grounded status snapshot covering session state, correlated current/last activity, evidence wording, capture limitations, event count, and freshness. Startup history defaults to the latest 50 narrated events; use `--history N`, `--history 0`, or `--all-history`. Every newly appended narrated event is still displayed. Raw events and complete JSONL remain available through `inspect`. Risk notices are explicitly non-blocking. See [Live attach history and status](docs/cli/live-attach.md).
 - `inspect` without `--event` lists the most recent inspectable events for a session and shows the next command. `inspect <session> list events` is accepted as an explicit list intent. With `--event`, it prints evidence for one recorded event by event ID, event ID prefix, or an unambiguous sequence; repeated sequences require an event ID prefix. Activity/type/search filters default to the latest 50 matches, support `--limit` or `--all`, and can emit clean JSONL for scripts. It includes file-tool meaning for read/edit/write-tool events and Git snapshot details for Git status events. See [Evidence filtering and export](docs/cli/evidence-filtering.md).
@@ -200,20 +203,25 @@ Use BashGuard to inspect the failed shell command and explain what evidence is a
 Use BashGuard to debrief session 1 and list anything worth reviewing.
 ```
 
-Pi can use the same local CLI and recorded session store to answer those questions. The answers remain limited to evidence BashGuard recorded; they do not recover older unrecorded sessions or query GitHub/deployment providers live.
+Pi can use the same local CLI and recorded session store to answer those questions. The answers remain limited to evidence BashGuard recorded; they do not recover older unrecorded sessions or query GitHub/deployment providers live. For automation and agent-driven commands, use an explicit selector from `bashguard sessions` rather than relying on interactive selection.
 
 ### Use BashGuard from a second terminal
 
-In another terminal, list and inspect recorded BashGuard sessions. If the `bashguard` CLI is on your `PATH`, use:
+In another terminal, list and inspect recorded BashGuard sessions. Selector-less `attach`, `inspect`, and `debrief` auto-select a sole eligible session. With multiple eligible sessions, they open a structured-text numbered picker only when both stdin and stdout are TTYs. Enter has no default: enter an exact displayed number; invalid input retries, while EOF or `Ctrl+C` cancels concisely. Scripts, pipes, and redirected output never prompt; they exit nonzero with eligible stable selectors and copyable commands. Picker rows retain the global numbers and globally unique prefixes from the single `bashguard sessions` discovery snapshot, even when completed sessions are hidden from an active-only attach picker.
+
+If the `bashguard` CLI is on your `PATH`, use:
 
 ```bash
 bashguard sessions
 bashguard session list
 bashguard sessions list
 bashguard doctor
+bashguard attach
 bashguard attach 1
+bashguard inspect
 bashguard inspect 1
 bashguard inspect 1 --event <event-id-prefix-or-sequence>
+bashguard debrief
 bashguard debrief 1
 ```
 

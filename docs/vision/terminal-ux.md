@@ -1,7 +1,7 @@
 # BashGuard Terminal UX
 
 **Status:** Draft  
-**Last updated:** July 23, 2026
+**Last updated:** August 13, 2026
 
 ## UX Decision
 
@@ -115,6 +115,16 @@ Purpose:
 - reconstruct the execution story without rerunning actions.
 
 Replay is event replay, not hidden-reasoning capture, shell re-execution, or video playback.
+
+### Session Selection
+
+`bashguard attach`, `bashguard inspect`, and `bashguard debrief` may omit the session selector. A sole eligible session is selected automatically. For attach, active sessions are eligible when any exist; if none are active, recent completed sessions are eligible. Inspect and debrief consider all recent active and completed sessions.
+
+When multiple sessions are eligible, BashGuard opens a numbered picker only if both stdin and stdout are TTYs. It is structured text, not the planned full-screen split-pane TUI. Enter does not choose a default: the user must type an exact displayed number. Blank, nonnumeric, whitespace-padded, or unavailable numbers receive concise guidance and retry; EOF and `Ctrl+C` cancel concisely.
+
+Pipes, redirected streams, scripts, and other non-TTY use never prompt or silently choose the newest session. They exit nonzero with the eligible rows and copyable explicit commands. Explicit global numeric selectors, exact session IDs, and unique session ID prefixes bypass the picker.
+
+Selection uses one discovery snapshot. Candidate rows keep their global `bashguard sessions` numbers, and displayed ID prefixes are computed for uniqueness against that full snapshot. Consequently an active-only attach picker may skip a number or use a longer prefix because a completed session is hidden; the displayed selectors remain stable and copyable.
 
 ### Sessions Mode
 

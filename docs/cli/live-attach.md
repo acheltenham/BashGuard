@@ -10,6 +10,20 @@ bashguard attach 1
 
 The startup limit changes terminal presentation only. It does not remove, truncate, or rewrite recorded JSONL evidence.
 
+## Choosing a session
+
+A selector is optional:
+
+```bash
+bashguard attach
+```
+
+Selector-less attach chooses its sole eligible session automatically. If active sessions exist, only they are eligible: one active session is automatic and multiple active sessions open a numbered picker when both stdin and stdout are TTYs. If no session is active, recent completed sessions become the candidates, with the same sole-candidate automatic selection and multiple-candidate picker behavior.
+
+The picker requires an exact displayed number. Enter has no default, invalid input prints concise guidance and retries, and EOF or `Ctrl+C` cancels concisely. Explicit numeric selectors, exact session IDs, and unique ID prefixes bypass the picker.
+
+Scripts, pipes, and redirected output never prompt. Unless exactly one eligible session can be selected automatically, attach exits nonzero and prints the eligible rows plus copyable explicit commands. Selection uses one discovery snapshot: rows retain their global `bashguard sessions` numbers, and ID prefixes remain globally unique against the full snapshot even when an active-only picker hides completed sessions. This is a structured-text prompt, not the planned full-screen split-pane TUI.
+
 ## Status snapshot
 
 Active sessions show:

@@ -1,6 +1,6 @@
 # BashGuard current state
 
-**Status:** Work in progress / Milestone 0 complete; Phase 1 next
+**Status:** Work in progress / Milestone 0 complete; Phase 1 in progress
 
 BashGuard is an early-stage, local-first Pi companion. It is useful for observing and investigating recorded Pi sessions, but it is not yet a complete command guard, approval system, sandbox, recovery system, or security control.
 
@@ -37,7 +37,7 @@ All narrative output is grounded in recorded local events. BashGuard does not li
 - There is no pre-execution resolved-command preview yet.
 - There is no recovery/restore workflow, event replay, browser UI, cloud service, or multi-harness support.
 - The session picker and current CLI are structured text, not a full-screen split-pane TUI; the richer split-pane experience remains planned separately.
-- Selector-less attach considers active sessions first and offers only active rows when any are active; with no active sessions, recent completed sessions become candidates. Selector-less inspect and debrief consider all recent sessions. Scripts, pipes, or redirected output never prompt because both stdin and stdout must be TTYs; ambiguity exits nonzero with eligible stable selectors and copyable commands.
+- Selector-less attach considers active sessions first and offers only active rows when any are active; with no active sessions, all discovered completed sessions become candidates. Selector-less inspect and debrief consider all discovered recorded sessions. Scripts, pipes, or redirected output never prompt because both stdin and stdout must be TTYs; ambiguity exits nonzero with eligible stable selectors and copyable commands.
 - Local validation measured approximately 251 ms median append-to-attach visibility with the current 250 ms polling interval and approximately 521 JSONL bytes/event for a seven-event representative fixture. These are documented local observations, not performance or storage guarantees.
 - Provider-specific activity labels are not the core model; recorded commands and outputs are the evidence.
 

@@ -157,15 +157,16 @@ bashguard inspect 1 list events
 
 ### Selector-less session selection
 
-Use one isolated `BASHGUARD_DATA_DIR` and run two Pi sessions simultaneously so at least two sessions are active. If practical, retain a recent completed session whose ID shares leading characters with an active session.
+Use one isolated `BASHGUARD_DATA_DIR` and run two Pi sessions simultaneously so at least two sessions are active. If practical, retain a completed session whose ID shares leading characters with an active session.
 
 From an actual terminal, run `bashguard attach` without a selector and confirm:
 
-- the picker contains active sessions only, while `bashguard inspect` and `bashguard debrief` contain all recent active and completed sessions;
+- the picker contains active sessions only, while `bashguard inspect` and `bashguard debrief` contain all discovered recorded sessions, active and completed;
 - a sole eligible candidate is automatic, but multiple candidates require an exact displayed number and Enter has no default;
 - invalid numbers retry, while EOF and `Ctrl+C` cancel with concise output and no stack trace;
-- choosing a non-default displayed number attaches to that session;
-- picker numbers match the global `bashguard sessions` numbers, including gaps caused by hidden completed rows, and prefixes remain globally unique against the full discovery snapshot, including hidden completed sessions;
+- choosing a non-first displayed number attaches to that session;
+- picker numbers match their original global `bashguard sessions` numbers and are not locally renumbered; eligible active selectors are currently contiguous because discovery orders active sessions first;
+- prefixes remain globally unique against the full discovery snapshot, including hidden completed sessions;
 - this is a structured-text prompt rather than a full-screen TUI.
 
 Exercise non-TTY behavior with multiple eligible sessions:

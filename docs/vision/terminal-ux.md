@@ -118,13 +118,13 @@ Replay is event replay, not hidden-reasoning capture, shell re-execution, or vid
 
 ### Session Selection
 
-`bashguard attach`, `bashguard inspect`, and `bashguard debrief` may omit the session selector. A sole eligible session is selected automatically. For attach, active sessions are eligible when any exist; if none are active, recent completed sessions are eligible. Inspect and debrief consider all recent active and completed sessions.
+`bashguard attach`, `bashguard inspect`, and `bashguard debrief` may omit the session selector. A sole eligible session is selected automatically. For attach, active sessions are eligible when any exist; if none are active, all discovered completed sessions are eligible. Inspect and debrief consider all discovered recorded sessions, active and completed.
 
 When multiple sessions are eligible, BashGuard opens a numbered picker only if both stdin and stdout are TTYs. It is structured text, not the planned full-screen split-pane TUI. Enter does not choose a default: the user must type an exact displayed number. Blank, nonnumeric, whitespace-padded, or unavailable numbers receive concise guidance and retry; EOF and `Ctrl+C` cancel concisely.
 
 Pipes, redirected streams, scripts, and other non-TTY use never prompt or silently choose the newest session. When multiple sessions are eligible, they exit nonzero with the eligible rows and copyable explicit commands. With no recorded sessions, BashGuard reports the existing no-sessions error without candidate rows or commands. Explicit global numeric selectors, exact session IDs, and unique session ID prefixes bypass the picker.
 
-Selection uses one discovery snapshot. Candidate rows keep their global `bashguard sessions` numbers, and displayed ID prefixes are computed for uniqueness against that full snapshot. Consequently an active-only attach picker may skip a number or use a longer prefix because a completed session is hidden; the displayed selectors remain stable and copyable.
+Selection uses one discovery snapshot. Candidate rows keep their original global `bashguard sessions` numbers and are not locally renumbered. Because discovery orders active sessions first, eligible active selectors are currently contiguous. Displayed ID prefixes are computed for uniqueness against the full snapshot, so a completed session hidden by an active-only attach picker may require a longer prefix; the displayed selectors remain stable and copyable.
 
 ### Sessions Mode
 
@@ -136,7 +136,7 @@ bashguard sessions
 
 Purpose:
 
-- find active and recent Pi sessions;
+- find recorded Pi sessions;
 - show repository, status, start time, duration, warnings, and attachment state;
 - copy or use the underlying session identifier.
 

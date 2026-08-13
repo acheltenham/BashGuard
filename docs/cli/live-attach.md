@@ -18,11 +18,11 @@ A selector is optional:
 bashguard attach
 ```
 
-Selector-less attach chooses its sole eligible session automatically. If active sessions exist, only they are eligible: one active session is automatic and multiple active sessions open a numbered picker when both stdin and stdout are TTYs. If no session is active, recent completed sessions become the candidates, with the same sole-candidate automatic selection and multiple-candidate picker behavior.
+Selector-less attach chooses its sole eligible session automatically. If active sessions exist, only they are eligible: one active session is automatic and multiple active sessions open a numbered picker when both stdin and stdout are TTYs. If no session is active, all discovered completed sessions become the candidates, with the same sole-candidate automatic selection and multiple-candidate picker behavior.
 
 The picker requires an exact displayed number. Enter has no default, invalid input prints concise guidance and retries, and EOF or `Ctrl+C` cancels concisely. Explicit numeric selectors, exact session IDs, and unique ID prefixes bypass the picker.
 
-Scripts, pipes, and redirected output never prompt. With multiple eligible sessions, attach exits nonzero and prints the eligible rows plus copyable explicit commands. With no recorded sessions, it uses the existing `No BashGuard sessions found` error and does not print candidate rows or commands. Selection uses one discovery snapshot: rows retain their global `bashguard sessions` numbers, and ID prefixes remain globally unique against the full snapshot even when an active-only picker hides completed sessions. This is a structured-text prompt, not the planned full-screen split-pane TUI.
+Scripts, pipes, and redirected output never prompt. With multiple eligible sessions, attach exits nonzero and prints the eligible rows plus copyable explicit commands. With no recorded sessions, it uses the existing `No BashGuard sessions found` error and does not print candidate rows or commands. Selection uses one discovery snapshot: rows retain their original global `bashguard sessions` numbers and are not locally renumbered. ID prefixes remain globally unique against the full snapshot, including completed sessions hidden by an active-only picker. This is a structured-text prompt, not the planned full-screen split-pane TUI.
 
 ## Status snapshot
 

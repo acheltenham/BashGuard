@@ -15,7 +15,7 @@ Goal: build the smallest end-to-end BashGuard experience that can observe a real
 - create the shared event-model package;
 - create the BashGuard CLI skeleton;
 - implement append-only local event transport;
-- implement active and recent session discovery;
+- implement discovery of all readable stored sessions, active and completed;
 - implement `bashguard sessions`;
 - implement `bashguard attach [session-id]`;
 - narrate prompts, tool calls, commands, results, and file-tool activity;

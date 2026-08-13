@@ -14,16 +14,16 @@ Make selector-less `attach`, `inspect`, and `debrief` convenient in an interacti
 
 - one active session selects automatically;
 - multiple active sessions show a picker containing active sessions only;
-- with no active sessions, recent completed sessions become the candidates;
+- with no active sessions, all discovered completed sessions become the candidates;
 - any sole eligible session, active or completed, selects automatically; multiple completed candidates require the same TTY picker policy.
 
-`bashguard inspect` and `bashguard debrief` without a selector consider all recent active and completed sessions. One eligible session selects automatically; multiple sessions require a picker.
+`bashguard inspect` and `bashguard debrief` without a selector consider all discovered recorded sessions, active and completed. One eligible session selects automatically; multiple sessions require a picker.
 
 Explicit list indexes, exact session IDs, and unique ID prefixes retain their current behavior and bypass interaction. The picker requires an explicit valid number; Enter never silently chooses a default.
 
 ## Architecture and data flow
 
-Session discovery produces one stable, ordered snapshot for a selection operation. A pure policy function derives eligible candidates by command. Existing explicit-selector resolution works against that same full snapshot. Numeric selectors are assigned before command-specific filtering, so an active-only attach picker retains the global `bashguard sessions` numbers rather than renumbering its subset. Session ID prefixes are also derived against every session in the snapshot, including completed sessions hidden from that picker, so displayed prefixes remain globally unique and copyable.
+Session discovery produces one stable, active-first ordered snapshot for a selection operation. A pure policy function derives eligible candidates by command. Existing explicit-selector resolution works against that same full snapshot. Numeric selectors are assigned before command-specific filtering, so an active-only attach picker retains the original global `bashguard sessions` numbers rather than locally renumbering its subset. Because active sessions come first in the snapshot, eligible active selectors are currently contiguous. Session ID prefixes are also derived against every session in the snapshot, including completed sessions hidden from that picker, so displayed prefixes remain globally unique and copyable.
 
 A shared asynchronous selector then either:
 
@@ -55,11 +55,11 @@ The picker uses structured text and enough context to distinguish sessions:
 
 ```text
 1  019fc93a-1  api-work  backend  active  updated 2026-08-13T12:00:00.000Z
-3  019fc93a-3  ui-work  portfolio-site  active  updated 2026-08-13T11:59:46.000Z
-Select a session [1, 3]:
+2  019fc93a-2  ui-work  portfolio-site  active  updated 2026-08-13T11:59:46.000Z
+Select a session [1, 2]:
 ```
 
-A gap such as the hidden global selector `2`, or a longer-than-expected prefix, can be caused by a completed session that is part of the full snapshot but not eligible for the active-only attach picker.
+The active selectors shown here are contiguous because discovery orders active sessions first, but they still retain their original global selectors rather than being locally renumbered. A completed session that is part of the full snapshot but hidden from the active-only attach picker can require a longer-than-expected globally unique prefix.
 
 It does not rely on color, mouse input, or a full-screen terminal mode.
 

@@ -62,7 +62,7 @@ Confirm:
 
 - `doctor` reports CLI path, package root, data dir, Pi package status, and next steps;
 - `sessions` output includes `#`, `SESSION`, `NAME`, `REPOSITORY`, and `UPDATED`;
-- with two simultaneous active sessions in an actual TTY, selector-less attach shows an active-only structured-text picker and accepts a non-default displayed global number; selector-less inspect/debrief show all recent sessions;
+- with two simultaneous active sessions in an actual TTY, selector-less attach shows an active-only structured-text picker and accepts a non-first displayed global number; selector-less inspect/debrief show all discovered recorded sessions;
 - selector-less commands auto-select a sole eligible session, while explicit numeric, exact-ID, and unique-prefix selectors bypass the picker;
 - piped or redirected ambiguous commands never prompt, exit nonzero, and list eligible stable global numbers with copyable commands; picker prefixes remain unique against the full discovery snapshot even when completed rows are hidden;
 - Enter has no default, invalid input retries, and EOF/`Ctrl+C` cancels concisely;

@@ -416,7 +416,7 @@ Verify in an actual terminal:
 - Enter alone does not select;
 - invalid input retries;
 - a valid displayed number attaches to the matching session;
-- selector-less inspect and debrief show all recent sessions;
+- selector-less inspect and debrief show all discovered recorded sessions;
 - explicit selectors bypass the picker.
 
 Record only sanitized IDs/output.

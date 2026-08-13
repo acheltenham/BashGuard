@@ -649,7 +649,7 @@ export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now
   const latestStartIndex = normalized.findLastIndex((event) => event.type === "session.started");
   const currentSessionTail = latestStartIndex >= 0 ? normalized.slice(latestStartIndex) : normalized;
   const latestShutdownIndex = currentSessionTail.findLastIndex((event) => event.type === "session.shutdown");
-  const restartPending = active && latestShutdownIndex === currentSessionTail.length - 1;
+  const restartPending = active && latestSessionLifecycle(currentSessionTail)?.type === "session.shutdown";
   const currentSessionEvents = restartPending
     ? currentSessionTail.slice(latestShutdownIndex)
     : !active && latestShutdownIndex >= 0

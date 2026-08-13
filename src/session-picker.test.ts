@@ -82,6 +82,19 @@ test("retries blank, nonnumeric, and unavailable selectors until a valid selecto
   assert.equal(io.readOutput().match(/Select a session \[1, 3\]: /g)?.length, 4);
 });
 
+test("retries a whitespace-padded selector until an exact selector is entered", async () => {
+  const io = streams();
+  const choices = [choice(1, "session-one"), choice(3, "session-three")];
+
+  const selected = promptForSessionChoice(choices, io);
+  await writeLines(io.input, [" 3 ", "1"]);
+
+  assert.equal((await selected).selector, 1);
+  io.input.end();
+  assert.equal(io.readOutput().match(/Enter one of: 1, 3\./g)?.length, 1);
+  assert.equal(io.readOutput().match(/Select a session \[1, 3\]: /g)?.length, 2);
+});
+
 test("blank input has no default", async () => {
   const io = streams();
   const selected = promptForSessionChoice([choice(1, "session-one")], io);

@@ -67,8 +67,8 @@ export async function promptForSessionChoice(
         interruption.cleanup();
       }
 
-      const selected = choicesBySelector.get(answer.trim());
-      if (selected && /^\d+$/.test(answer.trim())) return selected;
+      const selected = choicesBySelector.get(answer);
+      if (selected && /^\d+$/.test(answer)) return selected;
       output.write(`Enter one of: ${selectorList}.\n`);
     }
   } finally {

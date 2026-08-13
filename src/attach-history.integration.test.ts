@@ -59,6 +59,38 @@ test("attach completes an event whose JSONL line was partial at the startup boun
   assert.match(stdout, /Pi session ended/);
 });
 
+test("attach preserves UTF-8 split across live polling cycles", async (t) => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "bashguard-attach-live-utf8-"));
+  t.after(async () => rm(dataRoot, { recursive: true, force: true }));
+  const sessionId = "attach-live-utf8-session";
+  const directory = join(dataRoot, sessionId);
+  const eventsFile = join(directory, "events.jsonl");
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "session.json"), `${JSON.stringify({ schemaVersion: 1, sessionId, processId: process.pid })}\n`);
+  await writeFile(eventsFile, `${JSON.stringify(event(1, "start001", "session.started"))}\n`);
+
+  const child = spawn(process.execPath, ["--experimental-strip-types", "src/cli.ts", "attach", sessionId, "--history", "0"], {
+    cwd: process.cwd(), env: { ...process.env, BASHGUARD_DATA_DIR: dataRoot }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(() => { if (child.exitCode === null) child.kill("SIGTERM"); });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.match(stdout, /Following live events/);
+
+  const liveLine = Buffer.from(JSON.stringify(event(2, "liveutf8", "bash.user_requested", { command: "echo café-live" })));
+  const splitAt = liveLine.indexOf(Buffer.from("é")) + 1;
+  await appendFile(eventsFile, liveLine.subarray(0, splitAt));
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  await appendFile(eventsFile, Buffer.concat([liveLine.subarray(splitAt), Buffer.from(`\n${JSON.stringify(event(3, "shutdown", "session.shutdown"))}\n`)]));
+
+  await new Promise<void>((resolve, reject) => child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`attach exited ${code}: ${stderr}`))));
+  assert.match(stdout, /café-live/);
+  assert.doesNotMatch(stdout, /�/);
+});
+
 test("attach bounds startup history but streams every new narrated event", async (t) => {
   const dataRoot = await mkdtemp(join(tmpdir(), "bashguard-attach-history-"));
   t.after(async () => rm(dataRoot, { recursive: true, force: true }));

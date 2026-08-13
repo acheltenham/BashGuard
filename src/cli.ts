@@ -5,6 +5,7 @@ import { createReadStream, existsSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 export type SessionMetadata = {
@@ -1599,6 +1600,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
 
   let offset = snapshot.offset;
   let remainder = snapshot.remainder;
+  let decoder = new StringDecoder("utf8");
   const historySelection = selectAttachHistory(existing, history, options.allHistory ?? false);
   const seenEventIds = historySelection.seenEventIds;
   process.stdout.write(formatAttachStatus(buildAttachStatus(existing, active)));
@@ -1640,6 +1642,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     if (info.size < offset) {
       offset = 0;
       remainder = "";
+      decoder = new StringDecoder("utf8");
     }
     if (info.size === offset) {
       if (!processIsAlive(session.metadata.processId)) {
@@ -1649,9 +1652,9 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
       continue;
     }
 
-    const stream = createReadStream(session.eventsFile, { start: offset, end: info.size - 1, encoding: "utf8" });
+    const stream = createReadStream(session.eventsFile, { start: offset, end: info.size - 1 });
     let chunk = "";
-    for await (const piece of stream) chunk += piece;
+    for await (const piece of stream) chunk += decoder.write(piece as Buffer);
     offset = info.size;
 
     const combined = remainder + chunk;

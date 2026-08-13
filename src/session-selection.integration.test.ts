@@ -336,45 +336,67 @@ test("explicit ID prefixes still resolve without interaction", async (t) => {
   }
 });
 
-test("non-TTY remediation for a numeric session ID selects that displayed session", async (t) => {
+test("exact numeric ID remediation survives ordering and count changes", async (t) => {
   const now = Date.now();
+  const targetId = "3";
+  const otherId = "original-other-session";
   const root = await store(t, [
-    { id: "other-session", modifiedAt: now, command: "echo wrong-index-session" },
-    { id: "1", modifiedAt: now - 1_000, command: "echo numeric-id-target" },
+    { id: targetId, modifiedAt: now, command: "echo numeric-id-target" },
+    { id: otherId, modifiedAt: now - 1_000, command: "echo future-row-three" },
   ]);
 
   const ambiguity = run(root, ["inspect"]);
   const output = combined(ambiguity);
   assert.notEqual(ambiguity.status, 0);
-  assert.match(output, /^2\s+complete\s+1\s+/m);
-  assert.match(output, /bashguard inspect --session=1(?:\s|$)/);
+  assert.match(output, /^1\s+complete\s+3\s+/m);
+  const emittedCommand = output.split("\n").map((line) => line.trim())
+    .find((line) => line === "bashguard inspect --session=3");
+  assert.ok(emittedCommand, output);
 
-  const remediated = run(root, ["inspect", "--session=1"]);
+  await writeSession(root, {
+    id: "future-newest-session",
+    modifiedAt: now + 1_000,
+    command: "echo future-row-one",
+  });
+  const reordered = run(root, ["sessions"]);
+  assert.match(reordered.stdout, /^2\s+complete\s+3\s+/m);
+  assert.match(reordered.stdout, /^3\s+complete\s+original/m);
+
+  const remediated = runShell(root, emittedCommand);
   assert.equal(remediated.status, 0, remediated.stderr);
   assert.match(remediated.stdout, /numeric-id-target/);
-  assert.doesNotMatch(remediated.stdout, /wrong-index-session/);
+  assert.doesNotMatch(remediated.stdout, /future-row-three|future-row-one/);
 });
 
-test("numeric-looking non-TTY remediation executes against its displayed session", async (t) => {
+test("nonnumeric non-TTY remediation prefix survives a future numeric-index collision", async (t) => {
   const now = Date.now();
-  const targetId = "00000002-target";
+  const targetId = "00000003-target";
+  const otherId = "original-other-session";
   const root = await store(t, [
     { id: targetId, modifiedAt: now, command: "echo numeric-prefix-target" },
-    { id: "other-session", modifiedAt: now - 1_000, command: "echo wrong-row-two" },
+    { id: otherId, modifiedAt: now - 1_000, command: "echo future-row-three" },
   ]);
 
   const ambiguity = run(root, ["inspect"]);
   const output = combined(ambiguity);
   assert.notEqual(ambiguity.status, 0);
-  assert.match(output, /^1\s+complete\s+00000002-\s+/m);
+  assert.match(output, /^1\s+complete\s+00000003-\s+/m);
   const emittedCommand = output.split("\n").map((line) => line.trim())
-    .find((line) => line === "bashguard inspect --session=00000002-");
+    .find((line) => line === "bashguard inspect --session=00000003-");
   assert.ok(emittedCommand, output);
+
+  await writeSession(root, {
+    id: "future-newest-session",
+    modifiedAt: now + 1_000,
+    command: "echo future-row-one",
+  });
+  const reordered = run(root, ["sessions"]);
+  assert.match(reordered.stdout, /^3\s+complete\s+original/m);
 
   const remediated = runShell(root, emittedCommand);
   assert.equal(remediated.status, 0, remediated.stderr);
   assert.match(remediated.stdout, /numeric-prefix-target/);
-  assert.doesNotMatch(remediated.stdout, /wrong-row-two/);
+  assert.doesNotMatch(remediated.stdout, /future-row-three|future-row-one/);
 });
 
 test("non-TTY remediation executes durable selectors that resemble options or inspect aliases", async (t) => {

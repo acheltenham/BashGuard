@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import type { SessionChoice, SessionSummary } from "./cli.ts";
-import { shellQuoteArgument, singleLineDisplay } from "./session-format.ts";
+import { shellQuoteArgument, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
 import { promptForSessionChoice } from "./session-picker.ts";
 
 function choice(
@@ -74,6 +74,13 @@ test("renders globally distinguishing session ID prefixes carried by each choice
   assert.equal((await selected).selector, 3);
   assert.match(io.readOutput(), /1\s+019fc93a-1\s+-/);
   assert.match(io.readOutput(), /3\s+019fc93a-2\s+-/);
+});
+
+test("unique proper session ID prefixes are never numeric, regardless of current session count", () => {
+  assert.deepEqual(
+    uniqueSessionIdPrefixes(["00000003-target", "other-session"]),
+    ["00000003-", "other-se"],
+  );
 });
 
 test("singleLineDisplay removes terminal controls and collapses whitespace while preserving Unicode", () => {

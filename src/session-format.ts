@@ -69,12 +69,8 @@ export function uniqueSessionIdPrefixes(sessionIds: readonly string[]): string[]
       const prefix = sessionId.slice(0, length);
       if (sessionIds.filter((id) => id.startsWith(prefix)).length !== 1) continue;
 
-      // Exact IDs resolve before indexes, but a numeric-looking proper prefix does not.
-      const numericSelector = Number(prefix);
-      const resolvesAsIndex = Number.isInteger(numericSelector)
-        && numericSelector >= 1
-        && numericSelector <= sessionIds.length;
-      if (prefix === sessionId || !resolvesAsIndex) return prefix;
+      // Exact IDs resolve before indexes, but a numeric proper prefix may collide with a future index.
+      if (prefix === sessionId || !/^\d+$/u.test(prefix)) return prefix;
     }
     return sessionId;
   });

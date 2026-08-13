@@ -532,12 +532,14 @@ function latestSessionLine(sessions: SessionSummary[]): string | undefined {
   return `1 · ${latest.active ? "active" : "complete"} · ${name} · ${repo} · ${formatAge(latest.modifiedAt)}`;
 }
 
-function bashGuardPackageSource(packages: string[]): string | undefined {
-  return packages.find((source) => source.includes("github.com/acheltenham/BashGuard") || source === "bashguard" || source.endsWith("/BashGuard"));
+function bashGuardPackageSources(packages: string[]): string[] {
+  return Array.from(new Set(packages.filter((source) => source.includes("github.com/acheltenham/BashGuard") || source === "bashguard" || source.endsWith("/BashGuard"))));
 }
 
 export function formatDoctorReport(input: DoctorReportInput): string {
-  const bashGuardSource = bashGuardPackageSource(input.piPackages);
+  const bashGuardSources = bashGuardPackageSources(input.piPackages);
+  const bashGuardSource = bashGuardSources[0];
+  const multipleSources = bashGuardSources.length > 1;
   const lines = [
     "BashGuard doctor",
     "",
@@ -555,22 +557,26 @@ export function formatDoctorReport(input: DoctorReportInput): string {
     formatField("pi list", input.piListAvailable ? "available" : "unavailable"),
     formatField("Installed", bashGuardSource ? "yes" : "no"),
     formatField("Source", bashGuardSource),
+    formatField("Configured sources", bashGuardSources.length || undefined),
+    ...(multipleSources ? bashGuardSources.map((source) => `- ${source}`) : []),
+    formatField("Configuration warning", multipleSources ? "multiple BashGuard package sources found" : undefined),
+    multipleSources ? "This does not prove both sources are active in a running Pi session; the runtime recorder lock remains authoritative." : undefined,
     formatField("Update", bashGuardSource ? `pi update ${bashGuardSource}` : undefined),
     "",
     "Next steps",
     ...(bashGuardSource
-      ? [input.globalCommandPath ? "- bashguard sessions" : `- ${join(input.packageRoot, "bin", "bashguard")} setup cli --global`, input.sessions.length > 0 ? "- bashguard debrief 1" : undefined]
+      ? [multipleSources ? "- Review `pi list` and remove the redundant BashGuard source" : undefined, input.globalCommandPath ? "- bashguard sessions" : `- ${join(input.packageRoot, "bin", "bashguard")} setup cli --global`, input.sessions.length > 0 ? "- bashguard debrief 1" : undefined]
       : ["- pi install git:github.com/acheltenham/BashGuard", `- ${join(input.packageRoot, "bin", "bashguard")} setup cli --global`]),
   ].filter((line): line is string => line !== undefined);
 
   return `${lines.join("\n")}\n`;
 }
 
-function parsePiListPackages(stdout: string): string[] {
+export function parsePiListPackages(stdout: string): string[] {
   return stdout
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("/") && !line.endsWith("packages:"));
+    .filter((line) => /^  \S/.test(line))
+    .map((line) => line.trim());
 }
 
 function readPiPackages(): { available: boolean; packages: string[] } {

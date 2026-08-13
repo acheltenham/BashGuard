@@ -10,6 +10,7 @@ When the BashGuard Pi extension is loaded before a session starts:
 
 - records supported Pi lifecycle, prompt, turn, tool, shell, user-bash, read, edit, write, Git snapshot, and shutdown events;
 - stores the event stream locally as append-only JSONL;
+- uses a per-session ownership lock so redundant BashGuard extension instances do not record duplicate events;
 - discovers active and completed BashGuard-recorded sessions;
 - follows a session from another terminal with `bashguard attach`;
 - inspects individual events by sequence or event ID prefix;
@@ -28,6 +29,7 @@ All narrative output is grounded in recorded local events. BashGuard does not li
 
 - BashGuard cannot attach retroactively to older Pi sessions that were not recorded by the extension; the extension and skill must be loaded before the Pi session starts.
 - Capture can be partial because Pi hooks, event fields, output, or storage writes may be unavailable.
+- If BashGuard is loaded from more than one package source, only the first instance records. Other instances warn and remain inactive; remove the redundant source and start a new Pi session. `bashguard doctor` can flag multiple sources visible in `pi list`, but it does not claim configured sources are active runtime instances.
 - Git and file correlations are session-level or path-overlap evidence, not proof of causality.
 - Risk notices are non-blocking review notes. BashGuard does not currently approve, block, interrupt, or sandbox commands.
 - There is no pre-execution resolved-command preview yet.

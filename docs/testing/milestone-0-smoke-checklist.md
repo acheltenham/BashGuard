@@ -66,6 +66,8 @@ pi install git:github.com/acheltenham/BashGuard@v0.1.1
 
 Then start a new Pi session. Already-running Pi sessions keep the extension code they started with.
 
+Before starting, check that BashGuard is not also being loaded from another source such as both an installed GitHub package and `pi -e /path/to/local/BashGuard`. If two instances are loaded, the first owns recording and the other warns that recording is disabled. Remove the redundant source and start a new Pi session.
+
 ## 4. Run a small controlled Pi session
 
 In Pi, ask for a small task in a test repository, for example:
@@ -150,7 +152,8 @@ Confirm:
 - it reports the BashGuard data directory;
 - it reports session count and latest session when present;
 - it reports whether BashGuard appears in `pi list`;
-- it suggests install/update/setup next steps without mutating anything.
+- it suggests install/update/setup next steps without mutating anything;
+- if `pi list` contains multiple configured BashGuard sources, it warns without claiming both are active in the current Pi process.
 
 ### `bashguard sessions`
 
@@ -217,3 +220,4 @@ BASHGUARD_DATA_DIR=/tmp/bashguard-smoke bashguard sessions
 ```
 
 - Debriefs should report observed evidence and confidence labels; they should not claim that a specific event caused a Git diff unless the recorded evidence supports that claim.
+- Loading BashGuard twice should produce one duplicate-instance warning and one set of recorded events, not inflated prompt/tool/file counts.

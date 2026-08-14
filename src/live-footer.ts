@@ -148,7 +148,7 @@ export const ANSI_CLEAR_LINE = `${ANSI_CARRIAGE_RETURN}${ANSI_ERASE_LINE}`;
 export const LIVE_FOOTER_REFRESH_MS = 1_000;
 
 export type StructuralWritable = {
-  write(chunk: string): boolean;
+  write(chunk: string, callback: (error?: Error | null) => void): boolean;
   once(event: "drain", listener: () => void): unknown;
   once(event: "error", listener: (error: unknown) => void): unknown;
   once(event: "close", listener: () => void): unknown;
@@ -207,6 +207,8 @@ export class LiveFooterController {
   #lastRenderTime: number | undefined;
   #lastRenderWidth: number | undefined;
   #cleaned = false;
+  #failed = false;
+  #failure: unknown;
 
   constructor(options: LiveFooterControllerOptions) {
     this.#output = options.output;
@@ -223,6 +225,10 @@ export class LiveFooterController {
     return this.#renderedLineCount;
   }
 
+  get failed(): boolean {
+    return this.#failed;
+  }
+
   get lastRenderTime(): number | undefined {
     return this.#lastRenderTime;
   }
@@ -234,6 +240,7 @@ export class LiveFooterController {
   render(model: LiveFooterModel): Promise<void> {
     const snapshot = copyModel(model);
     return this.#enqueue(async () => {
+      this.#assertOperational();
       if (this.#cleaned) return;
       const width = normalizeWidth(this.#width());
       const now = this.#clock();
@@ -249,6 +256,7 @@ export class LiveFooterController {
 
   refresh(): Promise<void> {
     return this.#enqueue(async () => {
+      this.#assertOperational();
       if (this.#cleaned || this.#model === undefined) return;
       const width = normalizeWidth(this.#width());
       const now = this.#clock();
@@ -263,14 +271,18 @@ export class LiveFooterController {
 
   writeTimeline(payload: string): Promise<void> {
     return this.#enqueue(async () => {
+      this.#assertOperational();
       if (this.#cleaned) return;
       const width = normalizeWidth(this.#width());
       const now = this.#clock();
       const model = this.#model === undefined ? undefined : copyModel(this.#model);
       const lines = model === undefined ? undefined : this.#formatter(model, width);
+      const normalizedPayload = payload
+        .replace(/(?:\r\n|\r|\n)+$/u, "")
+        .replace(/\r\n|\r|\n/gu, "\r\n");
 
       await this.#clearRendered();
-      await this.#write(`${payload.replace(/\r\n|\r|\n/gu, "\r\n")}\r\n`);
+      await this.#write(`${normalizedPayload}\r\n`);
       if (model !== undefined && lines !== undefined) {
         await this.#writeFooter(lines);
         this.#lastRenderTime = now;
@@ -281,6 +293,7 @@ export class LiveFooterController {
 
   resize(): Promise<void> {
     return this.#enqueue(async () => {
+      this.#assertOperational();
       if (this.#cleaned || this.#model === undefined) return;
       const width = normalizeWidth(this.#width());
       if (width === this.#lastRenderWidth) return;
@@ -290,7 +303,7 @@ export class LiveFooterController {
 
   cleanup(): Promise<void> {
     return this.#enqueue(async () => {
-      if (this.#cleaned) return;
+      if (this.#failed || this.#cleaned) return;
       await this.#clearRendered();
       await this.#write("\r\n");
       this.#cleaned = true;
@@ -301,6 +314,22 @@ export class LiveFooterController {
     const result = this.#tail.then(operation);
     this.#tail = result.catch(() => undefined);
     return result;
+  }
+
+  #assertOperational(): void {
+    if (this.#failed) throw this.#failure;
+  }
+
+  #disable(error: unknown): void {
+    if (!this.#failed) {
+      this.#failed = true;
+      this.#failure = error;
+    }
+    // An accepted write that later fails makes the cursor and footer contents
+    // unknowable. Relinquish ownership rather than clearing presumed lines.
+    this.#renderedLineCount = 0;
+    this.#lastRenderTime = undefined;
+    this.#lastRenderWidth = undefined;
   }
 
   async #redraw(model: LiveFooterModel, width: number, now: number): Promise<void> {
@@ -332,29 +361,80 @@ export class LiveFooterController {
 
   #write(chunk: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
+      let returned = false;
+      let accepted = false;
+      let needsDrain = false;
+      let drained = false;
+      let callbackComplete = false;
+      let failureRecorded = false;
+      let failure: unknown;
+      let callbackFailed = false;
       let settled = false;
-      const finish = (error?: unknown) => {
-        if (settled) return;
-        settled = true;
+
+      const removeListeners = () => {
         this.#output.removeListener("drain", onDrain);
         this.#output.removeListener("error", onError);
         this.#output.removeListener("close", onClose);
-        if (error === undefined) resolve();
-        else reject(error);
       };
-      const onDrain = () => finish();
-      const onError = (error: unknown) => finish(error);
-      const onClose = () => finish(Object.assign(new Error("Writable closed before drain"), {
+      const rejectWrite = (error: unknown, deferListenerRemoval = false) => {
+        if (settled) return;
+        settled = true;
+        if (accepted) this.#disable(error);
+        // Node may emit 'error' immediately after invoking a write callback
+        // with that same error. Keep our listener through the callback stack.
+        if (deferListenerRemoval) queueMicrotask(removeListeners);
+        else removeListeners();
+        reject(error);
+      };
+      const tryFinish = () => {
+        if (!returned || settled) return;
+        if (failureRecorded) {
+          rejectWrite(failure, callbackFailed);
+          return;
+        }
+        if (!callbackComplete || (needsDrain && !drained)) return;
+        settled = true;
+        removeListeners();
+        resolve();
+      };
+      const recordFailure = (error: unknown, fromCallback = false) => {
+        if (!failureRecorded) {
+          failureRecorded = true;
+          failure = error;
+          callbackFailed = fromCallback;
+        }
+        tryFinish();
+      };
+      const onDrain = () => {
+        drained = true;
+        tryFinish();
+      };
+      const onError = (error: unknown) => recordFailure(error);
+      const onClose = () => recordFailure(Object.assign(new Error("Writable closed before write completed"), {
         code: "ERR_STREAM_PREMATURE_CLOSE",
       }));
+      const onWrite = (error?: Error | null) => {
+        callbackComplete = true;
+        if (error != null) recordFailure(error, true);
+        else tryFinish();
+      };
 
       this.#output.once("drain", onDrain);
       this.#output.once("error", onError);
       this.#output.once("close", onClose);
       try {
-        if (this.#output.write(chunk)) finish();
+        needsDrain = !this.#output.write(chunk, onWrite);
+        accepted = true;
+        returned = true;
+        tryFinish();
       } catch (error) {
-        finish(error);
+        returned = true;
+        // A throw before write() returns did not accept the chunk, so terminal
+        // state remains retryable even if the stream behaved unexpectedly.
+        failureRecorded = true;
+        failure = error;
+        callbackFailed = false;
+        rejectWrite(error);
       }
     });
   }

@@ -233,15 +233,30 @@ test("activity controls are sanitized before display-width measurement", () => {
   assert.match(output, /…/);
 });
 
+type WritePlan = boolean | Error | {
+  returns: boolean;
+  callbackError?: Error;
+  asynchronous?: boolean;
+  emitError?: boolean;
+};
+
 class RecordingWritable extends EventEmitter {
   chunks: string[] = [];
-  plans: Array<boolean | Error> = [];
+  plans: WritePlan[] = [];
 
-  write(chunk: string): boolean {
+  write(chunk: string, callback: (error?: Error) => void): boolean {
     const plan = this.plans.shift() ?? true;
     if (plan instanceof Error) throw plan;
     this.chunks.push(chunk);
-    return plan;
+    const returns = typeof plan === "boolean" ? plan : plan.returns;
+    const complete = () => {
+      const error = typeof plan === "boolean" ? undefined : plan.callbackError;
+      callback(error);
+      if (error !== undefined && plan.emitError) this.emit("error", error);
+    };
+    if (typeof plan !== "boolean" && plan.asynchronous) queueMicrotask(complete);
+    else complete();
+    return returns;
   }
 
   take(): string {
@@ -308,18 +323,27 @@ test("controller clearing emits exact ANSI and cleanup CRLF", async () => {
   assert.equal(many.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}\r\n`);
 });
 
-test("controller writeTimeline uses an explicit CRLF, then redraws with CRLF", async () => {
-  const { controller, output } = controllerFixture();
-  await controller.render(footerModel());
-  output.take();
+test("controller writeTimeline normalizes zero or many trailing newlines to one CRLF", async () => {
+  for (const [payload, expected] of [
+    ["17 event happened", "17 event happened\r\n"],
+    ["17 event happened\n", "17 event happened\r\n"],
+    ["17 event happened\r\n\r\n", "17 event happened\r\n"],
+    ["first\nsecond\n\n", "first\r\nsecond\r\n"],
+    ["", "\r\n"],
+    ["\n\r\n", "\r\n"],
+  ] as const) {
+    const { controller, output } = controllerFixture();
+    await controller.render(footerModel());
+    output.take();
 
-  await controller.writeTimeline("17 event happened");
-  assert.deepEqual(output.chunks, [
-    `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`,
-    "17 event happened\r\n",
-    "ACTIVE 80\r\nRunning tests",
-  ]);
-  assert.equal(controller.renderedLineCount, 2);
+    await controller.writeTimeline(payload);
+    assert.deepEqual(output.chunks, [
+      `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`,
+      expected,
+      "ACTIVE 80\r\nRunning tests",
+    ]);
+    assert.equal(controller.renderedLineCount, 2);
+  }
 });
 
 test("backpressure blocks later timeline and redraw writes, then preserves exact call order", async () => {
@@ -397,7 +421,7 @@ function footerClearSequenceForTest(lines: number): string {
   return ANSI_CLEAR_LINE + `${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`.repeat(lines - 1);
 }
 
-test("failed clear, timeline, and redraw writes reject without stalling queued operations", async () => {
+test("synchronous pre-accept write failures reject but remain safely retryable", async () => {
   const clear = controllerFixture();
   await clear.controller.render(footerModel());
   clear.output.take();
@@ -443,6 +467,42 @@ test("cleanup becomes idempotent only after clear and newline succeed", async ()
   assert.equal(fixture.output.take(), "\r\n");
   await fixture.controller.cleanup();
   assert.equal(fixture.output.take(), "");
+});
+
+test("accepted asynchronous failure disables the controller and prevents unsafe clearing retries", async () => {
+  const fixture = controllerFixture();
+  await fixture.controller.render(footerModel());
+  fixture.output.take();
+  const error = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
+  fixture.output.plans.push({ returns: true, callbackError: error, asynchronous: true, emitError: true });
+
+  await assert.rejects(
+    fixture.controller.render(footerModel({ activity: "Changed" })),
+    (thrown) => thrown === error,
+  );
+  assert.equal(fixture.controller.failed, true);
+  assert.equal(fixture.controller.renderedLineCount, 0);
+  const outputAfterFailure = fixture.output.take();
+  assert.equal(outputAfterFailure, `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`);
+  assert.equal(fixture.output.listenerCount("error"), 0);
+  assert.equal(fixture.output.listenerCount("close"), 0);
+
+  await assert.rejects(fixture.controller.render(footerModel({ activity: "Unsafe retry" })), (thrown) => thrown === error);
+  await assert.rejects(fixture.controller.writeTimeline("unsafe event"), (thrown) => thrown === error);
+  await assert.rejects(fixture.controller.resize(), (thrown) => thrown === error);
+  await fixture.controller.cleanup();
+  assert.equal(fixture.output.take(), "");
+});
+
+test("write waits for a successful callback even when write returns true", async () => {
+  const fixture = controllerFixture();
+  fixture.output.plans.push({ returns: true, asynchronous: true });
+  const render = fixture.controller.render(footerModel());
+  let completed = false;
+  void render.then(() => { completed = true; });
+  assert.equal(completed, false);
+  await render;
+  assert.equal(completed, true);
 });
 
 test("backpressure rejects on error or close and preserves EPIPE identity", async () => {

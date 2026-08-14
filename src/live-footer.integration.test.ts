@@ -185,6 +185,35 @@ test("active supported TTY prints header, bounded history, and guidance before t
   await attached;
 });
 
+test("active TTY defaults unknown zero columns to a full footer and still honors positive resize", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const output = ttyOutput();
+  output.columns = 0;
+  const captured = collect(output);
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm-256color",
+    pollMs: 5,
+  });
+
+  await waitForText(captured.text, "ACTIVE ·", abort);
+  const initial = captured.text();
+  assert.match(initial, new RegExp(`─{80}`));
+  assert.match(initial, /ACTIVE · You ran · echo history/u);
+  assert.match(initial, /\r\nrecorded\r\n/u);
+  assert.match(initial, /capture ok .* 2 ev/u);
+  assert.doesNotMatch(initial, /(?:^|\n)…(?:\r?\n|$)/u);
+
+  output.columns = 60;
+  output.emit("resize");
+  await waitForText(captured.text, footerClearSequence(4), abort);
+  assert.match(captured.text().slice(captured.text().indexOf(footerClearSequence(4))), new RegExp(`─{60}`));
+
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "stop-zero-columns", "session.shutdown"))}\n`);
+  await attached;
+});
+
 test("live batches retain normalized append order once and update request/completion and nonnarrated status", async (t) => {
   const { eventsFile, initial, selection } = await fixture(t);
   const output = ttyOutput();

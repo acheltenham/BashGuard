@@ -1857,6 +1857,11 @@ type AttachOutput = NodeJS.WritableStream & {
   off?(event: "resize", listener: () => void): unknown;
 };
 
+export function terminalColumns(output: { columns?: number }, fallback = 80): number {
+  const columns = output.columns;
+  return Number.isFinite(columns) && columns !== undefined && columns > 0 ? columns : fallback;
+}
+
 export type AttachRunnerRuntime = {
   input?: NodeJS.ReadableStream & { isTTY?: boolean };
   output?: AttachOutput;
@@ -1946,7 +1951,7 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
   let interrupted = false;
   let resizeDrainQueued = false;
   let resizeDirty = false;
-  let pendingResizeWidth = output.columns ?? 80;
+  let pendingResizeWidth = terminalColumns(output);
   let lifecycleTail: Promise<void> = Promise.resolve();
   const interrupt = new AbortController();
   const now = runtime.now ?? Date.now;
@@ -2044,7 +2049,7 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
   };
   const onResize = (): void => {
     if (completed || interrupted || footerState !== "active") return;
-    pendingResizeWidth = output.columns ?? 80;
+    pendingResizeWidth = terminalColumns(output);
     resizeDirty = true;
     if (resizeDrainQueued) return;
     resizeDrainQueued = true;
@@ -2062,8 +2067,8 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
             if (captured.resize) await captured.resize();
           });
           if (result.kind !== "completed") break;
-          if ((output.columns ?? 80) !== requestedWidth) {
-            pendingResizeWidth = output.columns ?? 80;
+          if (terminalColumns(output) !== requestedWidth) {
+            pendingResizeWidth = terminalColumns(output);
             resizeDirty = true;
           }
         }
@@ -2085,7 +2090,7 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
     controller = (runtime.createController ?? createLiveFooterController)({
       output: output as StructuralWritable,
       clock: runtime.now,
-      width: () => output.columns ?? 80,
+      width: () => terminalColumns(output),
     });
     if (typeof output.on === "function" && typeof output.off === "function") output.on("resize", onResize);
     runtime.signalSource?.on("SIGINT", onSigint);

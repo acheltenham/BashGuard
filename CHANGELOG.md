@@ -11,8 +11,8 @@ All notable project changes will be recorded here.
 
 ### Fixed
 
-- Live timeline writes and terminal resize now clear and redraw only the temporary footer. Recorded shutdown leaves one ordinary completed status block; `Ctrl+C`, errors, and `EPIPE` clean up without alternate-screen or hidden-cursor state.
-- Completed sessions, non-TTY output, missing or `dumb` `TERM`, redirects, and `--no-live-footer` preserve plain output; redirected output remains free of footer ANSI sequences.
+- Live timeline writes and terminal resize now clear and redraw only the temporary footer. Recorded shutdown leaves one ordinary completed status block; `Ctrl+C` and ordinary errors clear the temporary footer and scoped handlers. If an accepted write fails with `EPIPE`, BashGuard disables footer/output and removes scoped handlers/listeners without another write or stack trace; already-visible footer lines are not guaranteed to clear because stream and terminal state are then unknowable.
+- Completed sessions, non-TTY output, missing or `dumb` `TERM`, redirects, and `--no-live-footer` preserve plain output and emit no footer-generated ANSI or cursor-control sequences. Arbitrary recorded timeline payloads are not claimed to be universally ANSI-free.
 
 ## 0.4.0 - 2026-08-13
 

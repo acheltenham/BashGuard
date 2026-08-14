@@ -91,7 +91,9 @@ A terminal-only adapter tracks rendered line count and last render time. It:
 - writes/redraws around timeline events;
 - suppresses unchanged redraws except one-second freshness refresh;
 - responds to terminal resize;
-- cleans up on normal completion, errors, `EPIPE`, and process termination paths;
+- clears its tracked region on normal completion, `Ctrl+C`, and ordinary errors;
+- on a stream-accepted `EPIPE`, disables further output and relinquishes tracked terminal state so cleanup cannot write recursively;
+- removes its scoped stream listeners on every exit path, while attach integration removes its scoped process handlers;
 - never uses the alternate screen, hides the cursor, or requires mouse input.
 
 The controller does not interpret BashGuard events or evidence.
@@ -115,16 +117,20 @@ In sticky mode, the footer replaces the startup static status block to avoid dup
 
 Completed-session attach, redirected output, piped output, `TERM=dumb`, and explicit `--no-live-footer` retain the existing ordinary status block and timeline behavior.
 
-If terminal capabilities become uncertain, BashGuard visibly degrades to plain text rather than emitting speculative ANSI sequences.
+If terminal capabilities become uncertain while output remains writable, BashGuard visibly degrades to plain text rather than emitting speculative ANSI sequences. An accepted `EPIPE` is the exception: output itself is disabled, so degradation must be silent.
 
 ## Lifecycle and cleanup
 
 - No alternate screen.
 - Cursor remains visible.
 - Resize triggers one recalculation/redraw.
-- `Ctrl+C`, shutdown, `EPIPE`, and unexpected errors clear temporary footer lines and leave a normal newline/cursor position.
+- `Ctrl+C`, shutdown, and unexpected ordinary errors clear temporary footer lines and leave a normal newline/cursor position.
 - Shutdown renders one final ordinary completed status block where appropriate.
 - Cleanup handlers are scoped to attach and removed afterward.
+
+**Approved cleanup target:** The original design included `EPIPE` with the paths that clear temporary lines and restore a normal cursor position.
+
+**Actual accepted-`EPIPE` degradation:** Once a write has been accepted and then fails, BashGuard cannot know what reached the stream or terminal. It disables footer/output, drops tracked rendered-line ownership, aborts attach, and removes scoped stream/process handlers and listeners without another cleanup write or stack trace. It therefore does **not** guarantee that already-visible temporary footer lines are cleared.
 
 ## CLI
 
@@ -151,8 +157,8 @@ Write tests first for:
 - disabled behavior for non-TTY, completed sessions, `TERM=dumb`, and `--no-live-footer`;
 - partial JSONL boundaries and malformed lines;
 - shutdown finalization and cleanup;
-- `Ctrl+C`, `EPIPE`, and unexpected-error cleanup;
-- regression that redirected attach remains byte-for-byte free of footer ANSI;
+- `Ctrl+C` and unexpected-error cleanup, plus accepted-`EPIPE` output disablement and listener removal without recursive writes;
+- regression that redirected attach emits no known footer CSI cursor-up/erase sequences or sticky separator/redraw behavior (without making a universal claim about arbitrary recorded payload bytes);
 - real PTY active attach with resize, live events, and shutdown;
 - narrow-terminal PTY smoke testing.
 

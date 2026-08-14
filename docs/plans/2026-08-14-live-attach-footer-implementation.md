@@ -482,7 +482,7 @@ Use isolated `BASHGUARD_DATA_DIR` and local package worktree. Validate in a real
 - timeline event appears above footer;
 - shutdown produces final ordinary completed status;
 - Ctrl+C cleanup;
-- `--no-live-footer`, redirect, and `TERM=dumb` remain ANSI-free plain text.
+- `--no-live-footer`, redirect, and `TERM=dumb` remain plain text with no footer-generated ANSI/cursor-control sequences; arbitrary recorded payload bytes are outside that claim.
 
 Record only sanitized output.
 

@@ -136,7 +136,7 @@ You can pin a branch, tag, or commit. Use `@main` for the latest pre-release cod
 
 ```bash
 pi -e git:github.com/acheltenham/BashGuard@main
-pi -e git:github.com/acheltenham/BashGuard@v0.3.0
+pi -e git:github.com/acheltenham/BashGuard@v0.4.0
 ```
 
 For local development, load your checkout for one Pi run:
@@ -164,8 +164,8 @@ pi install -l git:github.com/acheltenham/BashGuard
 For repeatable installs, prefer a tagged release after the tag exists:
 
 ```bash
-pi install git:github.com/acheltenham/BashGuard@v0.3.0
-pi install -l git:github.com/acheltenham/BashGuard@v0.3.0
+pi install git:github.com/acheltenham/BashGuard@v0.4.0
+pi install -l git:github.com/acheltenham/BashGuard@v0.4.0
 ```
 
 To test changes newer than the latest release, use `@main` for the current development branch:

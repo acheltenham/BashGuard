@@ -370,19 +370,30 @@ export class LiveFooterController {
       let failure: unknown;
       let callbackFailed = false;
       let settled = false;
+      let listenersRemoved = false;
+      let listenerCleanupScheduled = false;
 
       const removeListeners = () => {
+        if (listenersRemoved) return;
+        listenersRemoved = true;
         this.#output.removeListener("drain", onDrain);
         this.#output.removeListener("error", onError);
         this.#output.removeListener("close", onClose);
       };
-      const rejectWrite = (error: unknown, deferListenerRemoval = false) => {
+      const scheduleListenerRemoval = () => {
+        if (listenerCleanupScheduled || listenersRemoved) return;
+        listenerCleanupScheduled = true;
+        setImmediate(removeListeners);
+      };
+      const rejectWrite = (error: unknown, awaitAssociatedError = false) => {
         if (settled) return;
         settled = true;
         if (accepted) this.#disable(error);
-        // Node may emit 'error' immediately after invoking a write callback
-        // with that same error. Keep our listener through the callback stack.
-        if (deferListenerRemoval) queueMicrotask(removeListeners);
+        // A real Node Writable can invoke its write callback from a microtask,
+        // then emit the associated 'error' on nextTick. Keep the listener until
+        // that event is observed, with bounded cleanup for non-Node streams
+        // that report only through the callback.
+        if (awaitAssociatedError) scheduleListenerRemoval();
         else removeListeners();
         reject(error);
       };
@@ -409,7 +420,10 @@ export class LiveFooterController {
         drained = true;
         tryFinish();
       };
-      const onError = (error: unknown) => recordFailure(error);
+      const onError = (error: unknown) => {
+        recordFailure(error);
+        removeListeners();
+      };
       const onClose = () => recordFailure(Object.assign(new Error("Writable closed before write completed"), {
         code: "ERR_STREAM_PREMATURE_CLOSE",
       }));

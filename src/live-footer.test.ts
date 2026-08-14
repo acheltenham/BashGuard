@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
+import { Writable } from "node:stream";
 import stringWidth from "string-width";
 
 import { buildAttachStatus, type AttachStatus, type BashGuardEvent } from "./cli.ts";
@@ -492,6 +493,49 @@ test("accepted asynchronous failure disables the controller and prevents unsafe 
   await assert.rejects(fixture.controller.resize(), (thrown) => thrown === error);
   await fixture.controller.cleanup();
   assert.equal(fixture.output.take(), "");
+});
+
+test("real Writable callback EPIPE remains handled through Node's deferred error event", async () => {
+  const error = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
+  const output = new Writable({
+    write(_chunk, _encoding, callback) {
+      queueMicrotask(() => callback(error));
+    },
+  });
+  const controller = createLiveFooterController({
+    output,
+    formatter: (model) => [model.state],
+    width: () => 80,
+  });
+
+  let rejectionCount = 0;
+  const render = controller.render(footerModel()).catch((thrown: unknown) => {
+    rejectionCount += 1;
+    throw thrown;
+  });
+  await assert.rejects(render, (thrown) => thrown === error);
+  assert.equal(controller.failed, true);
+  assert.equal(output.listenerCount("error"), 1);
+
+  await new Promise<void>((resolve) => process.nextTick(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(rejectionCount, 1);
+  assert.equal(output.listenerCount("error"), 0);
+  assert.equal(output.listenerCount("close"), 0);
+  await assert.rejects(controller.render(footerModel({ activity: "Unsafe retry" })), (thrown) => thrown === error);
+});
+
+test("callback failure listener cleanup is bounded when a stream emits no error", async () => {
+  const fixture = controllerFixture();
+  const error = new Error("callback only failure");
+  fixture.output.plans.push({ returns: true, callbackError: error, asynchronous: true });
+
+  await assert.rejects(fixture.controller.render(footerModel()), (thrown) => thrown === error);
+  assert.equal(fixture.output.listenerCount("error"), 1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(fixture.output.listenerCount("error"), 0);
+  assert.equal(fixture.output.listenerCount("drain"), 0);
+  assert.equal(fixture.output.listenerCount("close"), 0);
 });
 
 test("write waits for a successful callback even when write returns true", async () => {

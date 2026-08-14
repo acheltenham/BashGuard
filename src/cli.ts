@@ -735,8 +735,7 @@ export type AttachStatus = {
   capture: string;
   eventCount: number;
   lastObserved: string;
-  /** Structured companion to `capture`; non-enumerable to preserve the plain/deep-equality API. */
-  captureSummary?: AttachCaptureSummary;
+  captureSummary: AttachCaptureSummary;
 };
 
 function relativeEventAge(timestamp: string | undefined, now: number): string {
@@ -796,17 +795,14 @@ export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now
     capture: normalized.length === 0 ? "No capture metadata recorded" : captureIssues.length > 0 ? `Partial · ${captureIssues.join(" · ")}` : "No recorded capture limitations",
     eventCount: normalized.length,
     lastObserved: relativeEventAge(normalized.at(-1)?.timestamp, now),
-  };
-  Object.defineProperty(status, "captureSummary", {
-    value: {
+    captureSummary: {
       state: normalized.length === 0 ? "unknown" : captureIssues.length > 0 ? "partial" : "ok",
       gaps: captureGaps,
       missing: missingEvents,
       redacted: redactedEvents,
       truncated: truncatedEvents,
-    } satisfies AttachCaptureSummary,
-    enumerable: false,
-  });
+    },
+  };
   return status;
 }
 

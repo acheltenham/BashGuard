@@ -977,8 +977,16 @@ test("buildAttachStatus reports only correlated unmatched tool requests as curre
     activity: "Running · npm test",
     evidence: "request recorded; completion not recorded yet",
     capture: "No recorded capture limitations",
+    captureSummary: { state: "ok", gaps: 0, missing: 0, redacted: 0, truncated: 0 },
     eventCount: 2,
     lastObserved: "8s ago",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(status)).captureSummary, {
+    state: "ok",
+    gaps: 0,
+    missing: 0,
+    redacted: 0,
+    truncated: 0,
   });
 });
 
@@ -1041,6 +1049,7 @@ test("formatAttachStatus compacts multiline activity", () => {
     activity: `Running · npm test\necho done\n${"x".repeat(300)}`,
     evidence: "request recorded; completion not recorded yet",
     capture: "No recorded capture limitations",
+    captureSummary: { state: "ok", gaps: 0, missing: 0, redacted: 0, truncated: 0 },
     eventCount: 2,
     lastObserved: "1s ago",
   });

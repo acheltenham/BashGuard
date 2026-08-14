@@ -11,6 +11,7 @@ function status(overrides: Partial<AttachStatus> = {}): AttachStatus {
     activity: "Running · npm test",
     evidence: "request recorded; completion not recorded yet",
     capture: "No recorded capture limitations",
+    captureSummary: { state: "ok", gaps: 0, missing: 0, redacted: 0, truncated: 0 },
     eventCount: 42,
     lastObserved: "2s ago",
     ...overrides,
@@ -55,7 +56,10 @@ test("buildLiveFooterModel maps current unmatched and completed recorded evidenc
 });
 
 test("buildLiveFooterModel reports unknown and structured partial capture honestly", () => {
-  assert.equal(buildLiveFooterModel(status({ capture: "No capture metadata recorded" })).capture, "capture unknown");
+  assert.equal(buildLiveFooterModel(status({
+    capture: "No capture metadata recorded",
+    captureSummary: { state: "unknown", gaps: 0, missing: 0, redacted: 0, truncated: 0 },
+  })).capture, "capture unknown");
 
   const partial = buildAttachStatus([
     event(1, "capture.gap", { capture: { missing: [], redacted: ["secret"], truncated: ["output"] } }),
@@ -65,10 +69,11 @@ test("buildLiveFooterModel reports unknown and structured partial capture honest
   assert.deepEqual(model.captureDetails, ["1 gap", "2 truncated", "1 missing", "1 redacted"]);
   assert.match(formatLiveFooter(model, 120).join("\n"), /capture partial · 1 gap · 2 truncated · 1 missing · 1 redacted/);
 
-  const legacy = buildLiveFooterModel(status({
-    capture: "Partial · 2 capture gaps · 3 events with missing fields · 1 redacted event · 4 truncated events",
+  const structured = buildLiveFooterModel(status({
+    capture: "prose is not parsed",
+    captureSummary: { state: "partial", gaps: 2, missing: 3, redacted: 1, truncated: 4 },
   }));
-  assert.deepEqual(legacy.captureDetails, ["2 gap", "4 truncated", "3 missing", "1 redacted"]);
+  assert.deepEqual(structured.captureDetails, ["2 gap", "4 truncated", "3 missing", "1 redacted"]);
 });
 
 test("wide footer has a separator and exactly three content lines", () => {
@@ -95,14 +100,28 @@ test("medium footer is bounded to at most four content lines", () => {
   }
 });
 
-test("narrow footer is one bounded line", () => {
-  for (const columns of [1, 2, 8, 20, 39]) {
-    const lines = formatLiveFooter(buildLiveFooterModel(status()), columns);
-    assert.equal(lines.length, 1);
-    assertBounded(lines, columns);
+test("narrow footer keeps the complete state whenever it fits", () => {
+  const active = buildLiveFooterModel(status());
+  const done = buildLiveFooterModel(status({ state: "complete" }));
+  const activeExpected = ["ACT…", "ACTI…", "ACTIVE", "ACTIVE", "ACTIVE", "ACTIVE", "ACTIVE", "ACTIVE", "ACTIVE"];
+  const doneExpected = ["DONE", "DONE", "DONE", "DONE", "DONE", "DONE", "DONE", "DONE", "DONE"];
+
+  for (const [index, columns] of Array.from({ length: 9 }, (_, offset) => offset + 4).entries()) {
+    assert.equal(formatLiveFooter(active, columns)[0], activeExpected[index]);
+    assert.equal(formatLiveFooter(done, columns)[0], doneExpected[index]);
   }
-  assert.match(formatLiveFooter(buildLiveFooterModel(status()), 39)[0], /^ACTIVE/);
-  assert.equal(formatLiveFooter(buildLiveFooterModel(status()), 2)[0], "A…");
+
+  assert.equal(formatLiveFooter(active, 2)[0], "A…");
+  assert.match(formatLiveFooter(active, 39)[0], /^ACTIVE/);
+});
+
+test("columns normalize to a finite positive integer with a minimum of one", () => {
+  const model = buildLiveFooterModel(status());
+  for (const columns of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -20]) {
+    const lines = formatLiveFooter(model, columns);
+    assert.deepEqual(lines, ["…"]);
+  }
+  assert.deepEqual(formatLiveFooter(model, 8.9), formatLiveFooter(model, 8));
 });
 
 test("width pressure drops event count before freshness and higher-priority fields", () => {
@@ -120,12 +139,17 @@ test("width pressure drops event count before freshness and higher-priority fiel
   assert.doesNotMatch(output, /42 ev/);
 });
 
-test("width pressure never retains event count after freshness is dropped", () => {
-  const model = buildLiveFooterModel(status({
-    lastObserved: "a freshness value too long to fit beside the capture summary at this width",
-  }));
+test("wide width pressure reserves freshness before optional capture details and event count", () => {
+  const model: LiveFooterModel = {
+    ...buildLiveFooterModel(status()),
+    capture: "capture partial",
+    captureDetails: ["12 gaps", "8 truncated", "3 missing", "2 redacted"],
+    freshness: "12 seconds ago",
+  };
   const output = formatLiveFooter(model, 72).join("\n");
-  assert.doesNotMatch(output, /a freshness value/);
+  assert.match(output, /capture partial/);
+  assert.match(output, /12 seconds ago/);
+  assert.doesNotMatch(output, /2 redacted/);
   assert.doesNotMatch(output, /42 ev/);
 });
 

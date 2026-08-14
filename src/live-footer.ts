@@ -1,4 +1,4 @@
-import type { AttachCaptureSummary, AttachStatus } from "./cli.ts";
+import type { AttachStatus } from "./cli.ts";
 import { singleLineDisplay } from "./session-format.ts";
 
 export type LiveFooterModel = {
@@ -16,33 +16,12 @@ function display(value: string): string {
   return singleLineDisplay(value.replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|[@-_])/gu, ""));
 }
 
-function captureSummary(status: AttachStatus): AttachCaptureSummary {
-  if (status.captureSummary) return status.captureSummary;
-  if (status.capture === "No recorded capture limitations") {
-    return { state: "ok", gaps: 0, missing: 0, redacted: 0, truncated: 0 };
-  }
-  if (status.capture === "No capture metadata recorded") {
-    return { state: "unknown", gaps: 0, missing: 0, redacted: 0, truncated: 0 };
-  }
-
-  // Compatibility for AttachStatus values serialized before captureSummary was
-  // available. New buildAttachStatus results use the structured path above.
-  const count = (pattern: RegExp): number => Number(pattern.exec(status.capture)?.[1] ?? 0);
-  return {
-    state: "partial",
-    gaps: count(/(?:^| · )(\d+) capture gaps?(?: · |$)/u),
-    missing: count(/(?:^| · )(\d+) events? with missing fields(?: · |$)/u),
-    redacted: count(/(?:^| · )(\d+) redacted events?(?: · |$)/u),
-    truncated: count(/(?:^| · )(\d+) truncated events?(?: · |$)/u),
-  };
-}
-
 function countLabel(count: number, label: string): string | undefined {
   return count > 0 ? `${count} ${label}` : undefined;
 }
 
 export function buildLiveFooterModel(status: AttachStatus): LiveFooterModel {
-  const summary = captureSummary(status);
+  const summary = status.captureSummary;
   const captureDetails = [
     countLabel(summary.gaps, "gap"),
     countLabel(summary.truncated, "truncated"),
@@ -95,7 +74,7 @@ function addTokensWithin(tokens: string[], columns: number): { line: string; dro
 }
 
 export function formatLiveFooter(model: LiveFooterModel, columns: number): string[] {
-  const width = Math.max(1, Math.trunc(columns) || 1);
+  const width = Number.isFinite(columns) && columns > 0 ? Math.max(1, Math.trunc(columns)) : 1;
   const state = display(model.state);
   const activity = display(model.activity);
   const evidence = display(model.evidence);
@@ -105,11 +84,13 @@ export function formatLiveFooter(model: LiveFooterModel, columns: number): strin
   const eventCount = `${Math.max(0, Math.trunc(model.eventCount) || 0)} ev`;
 
   if (width < 40) {
-    let line = "";
-    for (const token of [state, activity, evidence, capture, freshness, eventCount]) {
-      const candidate = line ? `${line} · ${token}` : token;
-      if (candidate.length <= width) line = candidate;
-      else return [bounded(candidate, width)];
+    if (state.length > width) return [bounded(state, width)];
+
+    let line = state;
+    for (const token of [activity, evidence, capture, freshness, eventCount]) {
+      const candidate = `${line} · ${token}`;
+      if (candidate.length > width) break;
+      line = candidate;
     }
     return [line];
   }
@@ -119,8 +100,20 @@ export function formatLiveFooter(model: LiveFooterModel, columns: number): strin
   const evidenceLine = bounded(evidence, width);
 
   if (width >= 72) {
-    const summary = addTokensWithin([capture, ...details, freshness, eventCount], width).line;
-    return [separator, activityLine, evidenceLine, summary];
+    const essentialSummary = `${capture} · ${freshness}`;
+    if (essentialSummary.length > width) {
+      return [separator, activityLine, evidenceLine, bounded(essentialSummary, width)];
+    }
+
+    const includedDetails: string[] = [];
+    for (const detail of details) {
+      const candidate = [capture, ...includedDetails, detail, freshness].join(" · ");
+      if (candidate.length > width) break;
+      includedDetails.push(detail);
+    }
+    const summary = [capture, ...includedDetails, freshness];
+    const withEventCount = [...summary, eventCount].join(" · ");
+    return [separator, activityLine, evidenceLine, withEventCount.length <= width ? withEventCount : summary.join(" · ")];
   }
 
   const captureLine = addTokensWithin([capture, ...details], width);

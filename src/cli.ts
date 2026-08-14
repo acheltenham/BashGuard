@@ -8,7 +8,7 @@ import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
-import { buildLiveFooterModel, createLiveFooterController, LIVE_FOOTER_REFRESH_MS, type LiveFooterController, type StructuralWritable } from "./live-footer.ts";
+import { buildLiveFooterModel, createLiveFooterController, FooterOperationError, LIVE_FOOTER_REFRESH_MS, type LiveFooterController, type StructuralWritable } from "./live-footer.ts";
 import { sessionChoiceDisplay, shellQuoteArgument, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
 import { promptForSessionChoice } from "./session-picker.ts";
 
@@ -1853,6 +1853,9 @@ type AttachSignalSource = {
 type AttachOutput = NodeJS.WritableStream & {
   isTTY?: boolean;
   columns?: number;
+  destroyed?: boolean;
+  writable?: boolean;
+  writableEnded?: boolean;
   on?(event: "resize", listener: () => void): unknown;
   off?(event: "resize", listener: () => void): unknown;
 };
@@ -1879,8 +1882,8 @@ export type AttachRunnerRuntime = {
   onSnapshot?: (events: readonly BashGuardEvent[], status: AttachStatus) => void;
 };
 
-function footerWriteWasAccepted(controller: AttachFooterController, error: unknown): boolean {
-  return controller.failed || (error as { accepted?: unknown } | undefined)?.accepted === true;
+function footerTimelineWasAccepted(error: unknown): boolean {
+  return error instanceof FooterOperationError && error.timelineAccepted === true;
 }
 
 export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunnerRuntime = {}): Promise<BashGuardEvent[]> {
@@ -1970,17 +1973,50 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
     lifecycleTail = result.then(() => undefined, () => undefined);
     return result;
   };
+  const removeFooterListeners = (): void => {
+    if (typeof output.off === "function") output.off("resize", onResize);
+    runtime.signalSource?.off("SIGINT", onSigint);
+  };
+  const writeSafeFallback = async (text: string): Promise<boolean> => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (output.destroyed === true || output.writable === false || output.writableEnded === true) return false;
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      let removalScheduled = false;
+      const removeErrorListener = () => output.removeListener("error", onError);
+      const finish = (success: boolean, awaitAssociatedError = false) => {
+        if (settled) return;
+        settled = true;
+        if (awaitAssociatedError && !removalScheduled) {
+          removalScheduled = true;
+          setImmediate(removeErrorListener);
+        } else {
+          removeErrorListener();
+        }
+        resolve(success);
+      };
+      const onError = () => finish(false);
+      output.once("error", onError);
+      try {
+        output.write(text, (writeError?: Error | null) => finish(writeError == null, writeError != null));
+      } catch {
+        finish(false);
+      }
+    });
+  };
   const degradeFooter = async (owned: AttachFooterController, status: AttachStatus, error: unknown): Promise<void> => {
     if (footerState !== "active" || controller !== owned) return;
     footerState = "degraded";
     controller = undefined;
     plainAfterFooterFailure = true;
+    removeFooterListeners();
+    const acceptedFailure = error instanceof FooterOperationError && error.accepted;
     if ((error as NodeJS.ErrnoException | undefined)?.code === "EPIPE") {
       outputFailed = true;
       interrupt.abort();
       return;
     }
-    if (owned.cleanup && !owned.failed) {
+    if (owned.cleanup && !acceptedFailure && !owned.failed) {
       try {
         await owned.cleanup();
       } catch (cleanupError) {
@@ -1991,8 +2027,15 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
         }
       }
     }
-    write("\r\nLive footer unavailable; continuing with plain status.\n");
-    write(formatAttachStatus(status));
+    const fallback = `\r\nLive footer unavailable; continuing with plain status.\n${formatAttachStatus(status)}`;
+    if (acceptedFailure) {
+      if (!await writeSafeFallback(fallback)) {
+        outputFailed = true;
+        interrupt.abort();
+      }
+    } else {
+      write(fallback);
+    }
   };
   const operateController = async <T>(
     owned: AttachFooterController,
@@ -2223,7 +2266,7 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
               try {
                 await owned.writeTimeline(rendered);
               } catch (error) {
-                acceptedWrite = footerWriteWasAccepted(owned, error);
+                acceptedWrite = footerTimelineWasAccepted(error);
                 throw error;
               }
             }

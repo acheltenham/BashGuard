@@ -10,6 +10,7 @@ import {
   ANSI_CURSOR_UP,
   buildLiveFooterModel,
   createLiveFooterController,
+  FooterOperationError,
   formatLiveFooter,
   type LiveFooterModel,
 } from "./live-footer.ts";
@@ -451,6 +452,68 @@ test("synchronous pre-accept write failures reject but remain safely retryable",
   assert.equal(redraw.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}event\r\nACTIVE 80\r\nRunning tests`);
 });
 
+test("timeline failures expose phase, acceptance, cause, and code metadata", async () => {
+  const clear = controllerFixture();
+  await clear.controller.render(footerModel());
+  clear.output.take();
+  const clearCause = Object.assign(new Error("clear EIO"), { code: "EIO" });
+  clear.output.plans.push({ returns: true, callbackError: clearCause, asynchronous: true, emitError: true });
+  await assert.rejects(clear.controller.writeTimeline("clear replay"), (error: unknown) => {
+    assert.ok(error instanceof FooterOperationError);
+    assert.equal(error.phase, "clear");
+    assert.equal(error.timelineAccepted, false);
+    assert.equal(error.accepted, true);
+    assert.equal(error.code, "EIO");
+    assert.equal(error.cause, clearCause);
+    return true;
+  });
+  const outputAfterAcceptedClearFailure = clear.output.take();
+  await clear.controller.cleanup();
+  assert.equal(clear.output.take(), "", "accepted ordinary failures must not trigger cursor-up cleanup");
+  assert.equal(outputAfterAcceptedClearFailure.split(ANSI_CURSOR_UP).length - 1, 1);
+
+  const payload = controllerFixture();
+  await payload.controller.render(footerModel());
+  payload.output.take();
+  const payloadCause = Object.assign(new Error("payload EIO"), { code: "EIO" });
+  payload.output.plans.push(true, { returns: true, callbackError: payloadCause, asynchronous: true, emitError: true });
+  await assert.rejects(payload.controller.writeTimeline("accepted once"), (error: unknown) => {
+    assert.ok(error instanceof FooterOperationError);
+    assert.equal(error.phase, "timeline");
+    assert.equal(error.timelineAccepted, true);
+    assert.equal(error.accepted, true);
+    assert.equal(error.code, "EIO");
+    assert.equal(error.cause, payloadCause);
+    return true;
+  });
+
+  const redraw = controllerFixture();
+  await redraw.controller.render(footerModel());
+  redraw.output.take();
+  const redrawCause = new Error("redraw failed");
+  redraw.output.plans.push(true, true, redrawCause);
+  await assert.rejects(redraw.controller.writeTimeline("already accepted"), (error: unknown) => {
+    assert.ok(error instanceof FooterOperationError);
+    assert.equal(error.phase, "redraw");
+    assert.equal(error.timelineAccepted, true);
+    assert.equal(error.accepted, false);
+    assert.equal(error.cause, redrawCause);
+    return true;
+  });
+
+  const synchronousPayload = controllerFixture();
+  await synchronousPayload.controller.render(footerModel());
+  synchronousPayload.output.take();
+  synchronousPayload.output.plans.push(true, new Error("payload throw"));
+  await assert.rejects(synchronousPayload.controller.writeTimeline("safe replay"), (error: unknown) => {
+    assert.ok(error instanceof FooterOperationError);
+    assert.equal(error.phase, "timeline");
+    assert.equal(error.timelineAccepted, false);
+    assert.equal(error.accepted, false);
+    return true;
+  });
+});
+
 test("cleanup is safe before any render and repeated cleanup writes one newline", async () => {
   const fixture = controllerFixture();
   await Promise.all([fixture.controller.cleanup(), fixture.controller.cleanup()]);
@@ -485,9 +548,14 @@ test("accepted asynchronous failure disables the controller and prevents unsafe 
   const error = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
   fixture.output.plans.push({ returns: true, callbackError: error, asynchronous: true, emitError: true });
 
+  let operationError: FooterOperationError | undefined;
   await assert.rejects(
     fixture.controller.render(footerModel({ activity: "Changed" })),
-    (thrown) => thrown === error,
+    (thrown: unknown) => {
+      assert.ok(thrown instanceof FooterOperationError);
+      operationError = thrown;
+      return thrown.cause === error && thrown.code === "EPIPE" && thrown.phase === "clear" && thrown.accepted;
+    },
   );
   assert.equal(fixture.controller.failed, true);
   assert.equal(fixture.controller.renderedLineCount, 0);
@@ -496,9 +564,9 @@ test("accepted asynchronous failure disables the controller and prevents unsafe 
   assert.equal(fixture.output.listenerCount("error"), 0);
   assert.equal(fixture.output.listenerCount("close"), 0);
 
-  await assert.rejects(fixture.controller.render(footerModel({ activity: "Unsafe retry" })), (thrown) => thrown === error);
-  await assert.rejects(fixture.controller.writeTimeline("unsafe event"), (thrown) => thrown === error);
-  await assert.rejects(fixture.controller.resize(), (thrown) => thrown === error);
+  await assert.rejects(fixture.controller.render(footerModel({ activity: "Unsafe retry" })), (thrown) => thrown === operationError);
+  await assert.rejects(fixture.controller.writeTimeline("unsafe event"), (thrown) => thrown === operationError);
+  await assert.rejects(fixture.controller.resize(), (thrown) => thrown === operationError);
   await fixture.controller.cleanup();
   assert.equal(fixture.output.take(), "");
 });
@@ -521,7 +589,12 @@ test("real Writable callback EPIPE remains handled through Node's deferred error
     rejectionCount += 1;
     throw thrown;
   });
-  await assert.rejects(render, (thrown) => thrown === error);
+  let operationError: FooterOperationError | undefined;
+  await assert.rejects(render, (thrown: unknown) => {
+    assert.ok(thrown instanceof FooterOperationError);
+    operationError = thrown;
+    return thrown.cause === error && thrown.code === "EPIPE" && thrown.accepted;
+  });
   assert.equal(controller.failed, true);
   assert.equal(output.listenerCount("error"), 1);
 
@@ -530,7 +603,7 @@ test("real Writable callback EPIPE remains handled through Node's deferred error
   assert.equal(rejectionCount, 1);
   assert.equal(output.listenerCount("error"), 0);
   assert.equal(output.listenerCount("close"), 0);
-  await assert.rejects(controller.render(footerModel({ activity: "Unsafe retry" })), (thrown) => thrown === error);
+  await assert.rejects(controller.render(footerModel({ activity: "Unsafe retry" })), (thrown) => thrown === operationError);
 });
 
 test("callback failure listener cleanup is bounded when a stream emits no error", async () => {
@@ -538,7 +611,10 @@ test("callback failure listener cleanup is bounded when a stream emits no error"
   const error = new Error("callback only failure");
   fixture.output.plans.push({ returns: true, callbackError: error, asynchronous: true });
 
-  await assert.rejects(fixture.controller.render(footerModel()), (thrown) => thrown === error);
+  await assert.rejects(fixture.controller.render(footerModel()), (thrown: unknown) => {
+    assert.ok(thrown instanceof FooterOperationError);
+    return thrown.cause === error && thrown.accepted;
+  });
   assert.equal(fixture.output.listenerCount("error"), 1);
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(fixture.output.listenerCount("error"), 0);
@@ -562,7 +638,10 @@ test("backpressure rejects on error or close and preserves EPIPE identity", asyn
   const error = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
   epiped.output.plans.push(false);
   const render = epiped.controller.render(footerModel());
-  const epipeRejection = assert.rejects(render, (thrown) => thrown === error && (thrown as NodeJS.ErrnoException).code === "EPIPE");
+  const epipeRejection = assert.rejects(render, (thrown: unknown) => thrown instanceof FooterOperationError
+    && thrown.cause === error
+    && thrown.code === "EPIPE"
+    && thrown.accepted);
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(epiped.output.listenerCount("error"), 1);
   epiped.output.emit("error", error);
@@ -571,7 +650,9 @@ test("backpressure rejects on error or close and preserves EPIPE identity", asyn
   const closed = controllerFixture();
   closed.output.plans.push(false);
   const closedRender = closed.controller.render(footerModel());
-  const closeRejection = assert.rejects(closedRender, (thrown: unknown) => (thrown as NodeJS.ErrnoException).code === "ERR_STREAM_PREMATURE_CLOSE");
+  const closeRejection = assert.rejects(closedRender, (thrown: unknown) => thrown instanceof FooterOperationError
+    && thrown.code === "ERR_STREAM_PREMATURE_CLOSE"
+    && thrown.accepted);
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(closed.output.listenerCount("close"), 1);
   closed.output.emit("close");

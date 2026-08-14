@@ -159,6 +159,41 @@ export type StructuralWritable = {
 
 export type LiveFooterFormatter = (model: LiveFooterModel, width: number) => readonly string[];
 
+export type FooterOperationPhase = "render" | "refresh" | "resize" | "clear" | "timeline" | "redraw" | "cleanup";
+
+export class FooterOperationError extends Error {
+  readonly phase: FooterOperationPhase;
+  readonly accepted: boolean;
+  readonly timelineAccepted?: boolean;
+  readonly code?: string;
+  override readonly cause: unknown;
+
+  constructor(
+    phase: FooterOperationPhase,
+    cause: unknown,
+    metadata: { accepted: boolean; timelineAccepted?: boolean },
+  ) {
+    super(cause instanceof Error ? cause.message : `Footer ${phase} operation failed`, { cause });
+    this.name = "FooterOperationError";
+    this.phase = phase;
+    this.accepted = metadata.accepted;
+    this.timelineAccepted = metadata.timelineAccepted;
+    this.cause = cause;
+    const code = (cause as { code?: unknown } | null | undefined)?.code;
+    if (typeof code === "string") this.code = code;
+  }
+}
+
+class FooterWriteError {
+  readonly cause: unknown;
+  readonly accepted: boolean;
+
+  constructor(cause: unknown, accepted: boolean) {
+    this.cause = cause;
+    this.accepted = accepted;
+  }
+}
+
 export type LiveFooterControllerOptions = {
   output: StructuralWritable;
   formatter?: LiveFooterFormatter;
@@ -240,32 +275,40 @@ export class LiveFooterController {
   render(model: LiveFooterModel): Promise<void> {
     const snapshot = copyModel(model);
     return this.#enqueue(async () => {
-      this.#assertOperational();
-      if (this.#cleaned) return;
-      const width = normalizeWidth(this.#width());
-      const now = this.#clock();
-      const changed = !modelsEqual(this.#model, snapshot);
-      const widthChanged = this.#lastRenderWidth !== width;
-      const freshnessDue = this.#lastRenderTime === undefined
-        || now < this.#lastRenderTime
-        || now - this.#lastRenderTime >= LIVE_FOOTER_REFRESH_MS;
-      if (!changed && !widthChanged && !freshnessDue) return;
-      await this.#redraw(snapshot, width, now);
+      try {
+        this.#assertOperational();
+        if (this.#cleaned) return;
+        const width = normalizeWidth(this.#width());
+        const now = this.#clock();
+        const changed = !modelsEqual(this.#model, snapshot);
+        const widthChanged = this.#lastRenderWidth !== width;
+        const freshnessDue = this.#lastRenderTime === undefined
+          || now < this.#lastRenderTime
+          || now - this.#lastRenderTime >= LIVE_FOOTER_REFRESH_MS;
+        if (!changed && !widthChanged && !freshnessDue) return;
+        await this.#redraw(snapshot, width, now);
+      } catch (error) {
+        throw this.#operationError("render", error);
+      }
     });
   }
 
   refresh(): Promise<void> {
     return this.#enqueue(async () => {
-      this.#assertOperational();
-      if (this.#cleaned || this.#model === undefined) return;
-      const width = normalizeWidth(this.#width());
-      const now = this.#clock();
-      const widthChanged = this.#lastRenderWidth !== width;
-      const freshnessDue = this.#lastRenderTime === undefined
-        || now < this.#lastRenderTime
-        || now - this.#lastRenderTime >= LIVE_FOOTER_REFRESH_MS;
-      if (!widthChanged && !freshnessDue) return;
-      await this.#redraw(this.#model, width, now);
+      try {
+        this.#assertOperational();
+        if (this.#cleaned || this.#model === undefined) return;
+        const width = normalizeWidth(this.#width());
+        const now = this.#clock();
+        const widthChanged = this.#lastRenderWidth !== width;
+        const freshnessDue = this.#lastRenderTime === undefined
+          || now < this.#lastRenderTime
+          || now - this.#lastRenderTime >= LIVE_FOOTER_REFRESH_MS;
+        if (!widthChanged && !freshnessDue) return;
+        await this.#redraw(this.#model, width, now);
+      } catch (error) {
+        throw this.#operationError("refresh", error);
+      }
     });
   }
 
@@ -273,18 +316,26 @@ export class LiveFooterController {
     return this.#enqueue(async () => {
       this.#assertOperational();
       if (this.#cleaned) return;
-      const width = normalizeWidth(this.#width());
-      const now = this.#clock();
-      const model = this.#model === undefined ? undefined : copyModel(this.#model);
-      const lines = model === undefined ? undefined : this.#formatter(model, width);
+      let width: number;
+      let now: number;
+      let model: LiveFooterModel | undefined;
+      let lines: readonly string[] | undefined;
+      try {
+        width = normalizeWidth(this.#width());
+        now = this.#clock();
+        model = this.#model === undefined ? undefined : copyModel(this.#model);
+        lines = model === undefined ? undefined : this.#formatter(model, width);
+      } catch (error) {
+        throw this.#operationError("redraw", error, false);
+      }
       const normalizedPayload = payload
         .replace(/(?:\r\n|\r|\n)+$/u, "")
         .replace(/\r\n|\r|\n/gu, "\r\n");
 
-      await this.#clearRendered();
-      await this.#write(`${normalizedPayload}\r\n`);
+      await this.#clearRendered(false);
+      await this.#writeOperation(`${normalizedPayload}\r\n`, "timeline", (accepted) => accepted);
       if (model !== undefined && lines !== undefined) {
-        await this.#writeFooter(lines);
+        await this.#writeFooter(lines, "redraw", true);
         this.#lastRenderTime = now;
         this.#lastRenderWidth = width;
       }
@@ -293,20 +344,28 @@ export class LiveFooterController {
 
   resize(): Promise<void> {
     return this.#enqueue(async () => {
-      this.#assertOperational();
-      if (this.#cleaned || this.#model === undefined) return;
-      const width = normalizeWidth(this.#width());
-      if (width === this.#lastRenderWidth) return;
-      await this.#redraw(this.#model, width, this.#clock());
+      try {
+        this.#assertOperational();
+        if (this.#cleaned || this.#model === undefined) return;
+        const width = normalizeWidth(this.#width());
+        if (width === this.#lastRenderWidth) return;
+        await this.#redraw(this.#model, width, this.#clock());
+      } catch (error) {
+        throw this.#operationError("resize", error);
+      }
     });
   }
 
   cleanup(): Promise<void> {
     return this.#enqueue(async () => {
       if (this.#failed || this.#cleaned) return;
-      await this.#clearRendered();
-      await this.#write("\r\n");
-      this.#cleaned = true;
+      try {
+        await this.#clearRendered();
+        await this.#writeOperation("\r\n", "cleanup");
+        this.#cleaned = true;
+      } catch (error) {
+        throw this.#operationError("cleanup", error);
+      }
     });
   }
 
@@ -332,30 +391,68 @@ export class LiveFooterController {
     this.#lastRenderWidth = undefined;
   }
 
+  #operationError(
+    phase: FooterOperationPhase,
+    error: unknown,
+    timelineAccepted?: boolean,
+  ): FooterOperationError {
+    if (error instanceof FooterOperationError) return error;
+    const writeError = error instanceof FooterWriteError ? error : undefined;
+    const operationError = new FooterOperationError(phase, writeError?.cause ?? error, {
+      accepted: writeError?.accepted ?? false,
+      ...(timelineAccepted === undefined ? {} : { timelineAccepted }),
+    });
+    if (operationError.accepted) this.#disable(operationError);
+    return operationError;
+  }
+
+  async #writeOperation(
+    chunk: string,
+    phase: FooterOperationPhase,
+    timelineAccepted?: boolean | ((accepted: boolean) => boolean),
+  ): Promise<void> {
+    try {
+      await this.#write(chunk);
+    } catch (error) {
+      const accepted = error instanceof FooterWriteError && error.accepted;
+      const timeline = typeof timelineAccepted === "function" ? timelineAccepted(accepted) : timelineAccepted;
+      throw this.#operationError(phase, error, timeline);
+    }
+  }
+
   async #redraw(model: LiveFooterModel, width: number, now: number): Promise<void> {
     const snapshot = copyModel(model);
-    const lines = this.#formatter(snapshot, width);
+    let lines: readonly string[];
+    try {
+      lines = this.#formatter(snapshot, width);
+    } catch (error) {
+      throw this.#operationError("redraw", error);
+    }
     await this.#clearRendered();
-    await this.#writeFooter(lines);
+    await this.#writeFooter(lines, "redraw");
     this.#model = snapshot;
     this.#lastRenderTime = now;
     this.#lastRenderWidth = width;
   }
 
-  async #clearRendered(): Promise<void> {
+  async #clearRendered(timelineAccepted?: boolean): Promise<void> {
     const sequence = footerClearSequence(this.#renderedLineCount);
     if (!sequence) return;
-    await this.#write(sequence);
+    await this.#writeOperation(sequence, "clear", timelineAccepted);
     this.#renderedLineCount = 0;
     this.#lastRenderTime = undefined;
   }
 
-  async #writeFooter(lines: readonly string[]): Promise<void> {
+  async #writeFooter(
+    lines: readonly string[],
+    phase: FooterOperationPhase = "redraw",
+    timelineAccepted?: boolean,
+  ): Promise<void> {
     if (lines.length === 0) {
       this.#renderedLineCount = 0;
       return;
     }
-    await this.#write(lines.join("\r\n"));
+    await this.#writeOperation(lines.join("\r\n"), phase, timelineAccepted);
     this.#renderedLineCount = lines.length;
   }
 
@@ -388,14 +485,13 @@ export class LiveFooterController {
       const rejectWrite = (error: unknown, awaitAssociatedError = false) => {
         if (settled) return;
         settled = true;
-        if (accepted) this.#disable(error);
         // A real Node Writable can invoke its write callback from a microtask,
         // then emit the associated 'error' on nextTick. Keep the listener until
         // that event is observed, with bounded cleanup for non-Node streams
         // that report only through the callback.
         if (awaitAssociatedError) scheduleListenerRemoval();
         else removeListeners();
-        reject(error);
+        reject(new FooterWriteError(error, accepted));
       };
       const tryFinish = () => {
         if (!returned || settled) return;

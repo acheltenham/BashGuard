@@ -16,7 +16,7 @@ import {
   type ParsedCommandArgs,
   type SessionSelectionResult,
 } from "./cli.ts";
-import { footerClearSequence, type LiveFooterModel } from "./live-footer.ts";
+import { FooterOperationError, footerClearSequence, type LiveFooterModel } from "./live-footer.ts";
 import { portablePtyUnavailableReason, runPortablePty, waitForExit } from "./test-process.ts";
 
 const ANSI_FOOTER = /\u001b\[(?:1A|2K)/u;
@@ -337,6 +337,43 @@ test("idle polling requests an awaited freshness model only at the one-second po
   await attached;
 });
 
+test("accepted clear failure replays the unaccepted narrated event once in plain mode", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const signals = new EventEmitter();
+  let cleanupCalls = 0;
+  const cause = Object.assign(new Error("clear EIO"), { code: "EIO" });
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    signalSource: signals,
+    createController() {
+      return {
+        failed: false,
+        async render() {},
+        async writeTimeline() {
+          throw new FooterOperationError("clear", cause, { accepted: true, timelineAccepted: false });
+        },
+        async cleanup() { cleanupCalls += 1; },
+      };
+    },
+  });
+  await waitForText(captured.text, "Following live events", abort);
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "clear-replay", "bash.user_requested", {
+    payload: { command: "echo clear-replay-once" },
+  }))}\n`);
+  await waitForText(captured.text, "clear-replay-once", abort);
+  assert.equal(cleanupCalls, 0, "accepted ordinary failure must not attempt footer cleanup");
+  assert.equal(signals.listenerCount("SIGINT"), 0);
+  assert.equal(output.listenerCount("resize"), 0);
+  await appendFile(eventsFile, `${JSON.stringify(event(4, "stop-clear", "session.shutdown"))}\n`);
+  await attached;
+  assert.equal(captured.text().match(/(?:^|\n)\s*3\s+clear-re/gu)?.length, 1);
+});
+
 test("accepted controller failure visibly degrades without losing or duplicating event evidence", async (t) => {
   const { eventsFile, selection } = await fixture(t);
   const output = ttyOutput();
@@ -354,8 +391,12 @@ test("accepted controller failure visibly degrades without losing or duplicating
         async render() {},
         async writeTimeline(payload) {
           acceptedPayloads.push(payload);
+          output.write(`${payload}\n`);
           failed = true;
-          throw Object.assign(new Error("accepted footer write failed"), { accepted: true });
+          throw new FooterOperationError("timeline", new Error("accepted footer write failed"), {
+            accepted: true,
+            timelineAccepted: true,
+          });
         },
       };
     },
@@ -373,9 +414,43 @@ test("accepted controller failure visibly degrades without losing or duplicating
   const finalEvents = await attached;
   assert.deepEqual(finalEvents.map((item) => item.id), ["start", "history", "degrade", "after-degrade", "stop-degrade"]);
   assert.equal(acceptedPayloads.filter((payload) => payload.includes("printf degrade-once")).length, 1);
+  assert.equal(captured.text().match(/(?:^|\n)\s*3\s+degrade/gu)?.length, 1, "the accepted payload is not duplicated");
   assert.equal(captured.text().match(/retained-after-accepted-failure/gu)?.length, 1);
   assert.equal(captured.text().match(/(?:^|\n)\s*4\s+after-de/gu)?.length, 1, "the unattempted accepted event is replayed once");
   assert.match(captured.text(), /Events\s+4/u);
+});
+
+test("redraw failure after an accepted payload does not duplicate the timeline event", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    createController() {
+      return {
+        failed: false,
+        async render() {},
+        async writeTimeline(payload) {
+          output.write(`${payload}\n`);
+          throw new FooterOperationError("redraw", new Error("redraw EIO"), {
+            accepted: true,
+            timelineAccepted: true,
+          });
+        },
+      };
+    },
+  });
+  await waitForText(captured.text, "Following live events", abort);
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "redraw-once", "bash.user_requested", {
+    payload: { command: "echo redraw-once" },
+  }))}\n`);
+  await waitForText(captured.text, "Live footer unavailable", abort);
+  await appendFile(eventsFile, `${JSON.stringify(event(4, "stop-redraw", "session.shutdown"))}\n`);
+  await attached;
+  assert.equal(captured.text().match(/(?:^|\n)\s*3\s+redraw-o/gu)?.length, 1);
 });
 
 test("plain active fallbacks retain startup status and emit no footer ANSI", async (t) => {

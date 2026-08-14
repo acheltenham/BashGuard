@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
+import stringWidth from "string-width";
 
 import {
   runAttach,
@@ -16,7 +17,7 @@ import {
   type SessionSelectionResult,
 } from "./cli.ts";
 import { footerClearSequence, type LiveFooterModel } from "./live-footer.ts";
-import { waitForExit } from "./test-process.ts";
+import { portablePtyUnavailableReason, runPortablePty, waitForExit } from "./test-process.ts";
 
 const ANSI_FOOTER = /\u001b\[(?:1A|2K)/u;
 
@@ -975,6 +976,152 @@ test("completed attach preserves plain static output in a TTY", async (t) => {
   assert.match(captured.text(), /Session status\n/u);
   assert.match(captured.text(), /State\s+complete/u);
   assert.doesNotMatch(captured.text(), ANSI_FOOTER);
+});
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function stripTerminalControls(value: string): string {
+  return value
+    .replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|[@-_])/gu, "")
+    .replace(/\r/gu, "");
+}
+
+async function writePtyEvent(path: string, value: BashGuardEvent): Promise<void> {
+  await writeFile(path, `${JSON.stringify(value)}\n`);
+}
+
+function requirePortablePty(t: test.TestContext): boolean {
+  const unavailable = portablePtyUnavailableReason();
+  if (!unavailable) return true;
+  t.skip(unavailable);
+  return false;
+}
+
+test("real PTY live footer updates, resizes, stays bounded, and finalizes ordinarily", async (t) => {
+  if (!requirePortablePty(t)) return;
+  const { eventsFile, selection } = await fixture(t);
+  const requestPath = `${eventsFile}.request`;
+  const completionPath = `${eventsFile}.completion`;
+  const shutdownPath = `${eventsFile}.shutdown`;
+  const callId = "pty-live-call";
+  await writePtyEvent(requestPath, event(3, "pty-request", "tool.requested", {
+    toolName: "bash",
+    toolCallId: callId,
+    payload: { toolCallId: callId, input: { command: "printf pty-live-update" } },
+  }));
+  await writePtyEvent(completionPath, event(4, "pty-completion", "tool.completed", {
+    toolName: "bash",
+    toolCallId: callId,
+    payload: { toolCallId: callId, isError: false, details: { exitCode: 0 } },
+  }));
+  await writePtyEvent(shutdownPath, event(5, "pty-shutdown", "session.shutdown"));
+
+  const bin = join(process.cwd(), "bin", "bashguard");
+  const result = await runPortablePty({
+    timeoutMs: 12_000,
+    env: { BASHGUARD_DATA_DIR: join(selection.session.directory, ".."), TERM: "xterm-256color" },
+    scenario: [
+      "stty columns 80 rows 24",
+      `${shellQuote(bin)} attach --session-id=${shellQuote(selection.selector)} &`,
+      "attach_pid=$!",
+      "sleep 2.2",
+      `cat ${shellQuote(requestPath)} >> ${shellQuote(eventsFile)}`,
+      "sleep 0.7",
+      "stty columns 50 < /dev/tty",
+      "kill -WINCH \"$attach_pid\"",
+      "sleep 0.5",
+      `cat ${shellQuote(completionPath)} >> ${shellQuote(eventsFile)}`,
+      "sleep 0.7",
+      "stty columns 35 < /dev/tty",
+      "kill -WINCH \"$attach_pid\"",
+      "sleep 0.5",
+      `cat ${shellQuote(shutdownPath)} >> ${shellQuote(eventsFile)}`,
+      "wait \"$attach_pid\"",
+    ].join("\n"),
+  });
+  assert.equal(result.exitCode, 0, `raw=${JSON.stringify(result.raw)}\ntranscript=${JSON.stringify(result.transcript)}`);
+  assert.ok(result.transcript.length > 0, "system script must capture a PTY transcript");
+
+  const plain = stripTerminalControls(result.raw);
+  assert.match(result.raw, /\u001b\[(?:1A|2K)/u, "real TTY should use sticky-footer controls");
+  assert.match(plain, /─{80}/u, "80-column PTY should render the full separator");
+  assert.match(plain, /awaiting completion evidence/u);
+  assert.match(plain, /recorded/u);
+  assert.match(plain, /Running · printf pty-live-update/u);
+  assert.match(plain, /Command complete · exit 0/u);
+  assert.ok(plain.indexOf("Running · printf pty-live-update") < plain.indexOf("awaiting completion evidence"));
+  assert.ok(plain.indexOf("Command complete · exit 0") < plain.lastIndexOf("recorded"));
+
+  const beforeRequest = result.raw.slice(0, result.raw.indexOf("Running · printf pty-live-update"));
+  const freshnessRenders = beforeRequest.match(/─{80}/gu)?.length ?? 0;
+  assert.ok(freshnessRenders >= 2 && freshnessRenders <= 4, `expected near-1s refreshes, not 250ms spam; renders=${freshnessRenders}`);
+
+  assert.match(plain, /─{50}/u, "resize should render the medium separator");
+  const mediumLines = plain.split("\n").filter((line) => line.includes("─") && stringWidth(line.trim()) === 50);
+  assert.ok(mediumLines.length > 0, JSON.stringify(plain));
+  const activeLines = [...result.raw.matchAll(/ACTIVE[^\r\n\u001b]*/gu)].map((match) => match[0]);
+  const narrowLines = activeLines.filter((line) => stringWidth(line) <= 35);
+  assert.ok(narrowLines.length > 0, JSON.stringify(activeLines));
+  assert.ok(narrowLines.some((line) => line === "ACTIVE · Command complete · exit 0"), JSON.stringify(narrowLines));
+  assert.ok(narrowLines.every((line) => stringWidth(line) <= 35), `narrow footer exceeded PTY width: ${JSON.stringify(narrowLines)}`);
+
+  const finalStatus = plain.lastIndexOf("Session status");
+  assert.ok(finalStatus > plain.lastIndexOf("ACTIVE"), "final ordinary status must replace the temporary footer");
+  assert.match(plain.slice(finalStatus), /State\s+complete/u);
+  assert.equal(plain.slice(finalStatus).match(/Session status/gu)?.length, 1);
+  assert.doesNotMatch(result.raw, /\u001b\[\?(?:25l|47h|1047h|1049h)/u);
+});
+
+test("real PTY Ctrl+C clears the footer without terminal-mode leakage or a dangling fragment", async (t) => {
+  if (!requirePortablePty(t)) return;
+  const { selection } = await fixture(t);
+  const bin = join(process.cwd(), "bin", "bashguard");
+  const result = await runPortablePty({
+    timeoutMs: 7_000,
+    env: { BASHGUARD_DATA_DIR: join(selection.session.directory, ".."), TERM: "xterm" },
+    scenario: [
+      "stty columns 80 rows 24",
+      `exec ${shellQuote(bin)} attach --session-id=${shellQuote(selection.selector)}`,
+    ].join("\n"),
+    send: [{ afterMs: 1_200, text: "\u0003" }],
+  });
+  const plain = stripTerminalControls(result.raw);
+  assert.match(result.raw, /\u001b\[(?:1A|2K)/u, JSON.stringify(result.raw));
+  assert.doesNotMatch(result.raw, /\u001b\[\?(?:25l|47h|1047h|1049h)/u);
+  assert.ok(/(?:\r?\n)+$/u.test(result.transcript), `expected normal final newline: ${JSON.stringify(result.transcript)}`);
+  assert.ok(!plain.trimEnd().endsWith("ACTIVE ·"), `dangling footer fragment: ${JSON.stringify(plain.slice(-200))}`);
+  assert.ok([0, 2, 130].includes(result.exitCode ?? -1), `unexpected Ctrl+C wrapper status ${result.exitCode}; ${JSON.stringify(result.raw)}`);
+});
+
+test("real PTY --no-live-footer and redirected stdout remain static and footer-ANSI-free", async (t) => {
+  if (!requirePortablePty(t)) return;
+  const bin = join(process.cwd(), "bin", "bashguard");
+
+  for (const redirected of [false, true]) {
+    const { eventsFile, selection } = await fixture(t);
+    const shutdownPath = `${eventsFile}.plain-shutdown`;
+    const outputPath = `${eventsFile}.redirected-output`;
+    await writePtyEvent(shutdownPath, event(3, `pty-plain-shutdown-${redirected}`, "session.shutdown"));
+    const redirect = redirected ? ` > ${shellQuote(outputPath)}` : "";
+    const optOut = redirected ? "" : " --no-live-footer";
+    const result = await runPortablePty({
+      timeoutMs: 7_000,
+      env: { BASHGUARD_DATA_DIR: join(selection.session.directory, ".."), TERM: "xterm" },
+      scenario: [
+        "stty columns 80 rows 24",
+        `(sleep 0.8; cat ${shellQuote(shutdownPath)} >> ${shellQuote(eventsFile)}) &`,
+        `${shellQuote(bin)} attach --session-id=${shellQuote(selection.selector)}${optOut}${redirect}`,
+        ...(redirected ? [`cat ${shellQuote(outputPath)}`] : []),
+      ].join("\n"),
+    });
+    assert.equal(result.exitCode, 0, JSON.stringify(result.raw));
+    const plain = stripTerminalControls(result.raw);
+    assert.match(plain, /Live status/u);
+    assert.match(plain, /State\s+active/u);
+    assert.doesNotMatch(result.raw, /\u001b\[(?:1A|2K)/u, redirected ? "redirected stdout" : "--no-live-footer");
+  }
 });
 
 test("completed attach output is byte-identical with the live footer enabled or disabled", async (t) => {

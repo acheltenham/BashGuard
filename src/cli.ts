@@ -719,6 +719,14 @@ export function formatInspectableEvents(sessionSelector: string, events: BashGua
   return `${lines.join("\n")}\n`;
 }
 
+export type AttachCaptureSummary = {
+  state: "ok" | "partial" | "unknown";
+  gaps: number;
+  missing: number;
+  redacted: number;
+  truncated: number;
+};
+
 export type AttachStatus = {
   state: "active" | "complete";
   activityLabel: "Current activity" | "Last activity";
@@ -727,6 +735,8 @@ export type AttachStatus = {
   capture: string;
   eventCount: number;
   lastObserved: string;
+  /** Structured companion to `capture`; non-enumerable to preserve the plain/deep-equality API. */
+  captureSummary?: AttachCaptureSummary;
 };
 
 function relativeEventAge(timestamp: string | undefined, now: number): string {
@@ -778,7 +788,7 @@ export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now
     formatCaptureIssue(truncatedEvents, "truncated event"),
   ].filter((item): item is string => Boolean(item));
 
-  return {
+  const status: AttachStatus = {
     state: active ? "active" : "complete",
     activityLabel: currentRequest ? "Current activity" : "Last activity",
     activity: activityEvent ? renderEvent(activityEvent) ?? activityEvent.type : "No narrated activity recorded",
@@ -787,6 +797,17 @@ export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now
     eventCount: normalized.length,
     lastObserved: relativeEventAge(normalized.at(-1)?.timestamp, now),
   };
+  Object.defineProperty(status, "captureSummary", {
+    value: {
+      state: normalized.length === 0 ? "unknown" : captureIssues.length > 0 ? "partial" : "ok",
+      gaps: captureGaps,
+      missing: missingEvents,
+      redacted: redactedEvents,
+      truncated: truncatedEvents,
+    } satisfies AttachCaptureSummary,
+    enumerable: false,
+  });
+  return status;
 }
 
 function compactStatusValue(value: string): string {

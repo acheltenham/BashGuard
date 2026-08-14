@@ -451,6 +451,14 @@ test("synchronous pre-accept write failures reject but remain safely retryable",
   assert.equal(redraw.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}event\r\nACTIVE 80\r\nRunning tests`);
 });
 
+test("cleanup is safe before any render and repeated cleanup writes one newline", async () => {
+  const fixture = controllerFixture();
+  await Promise.all([fixture.controller.cleanup(), fixture.controller.cleanup()]);
+  assert.equal(fixture.output.take(), "\r\n");
+  await fixture.controller.cleanup();
+  assert.equal(fixture.output.take(), "");
+});
+
 test("cleanup becomes idempotent only after clear and newline succeed", async () => {
   const fixture = controllerFixture();
   await fixture.controller.render(footerModel());

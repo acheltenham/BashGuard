@@ -1841,17 +1841,33 @@ async function debrief(options: ParsedCommandArgs): Promise<void> {
 }
 
 export type AttachFooterController = Pick<LiveFooterController, "failed" | "render" | "writeTimeline"> & {
+  resize?: () => Promise<void>;
   cleanup?: () => Promise<void>;
+};
+
+type AttachSignalSource = {
+  on(event: "SIGINT", listener: () => void): unknown;
+  off(event: "SIGINT", listener: () => void): unknown;
+};
+
+type AttachOutput = NodeJS.WritableStream & {
+  isTTY?: boolean;
+  columns?: number;
+  on?(event: "resize", listener: () => void): unknown;
+  off?(event: "resize", listener: () => void): unknown;
 };
 
 export type AttachRunnerRuntime = {
   input?: NodeJS.ReadableStream & { isTTY?: boolean };
-  output?: NodeJS.WritableStream & { isTTY?: boolean; columns?: number };
+  output?: AttachOutput;
   term?: string;
   selection?: SessionSelectionResult;
   pollMs?: number;
   now?: () => number;
   signal?: AbortSignal;
+  signalSource?: AttachSignalSource;
+  setExitCode?: (code: number) => void;
+  isProcessAlive?: (pid?: number) => boolean;
   createController?: (options: Parameters<typeof createLiveFooterController>[0]) => AttachFooterController;
   onSnapshot?: (events: readonly BashGuardEvent[], status: AttachStatus) => void;
 };
@@ -1921,33 +1937,96 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
 
   let controller: AttachFooterController | undefined;
   let plainAfterFooterFailure = false;
+  let outputFailed = false;
   let lastFooterModelAt: number | undefined;
+  let completed = false;
+  let interrupted = false;
+  let resizeQueued = false;
+  let lifecycleTail: Promise<void> = Promise.resolve();
+  const interrupt = new AbortController();
   const now = runtime.now ?? Date.now;
-  const currentStatus = (): AttachStatus => buildAttachStatus(events, true, now());
+  const isProcessAlive = runtime.isProcessAlive ?? processIsAlive;
+  const currentStatus = (isActive = true): AttachStatus => buildAttachStatus(events, isActive, now());
   const publishSnapshot = (): AttachStatus => {
     const status = currentStatus();
     runtime.onSnapshot?.([...events], status);
     return status;
   };
-  const degradeFooter = (status: AttachStatus): void => {
+  const degradeFooter = async (status: AttachStatus, error: unknown): Promise<void> => {
+    const degraded = controller;
     controller = undefined;
     plainAfterFooterFailure = true;
+    if ((error as NodeJS.ErrnoException | undefined)?.code === "EPIPE") {
+      outputFailed = true;
+      interrupt.abort();
+      return;
+    }
+    if (degraded?.cleanup && !degraded.failed) {
+      try {
+        await degraded.cleanup();
+      } catch (cleanupError) {
+        if ((cleanupError as NodeJS.ErrnoException | undefined)?.code === "EPIPE") {
+          outputFailed = true;
+          interrupt.abort();
+          return;
+        }
+      }
+    }
     write("\r\nLive footer unavailable; continuing with plain status.\n");
     write(formatAttachStatus(status));
   };
+  const cleanupFooter = async (): Promise<void> => {
+    const owned = controller;
+    controller = undefined;
+    if (!owned?.cleanup || owned.failed || outputFailed) return;
+    try {
+      await owned.cleanup();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code === "EPIPE") outputFailed = true;
+    }
+  };
+  const finishCompleted = async (): Promise<BashGuardEvent[]> => {
+    completed = true;
+    await cleanupFooter();
+    if (stickyEnabled && !outputFailed) write(formatAttachStatus(currentStatus(false)));
+    return events;
+  };
+  const onResize = (): void => {
+    if (resizeQueued || completed || interrupted) return;
+    resizeQueued = true;
+    lifecycleTail = lifecycleTail.then(async () => {
+      try {
+        const activeController = controller;
+        if (activeController?.resize) await activeController.resize();
+      } catch (error) {
+        await degradeFooter(currentStatus(), error);
+      } finally {
+        resizeQueued = false;
+      }
+    });
+  };
+  const onSigint = (): void => {
+    if (interrupted || completed) return;
+    interrupted = true;
+    (runtime.setExitCode ?? ((code: number) => { process.exitCode = code; }))(130);
+    interrupt.abort();
+  };
 
+  try {
   if (stickyEnabled) {
     controller = (runtime.createController ?? createLiveFooterController)({
       output: output as StructuralWritable,
       clock: runtime.now,
       width: () => output.columns ?? 80,
     });
+    if (typeof output.on === "function" && typeof output.off === "function") output.on("resize", onResize);
+    runtime.signalSource?.on("SIGINT", onSigint);
     const status = publishSnapshot();
     try {
       await controller.render(buildLiveFooterModel(status));
       lastFooterModelAt = now();
-    } catch {
-      degradeFooter(status);
+    } catch (error) {
+      await degradeFooter(status, error);
     }
   }
 
@@ -1959,27 +2038,28 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
     try {
       await controller.render(buildLiveFooterModel(status));
       lastFooterModelAt = observedAt;
-    } catch {
-      degradeFooter(status);
+    } catch (error) {
+      await degradeFooter(status, error);
     }
   };
 
   const sleep = async (): Promise<boolean> => {
-    if (runtime.signal?.aborted) return false;
+    if (runtime.signal?.aborted || interrupt.signal.aborted) return false;
     return await new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => finish(true), runtime.pollMs ?? POLL_MS);
       const onAbort = () => finish(false);
       const finish = (completed: boolean) => {
         clearTimeout(timer);
         runtime.signal?.removeEventListener("abort", onAbort);
+        interrupt.signal.removeEventListener("abort", onAbort);
         resolve(completed);
       };
       runtime.signal?.addEventListener("abort", onAbort, { once: true });
+      interrupt.signal.addEventListener("abort", onAbort, { once: true });
     });
   };
   let followedProcessId = session.metadata.processId;
-  try {
-    while (!runtime.signal?.aborted) {
+    while (!runtime.signal?.aborted && !interrupt.signal.aborted) {
       if (!await sleep()) break;
 
       let info;
@@ -1996,10 +2076,10 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
       decoder = new StringDecoder("utf8");
     }
     if (info.size === offset) {
-      if (!processIsAlive(followedProcessId)) {
+      if (!isProcessAlive(followedProcessId)) {
         if (!await sleep()) break;
         const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
-        if (replacementMetadata && processIsAlive(replacementMetadata.processId)) {
+        if (replacementMetadata && isProcessAlive(replacementMetadata.processId)) {
           followedProcessId = replacementMetadata.processId;
           continue;
         }
@@ -2008,8 +2088,8 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
         } catch {
           continue;
         }
-        if (!controller) write("Pi session ended.\n");
-        return events;
+        if (!stickyEnabled && !controller) write("Pi session ended.\n");
+        return await finishCompleted();
       }
       await refreshFooterIfDue();
       continue;
@@ -2063,9 +2143,10 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
           lastFooterModelAt = now();
         } catch (error) {
           const acceptedWrite = footerWriteWasAccepted(controller, error);
-          degradeFooter(status);
-          if (!acceptedWrite) {
-            for (const event of accepted.slice(nextEventIndex)) {
+          await degradeFooter(status, error);
+          if (!outputFailed) {
+            const plainStart = nextEventIndex + (acceptedWrite ? 1 : 0);
+            for (const event of accepted.slice(plainStart)) {
               const rendered = formatTimelineEvent(event);
               if (rendered) write(`${rendered}\n`);
             }
@@ -2082,7 +2163,7 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
 
     if (latestLifecycleInBatch === "started") {
       const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
-      if (replacementMetadata && replacementMetadata.processId !== followedProcessId && processIsAlive(replacementMetadata.processId)) {
+      if (replacementMetadata && replacementMetadata.processId !== followedProcessId && isProcessAlive(replacementMetadata.processId)) {
         followedProcessId = replacementMetadata.processId;
       }
     }
@@ -2090,7 +2171,7 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
     if (latestLifecycleInBatch === "shutdown") {
       if (!await sleep()) break;
       const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
-      if (replacementMetadata && replacementMetadata.processId !== followedProcessId && processIsAlive(replacementMetadata.processId)) {
+      if (replacementMetadata && replacementMetadata.processId !== followedProcessId && isProcessAlive(replacementMetadata.processId)) {
         followedProcessId = replacementMetadata.processId;
         continue;
       }
@@ -2099,20 +2180,19 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
       } catch {
         continue;
       }
-      return events;
+      return await finishCompleted();
     }
     }
     return events;
   } finally {
-    if (runtime.signal?.aborted && controller?.cleanup) {
-      try {
-        await controller.cleanup();
-      } catch {
-        // Cancellation is best-effort terminal cleanup, not a signal policy.
-      }
-    }
+    if (typeof output.off === "function") output.off("resize", onResize);
+    runtime.signalSource?.off("SIGINT", onSigint);
+    await lifecycleTail;
+    await cleanupFooter();
   }
 }
+
+const cliOutputAbort = new AbortController();
 
 async function main(): Promise<void> {
   try {
@@ -2121,7 +2201,13 @@ async function main(): Promise<void> {
     if (command === "sessions") return await listSessions();
     if (command === "doctor") return await doctor();
     if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);
-    if (command === "attach") return void await runAttach(options);
+    if (command === "attach") return void await runAttach(options, {
+      input: process.stdin,
+      output: process.stdout,
+      signal: cliOutputAbort.signal,
+      signalSource: process,
+      setExitCode: (code) => { process.exitCode = code; },
+    });
     if (command === "inspect") return await inspect(options);
     if (command === "debrief") return await debrief(options);
     usage();
@@ -2135,7 +2221,9 @@ async function main(): Promise<void> {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   process.stdout.on("error", (error: NodeJS.ErrnoException) => {
     if (error.code === "EPIPE") {
-      process.exit(0);
+      process.exitCode = 0;
+      cliOutputAbort.abort();
+      return;
     }
     throw error;
   });

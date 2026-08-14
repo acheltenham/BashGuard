@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -287,6 +288,7 @@ test("accepted controller failure visibly degrades without losing or duplicating
   const output = ttyOutput();
   const captured = collect(output);
   let failed = false;
+  const acceptedPayloads: string[] = [];
   const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
     selection,
     output,
@@ -296,7 +298,8 @@ test("accepted controller failure visibly degrades without losing or duplicating
       return {
         get failed() { return failed; },
         async render() {},
-        async writeTimeline() {
+        async writeTimeline(payload) {
+          acceptedPayloads.push(payload);
           failed = true;
           throw Object.assign(new Error("accepted footer write failed"), { accepted: true });
         },
@@ -308,13 +311,17 @@ test("accepted controller failure visibly degrades without losing or duplicating
     toolCallId: "degrade-call",
     toolName: "bash",
     payload: { input: { command: "printf degrade-once" } },
+  }))}\n${JSON.stringify(event(4, "after-degrade", "bash.user_requested", {
+    payload: { command: "echo retained-after-accepted-failure" },
   }))}\n`);
   await waitForText(captured.text, "Live footer unavailable", abort);
-  await appendFile(eventsFile, `${JSON.stringify(event(4, "stop-degrade", "session.shutdown"))}\n`);
+  await appendFile(eventsFile, `${JSON.stringify(event(5, "stop-degrade", "session.shutdown"))}\n`);
   const finalEvents = await attached;
-  assert.deepEqual(finalEvents.map((item) => item.id), ["start", "history", "degrade", "stop-degrade"]);
-  assert.equal(captured.text().match(/printf degrade-once/gu)?.length, 1);
-  assert.match(captured.text(), /Events\s+3/u);
+  assert.deepEqual(finalEvents.map((item) => item.id), ["start", "history", "degrade", "after-degrade", "stop-degrade"]);
+  assert.equal(acceptedPayloads.filter((payload) => payload.includes("printf degrade-once")).length, 1);
+  assert.equal(captured.text().match(/retained-after-accepted-failure/gu)?.length, 1);
+  assert.equal(captured.text().match(/(?:^|\n)\s*4\s+after-de/gu)?.length, 1, "the unattempted accepted event is replayed once");
+  assert.match(captured.text(), /Events\s+4/u);
 });
 
 test("plain active fallbacks retain startup status and emit no footer ANSI", async (t) => {
@@ -415,6 +422,157 @@ test("plain attach preserves duplicate startup history and counts", async (t) =>
   assert.match(captured.text(), /echo duplicate-plain/u);
   await appendFile(eventsFile, `${JSON.stringify(event(21, "stop-plain-duplicate", "session.shutdown"))}\n`);
   assert.equal((await attached).length, 4);
+});
+
+test("stdout resize redraws real wide, medium, and narrow line counts once and removes its listener", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+  });
+
+  await waitForText(captured.text, "ACTIVE ·", abort);
+  assert.equal(output.listenerCount("resize"), 1);
+  output.columns = 60;
+  output.emit("resize");
+  await waitForText(captured.text, footerClearSequence(4), abort);
+  assert.match(captured.text().slice(captured.text().indexOf(footerClearSequence(4))), new RegExp(`─{60}`));
+  assert.equal(captured.text().split(footerClearSequence(4)).length - 1, 1);
+
+  output.columns = 30;
+  output.emit("resize");
+  await waitForText(captured.text, footerClearSequence(5), abort);
+  assert.match(captured.text().slice(captured.text().indexOf(footerClearSequence(5))), /ACTIVE ·/u);
+  assert.equal(captured.text().split(footerClearSequence(5)).length - 1, 1);
+
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "stop-resize", "session.shutdown"))}\n`);
+  await attached;
+  assert.equal(output.listenerCount("resize"), 0);
+});
+
+test("recorded shutdown clears sticky output and prints exactly one final grounded ordinary block", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+  });
+  await waitForText(captured.text, "ACTIVE ·", abort);
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "recorded-stop", "session.shutdown"))}\n`);
+  await attached;
+
+  const text = captured.text();
+  assert.equal(text.match(/Session status\n/gu)?.length, 1);
+  assert.equal(text.match(/State\s+complete/gu)?.length, 1);
+  assert.ok(text.includes(`${footerClearSequence(4)}\r\nSession status\n`), JSON.stringify(text));
+  assert.doesNotMatch(text, /State\s+active[^]*Session status\n[^]*State\s+active/u);
+});
+
+test("PID death without shutdown finalizes honestly from process evidence", async (t) => {
+  const { selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  let alive = true;
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    isProcessAlive: () => alive,
+  });
+  await waitForText(captured.text, "ACTIVE ·", abort);
+  alive = false;
+  await attached;
+
+  assert.equal(captured.text().match(/Session status\n/gu)?.length, 1);
+  assert.match(captured.text(), /State\s+complete/u);
+  assert.match(captured.text(), /Last activity\s+You ran · echo history/u);
+  assert.doesNotMatch(captured.text(), /completion recorded|Command complete/u);
+});
+
+test("injected SIGINT clears the footer, sets conventional status, stops the loop, and removes handlers", async (t) => {
+  const { selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const signals = new EventEmitter();
+  let exitCode: number | undefined;
+  const attached = runAttach({ command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 60_000,
+    signalSource: signals,
+    setExitCode(code) { exitCode = code; },
+  });
+  const abort = new AbortController();
+  await waitForText(captured.text, "ACTIVE ·", abort);
+  assert.equal(signals.listenerCount("SIGINT"), 1);
+  signals.emit("SIGINT");
+  await attached;
+
+  assert.equal(exitCode, 130);
+  assert.equal(signals.listenerCount("SIGINT"), 0);
+  assert.equal(output.listenerCount("resize"), 0);
+  assert.ok(captured.text().endsWith(`${footerClearSequence(4)}\r\n`));
+  assert.doesNotMatch(captured.text(), /Session status|Error:|at runAttach/u);
+});
+
+test("unexpected errors clear the footer before propagating and remove lifecycle listeners", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const signals = new EventEmitter();
+  let snapshots = 0;
+  const attached = runAttach({ command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    signalSource: signals,
+    onSnapshot() {
+      snapshots += 1;
+      if (snapshots > 1) throw new Error("snapshot exploded");
+    },
+  });
+  const abort = new AbortController();
+  await waitForText(captured.text, "ACTIVE ·", abort);
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "explode", "message.started"))}\n`);
+  await assert.rejects(attached, /snapshot exploded/);
+  assert.ok(captured.text().endsWith(`${footerClearSequence(4)}\r\n`));
+  assert.equal(signals.listenerCount("SIGINT"), 0);
+  assert.equal(output.listenerCount("resize"), 0);
+});
+
+test("EPIPE degradation performs no recursive output or cleanup", async (t) => {
+  const { selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const error = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
+  let cleanupCalls = 0;
+  await runAttach({ command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    createController() {
+      return {
+        failed: true,
+        async render() { throw error; },
+        async writeTimeline() { throw error; },
+        async cleanup() { cleanupCalls += 1; },
+      };
+    },
+  });
+  assert.equal(cleanupCalls, 0);
+  assert.doesNotMatch(captured.text(), /Live footer unavailable|broken pipe|Error:/u);
+  assert.equal(output.listenerCount("resize"), 0);
 });
 
 test("aborting active attach exits promptly and clears the rendered footer", async (t) => {

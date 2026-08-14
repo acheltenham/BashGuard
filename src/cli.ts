@@ -405,6 +405,21 @@ function validSessionId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && !value.includes("\0");
 }
 
+function eventIdForDedupe(event: BashGuardEvent): string | undefined {
+  return validSessionId(event.id) ? event.id : undefined;
+}
+
+function dedupeEventsById(events: readonly BashGuardEvent[]): BashGuardEvent[] {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    const id = eventIdForDedupe(event);
+    if (id === undefined) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 export function normalizeSessionMetadata(value: unknown): SessionMetadata | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const source = value as Record<string, unknown>;
@@ -658,7 +673,7 @@ function renderTimestamp(timestamp: string): string {
 export function formatTimelineEvent(event: BashGuardEvent): string | undefined {
   const rendered = renderEvent(event);
   if (!rendered) return undefined;
-  const eventSelector = event.id.slice(0, 8).padEnd(8);
+  const eventSelector = (typeof event.id === "string" ? event.id : "").slice(0, 8).padEnd(8);
   return `${String(event.sequence).padStart(2)}  ${eventSelector}  ${renderTimestamp(event.timestamp)}  ${rendered}`;
 }
 
@@ -1825,7 +1840,9 @@ async function debrief(options: ParsedCommandArgs): Promise<void> {
   process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: effectiveSelector, sessionState: session.active ? "active" : "complete" }));
 }
 
-export type AttachFooterController = Pick<LiveFooterController, "failed" | "render" | "writeTimeline">;
+export type AttachFooterController = Pick<LiveFooterController, "failed" | "render" | "writeTimeline"> & {
+  cleanup?: () => Promise<void>;
+};
 
 export type AttachRunnerRuntime = {
   input?: NodeJS.ReadableStream & { isTTY?: boolean };
@@ -1834,6 +1851,7 @@ export type AttachRunnerRuntime = {
   selection?: SessionSelectionResult;
   pollMs?: number;
   now?: () => number;
+  signal?: AbortSignal;
   createController?: (options: Parameters<typeof createLiveFooterController>[0]) => AttachFooterController;
   onSnapshot?: (events: readonly BashGuardEvent[], status: AttachStatus) => void;
 };
@@ -1857,14 +1875,18 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
   const { session } = selection;
   const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
   const snapshot = await readAttachSnapshot(session.eventsFile);
-  const events = [...snapshot.events];
-  const active = sessionSnapshotIsActive(session.metadata, events);
+  const recordedEvents = [...snapshot.events];
+  const active = sessionSnapshotIsActive(session.metadata, recordedEvents);
   const stickyEnabled = shouldUseLiveFooter({
     active,
     stdoutIsTTY: output.isTTY === true,
     term: runtime.term ?? process.env.TERM,
     disabled: options.noLiveFooter === true,
   });
+  // Sticky views are an in-memory projection: one canonical event per valid
+  // nonempty ID, preserving the first append occurrence. Plain/static attach
+  // keeps the historical byte-compatible projection, including duplicates.
+  const events = stickyEnabled ? dedupeEventsById(recordedEvents) : recordedEvents;
   const write = (text: string): void => { output.write(text); };
 
   write(`BashGuard · ${active ? "live" : "completed"}\n`);
@@ -1877,7 +1899,7 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
   let remainder = snapshot.remainder;
   let decoder = new StringDecoder("utf8");
   const historySelection = selectAttachHistory(events, history, options.allHistory ?? false);
-  const seenEventIds = historySelection.seenEventIds;
+  const seenEventIds = new Set(events.map(eventIdForDedupe).filter((id): id is string => id !== undefined));
   if (!stickyEnabled) {
     write(formatAttachStatus(buildAttachStatus(events, active, runtime.now?.())));
     write("─".repeat(60) + "\n");
@@ -1942,18 +1964,31 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
     }
   };
 
-  const sleep = async (): Promise<void> => new Promise((resolve) => setTimeout(resolve, runtime.pollMs ?? POLL_MS));
+  const sleep = async (): Promise<boolean> => {
+    if (runtime.signal?.aborted) return false;
+    return await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => finish(true), runtime.pollMs ?? POLL_MS);
+      const onAbort = () => finish(false);
+      const finish = (completed: boolean) => {
+        clearTimeout(timer);
+        runtime.signal?.removeEventListener("abort", onAbort);
+        resolve(completed);
+      };
+      runtime.signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  };
   let followedProcessId = session.metadata.processId;
-  while (true) {
-    await sleep();
+  try {
+    while (!runtime.signal?.aborted) {
+      if (!await sleep()) break;
 
-    let info;
-    try {
-      info = await stat(session.eventsFile);
-    } catch {
-      await refreshFooterIfDue();
-      continue;
-    }
+      let info;
+      try {
+        info = await stat(session.eventsFile);
+      } catch {
+        await refreshFooterIfDue();
+        continue;
+      }
 
     if (info.size < offset) {
       offset = 0;
@@ -1962,7 +1997,7 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
     }
     if (info.size === offset) {
       if (!processIsAlive(followedProcessId)) {
-        await sleep();
+        if (!await sleep()) break;
         const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
         if (replacementMetadata && processIsAlive(replacementMetadata.processId)) {
           followedProcessId = replacementMetadata.processId;
@@ -1995,8 +2030,15 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
       if (!line.trim()) continue;
       try {
         const event = normalizeEvent(JSON.parse(line) as BashGuardEvent);
-        if (!validSessionId(event.id) || seenEventIds.has(event.id)) continue;
-        seenEventIds.add(event.id);
+        const eventId = eventIdForDedupe(event);
+        if (stickyEnabled) {
+          if (eventId !== undefined && seenEventIds.has(eventId)) continue;
+          if (eventId !== undefined) seenEventIds.add(eventId);
+        } else {
+          // Preserve the established plain follower policy for malformed IDs.
+          if (eventId === undefined || seenEventIds.has(eventId)) continue;
+          seenEventIds.add(eventId);
+        }
         events.push(event);
         accepted.push(event);
         if (event.type === "session.started") latestLifecycleInBatch = "started";
@@ -2038,8 +2080,15 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
       }
     }
 
+    if (latestLifecycleInBatch === "started") {
+      const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
+      if (replacementMetadata && replacementMetadata.processId !== followedProcessId && processIsAlive(replacementMetadata.processId)) {
+        followedProcessId = replacementMetadata.processId;
+      }
+    }
+
     if (latestLifecycleInBatch === "shutdown") {
-      await sleep();
+      if (!await sleep()) break;
       const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
       if (replacementMetadata && replacementMetadata.processId !== followedProcessId && processIsAlive(replacementMetadata.processId)) {
         followedProcessId = replacementMetadata.processId;
@@ -2051,6 +2100,16 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
         continue;
       }
       return events;
+    }
+    }
+    return events;
+  } finally {
+    if (runtime.signal?.aborted && controller?.cleanup) {
+      try {
+        await controller.cleanup();
+      } catch {
+        // Cancellation is best-effort terminal cleanup, not a signal policy.
+      }
     }
   }
 }

@@ -8,10 +8,12 @@ import test from "node:test";
 
 import {
   runAttach,
+  type AttachRunnerRuntime,
   type BashGuardEvent,
+  type ParsedCommandArgs,
   type SessionSelectionResult,
 } from "./cli.ts";
-import type { LiveFooterModel } from "./live-footer.ts";
+import { footerClearSequence, type LiveFooterModel } from "./live-footer.ts";
 import { waitForExit } from "./test-process.ts";
 
 const ANSI_FOOTER = /\u001b\[(?:1A|2K)/u;
@@ -95,26 +97,57 @@ async function runCompletedAttach(dataRoot: string, sessionId: string, noLiveFoo
   return { stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), exitCode };
 }
 
-async function waitFor(read: () => string, needle: string): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (read().includes(needle)) return;
+async function waitForCondition(input: {
+  description: string;
+  condition: () => boolean;
+  diagnostics: () => unknown;
+  abort: AbortController;
+  timeoutMs?: number;
+}): Promise<void> {
+  const deadline = Date.now() + (input.timeoutMs ?? 1_000);
+  while (Date.now() < deadline) {
+    if (input.condition()) return;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  throw new Error(`Timed out waiting for ${JSON.stringify(needle)} in ${JSON.stringify(read())}`);
+  input.abort.abort();
+  throw new Error(`Timed out waiting for ${input.description}; captured=${JSON.stringify(input.diagnostics())}`);
+}
+
+function startActiveAttach(
+  t: test.TestContext,
+  options: ParsedCommandArgs,
+  runtime: AttachRunnerRuntime,
+): { abort: AbortController; attached: Promise<BashGuardEvent[]> } {
+  const abort = new AbortController();
+  const attached = runAttach(options, { ...runtime, signal: abort.signal });
+  t.after(async () => {
+    abort.abort();
+    await attached;
+  });
+  return { abort, attached };
+}
+
+async function waitForText(read: () => string, needle: string, abort: AbortController): Promise<void> {
+  await waitForCondition({
+    description: JSON.stringify(needle),
+    condition: () => read().includes(needle),
+    diagnostics: () => ({ output: read() }),
+    abort,
+  });
 }
 
 test("active supported TTY prints header, bounded history, and guidance before the sticky footer", async (t) => {
   const { eventsFile, selection } = await fixture(t);
   const output = ttyOutput();
   const captured = collect(output);
-  const attached = runAttach({ command: "attach", sessionId: selection.selector, attachHistory: 1 }, {
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 1 }, {
     selection,
     output,
     term: "xterm-256color",
     pollMs: 5,
   });
 
-  await waitFor(captured.text, "ACTIVE ·");
+  await waitForText(captured.text, "ACTIVE ·", abort);
   const startup = captured.text();
   assert.doesNotMatch(startup, /Live status\n/u);
   assert.ok(startup.indexOf("BashGuard · live") < startup.indexOf("echo history"));
@@ -131,14 +164,14 @@ test("live batches retain normalized append order once and update request/comple
   const output = ttyOutput();
   const captured = collect(output);
   const snapshots: BashGuardEvent[][] = [];
-  const attached = runAttach({ command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
     selection,
     output,
     term: "xterm",
     pollMs: 5,
     onSnapshot(events) { snapshots.push(events); },
   });
-  await waitFor(captured.text, "2 ev");
+  await waitForText(captured.text, "2 ev", abort);
 
   // Neither malformed complete JSON nor an incomplete valid line is evidence.
   const request = event(4, "request", "tool.requested", {
@@ -153,8 +186,8 @@ test("live batches retain normalized append order once and update request/comple
   assert.doesNotMatch(captured.text(), /4 ev/u);
 
   await appendFile(eventsFile, `${JSON.stringify(request).slice(30)}\n${JSON.stringify(event(5, "quiet", "message.started"))}\n`);
-  await waitFor(captured.text, "awaiting completion evidence");
-  await waitFor(captured.text, "4 ev");
+  await waitForText(captured.text, "awaiting completion evidence", abort);
+  await waitForText(captured.text, "4 ev", abort);
 
   const completion = event(6, "completion", "tool.completed", {
     toolCallId: "call-1",
@@ -178,7 +211,7 @@ test("attach awaits injected controller timeline writes and one batch status reb
   const output = ttyOutput();
   const calls: string[] = [];
   let lastRenderedCount: number | undefined;
-  const attached = runAttach({ command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
     selection,
     output,
     term: "xterm",
@@ -200,9 +233,9 @@ test("attach awaits injected controller timeline writes and one batch status reb
       };
     },
   });
-  while (!calls.includes("render:2")) await new Promise((resolve) => setTimeout(resolve, 2));
+  await waitForCondition({ description: "initial render", condition: () => calls.includes("render:2"), diagnostics: () => ({ calls }), abort });
   await appendFile(eventsFile, `${JSON.stringify(event(3, "request-await", "tool.requested", { toolCallId: "await", toolName: "bash" }))}\n${JSON.stringify(event(4, "quiet-await", "message.started"))}\n`);
-  while (!calls.includes("render:4")) await new Promise((resolve) => setTimeout(resolve, 2));
+  await waitForCondition({ description: "four-event render", condition: () => calls.includes("render:4"), diagnostics: () => ({ calls }), abort });
   await appendFile(eventsFile, `${JSON.stringify(event(5, "stop-await", "session.shutdown"))}\n`);
   await attached;
   assert.deepEqual(calls.filter((call) => call !== "render:2"), [
@@ -218,7 +251,7 @@ test("idle polling requests an awaited freshness model only at the one-second po
   const output = ttyOutput();
   let currentTime = Date.now();
   const renderedFreshness: string[] = [];
-  const attached = runAttach({ command: "attach", sessionId: selection.selector }, {
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector }, {
     selection,
     output,
     term: "xterm",
@@ -235,14 +268,14 @@ test("idle polling requests an awaited freshness model only at the one-second po
       };
     },
   });
-  while (renderedFreshness.length === 0) await new Promise((resolve) => setTimeout(resolve, 2));
+  await waitForCondition({ description: "initial freshness", condition: () => renderedFreshness.length > 0, diagnostics: () => ({ renderedFreshness }), abort });
   await new Promise((resolve) => setTimeout(resolve, 15));
   assert.equal(renderedFreshness.length, 1);
   currentTime += 999;
   await new Promise((resolve) => setTimeout(resolve, 15));
   assert.equal(renderedFreshness.length, 1);
   currentTime += 1;
-  while (renderedFreshness.length < 2) await new Promise((resolve) => setTimeout(resolve, 2));
+  await waitForCondition({ description: "refreshed freshness", condition: () => renderedFreshness.length >= 2, diagnostics: () => ({ renderedFreshness }), abort });
   assert.equal(renderedFreshness[1], "1s ago");
 
   await appendFile(eventsFile, `${JSON.stringify(event(3, "stop-refresh", "session.shutdown"))}\n`);
@@ -254,7 +287,7 @@ test("accepted controller failure visibly degrades without losing or duplicating
   const output = ttyOutput();
   const captured = collect(output);
   let failed = false;
-  const attached = runAttach({ command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
     selection,
     output,
     term: "xterm",
@@ -270,13 +303,13 @@ test("accepted controller failure visibly degrades without losing or duplicating
       };
     },
   });
-  await waitFor(captured.text, "Following live events");
+  await waitForText(captured.text, "Following live events", abort);
   await appendFile(eventsFile, `${JSON.stringify(event(3, "degrade", "tool.requested", {
     toolCallId: "degrade-call",
     toolName: "bash",
     payload: { input: { command: "printf degrade-once" } },
   }))}\n`);
-  await waitFor(captured.text, "Live footer unavailable");
+  await waitForText(captured.text, "Live footer unavailable", abort);
   await appendFile(eventsFile, `${JSON.stringify(event(4, "stop-degrade", "session.shutdown"))}\n`);
   const finalEvents = await attached;
   assert.deepEqual(finalEvents.map((item) => item.id), ["start", "history", "degrade", "stop-degrade"]);
@@ -290,13 +323,13 @@ test("plain active fallbacks retain startup status and emit no footer ANSI", asy
       const { eventsFile, selection } = await fixture(t);
       const output = mode === "nonTTY" ? new PassThrough() : ttyOutput();
       const captured = collect(output);
-      const attached = runAttach({ command: "attach", sessionId: selection.selector, noLiveFooter: mode === "disabled" }, {
+      const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, noLiveFooter: mode === "disabled" }, {
         selection,
         output,
         term: mode === "dumb" ? "DuMb" : "xterm",
         pollMs: 5,
       });
-      await waitFor(captured.text, "Following live events");
+      await waitForText(captured.text, "Following live events", abort);
       await appendFile(eventsFile, `${JSON.stringify(event(3, `stop-${mode}`, "session.shutdown"))}\n`);
       await attached;
       assert.match(captured.text(), /Live status\n/u);
@@ -304,6 +337,167 @@ test("plain active fallbacks retain startup status and emit no footer ANSI", asy
       assert.doesNotMatch(captured.text(), ANSI_FOOTER);
     });
   }
+});
+
+test("sticky startup and replay use the first event ID occurrence exactly once", async (t) => {
+  const { eventsFile, initial, selection } = await fixture(t);
+  const duplicateHistory = event(20, "history", "bash.user_requested", { payload: { command: "echo duplicate-startup" } });
+  await writeFile(eventsFile, `${[...initial, duplicateHistory].map((item) => JSON.stringify(item)).join("\n")}\n`);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const snapshots: Array<{ ids: string[]; count: number; activity: string }> = [];
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, allHistory: true }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    onSnapshot(events, status) {
+      snapshots.push({ ids: events.map((item) => item.id), count: status.eventCount, activity: status.activity });
+    },
+  });
+
+  await waitForText(captured.text, "2 ev", abort);
+  assert.equal(captured.text().match(/(?:^|\n)\s*2\s+history\s+/gu)?.length, 1);
+  assert.doesNotMatch(captured.text(), /echo duplicate-startup/u);
+  assert.deepEqual(snapshots[0], { ids: ["start", "history"], count: 2, activity: "You ran · echo history" });
+
+  const replay = event(21, "history", "bash.user_requested", { payload: { command: "echo duplicate-live" } });
+  await appendFile(eventsFile, `${JSON.stringify(replay)}\n${JSON.stringify(event(22, "quiet-dedupe", "message.started"))}\n`);
+  await waitForText(captured.text, "3 ev", abort);
+  assert.doesNotMatch(captured.text(), /echo duplicate-live/u);
+  assert.deepEqual(snapshots.at(-1)?.ids, ["start", "history", "quiet-dedupe"]);
+  assert.deepEqual(snapshots.map((snapshot) => snapshot.count), [2, 3]);
+
+  await appendFile(eventsFile, `${JSON.stringify(event(23, "stop-dedupe", "session.shutdown"))}\n`);
+  const finalEvents = await attached;
+  assert.deepEqual(finalEvents.map((item) => item.id), ["start", "history", "quiet-dedupe", "stop-dedupe"]);
+  assert.deepEqual(snapshots.map((snapshot) => snapshot.count), [2, 3, 4]);
+});
+
+test("sticky dedupe does not collapse distinct events with empty IDs", async (t) => {
+  const { eventsFile, initial, selection } = await fixture(t);
+  await writeFile(eventsFile, `${[...initial, event(3, "", "message.started"), event(4, "", "message.ended")].map((item) => JSON.stringify(item)).join("\n")}\n`);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const snapshots: BashGuardEvent[][] = [];
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    onSnapshot(events) { snapshots.push([...events]); },
+  });
+
+  await waitForText(captured.text, "4 ev", abort);
+  assert.equal(snapshots[0]?.filter((item) => item.id === "").length, 2);
+  await appendFile(eventsFile, `${JSON.stringify(event(5, "", "message.started"))}\n${JSON.stringify(event(6, "", "message.ended"))}\n${JSON.stringify(event(7, "stop-empty-ids", "session.shutdown"))}\n`);
+  const finalEvents = await attached;
+  assert.equal(finalEvents.filter((item) => item.id === "").length, 4);
+  assert.equal(finalEvents.length, 7);
+  assert.equal(snapshots.at(-1)?.length, 7);
+});
+
+test("plain attach preserves duplicate startup history and counts", async (t) => {
+  const { eventsFile, initial, selection } = await fixture(t);
+  const duplicateHistory = event(20, "history", "bash.user_requested", { payload: { command: "echo duplicate-plain" } });
+  await writeFile(eventsFile, `${[...initial, duplicateHistory].map((item) => JSON.stringify(item)).join("\n")}\n`);
+  const output = new PassThrough();
+  const captured = collect(output);
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, allHistory: true }, {
+    selection,
+    output,
+    pollMs: 5,
+  });
+
+  await waitForText(captured.text, "Following live events", abort);
+  assert.match(captured.text(), /Events\s+3/u);
+  assert.match(captured.text(), /echo history/u);
+  assert.match(captured.text(), /echo duplicate-plain/u);
+  await appendFile(eventsFile, `${JSON.stringify(event(21, "stop-plain-duplicate", "session.shutdown"))}\n`);
+  assert.equal((await attached).length, 4);
+});
+
+test("aborting active attach exits promptly and clears the rendered footer", async (t) => {
+  const { selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 60_000,
+  });
+
+  await waitForText(captured.text, "ACTIVE ·", abort);
+  abort.abort();
+  await attached;
+  assert.ok(captured.text().endsWith(`${footerClearSequence(4)}\r\n`), JSON.stringify(captured.text()));
+});
+
+test("sticky attach follows recorder replacement with repeated sequences and ordered async writes", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const replacement = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  t.after(() => { replacement.kill(); });
+  assert.ok(replacement.pid);
+  const output = ttyOutput();
+  const calls: string[] = [];
+  let settled = false;
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 10,
+    createController() {
+      return {
+        failed: false,
+        async writeTimeline(payload) {
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          calls.push(`timeline:${payload}`);
+        },
+        async render(model) {
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          calls.push(`render:${model.eventCount}:${model.state}`);
+        },
+      };
+    },
+  });
+  void attached.then(() => { settled = true; });
+  await waitForCondition({ description: "replacement test initial render", condition: () => calls.includes("render:2:ACTIVE"), diagnostics: () => ({ calls }), abort });
+
+  const oldShutdown = event(3, "old-shutdown", "session.shutdown");
+  await appendFile(eventsFile, `${JSON.stringify(oldShutdown)}\n`);
+  await writeFile(join(selection.session.directory, "session.json"), `${JSON.stringify({
+    ...selection.session.metadata,
+    processId: replacement.pid,
+    startedAt: new Date(Date.parse(oldShutdown.timestamp) + 1_000).toISOString(),
+  })}\n`);
+  const replacementStart = event(1, "replacement-start", "session.started");
+  const replay = event(2, "history", "bash.user_requested", { payload: { command: "echo replay-must-not-render" } });
+  const replacementRequest = event(2, "replacement-request", "tool.requested", {
+    toolCallId: "replacement-call",
+    toolName: "bash",
+    payload: { input: { command: "printf replacement-live" } },
+  });
+  await appendFile(eventsFile, `${[replacementStart, replay, replacementRequest].map((item) => JSON.stringify(item)).join("\n")}\n`);
+
+  await waitForCondition({
+    description: "replacement request and five-event render",
+    condition: () => calls.some((call) => call.includes("printf replacement-live")) && calls.includes("render:5:ACTIVE"),
+    diagnostics: () => ({ calls, settled }),
+    abort,
+  });
+  assert.equal(settled, false, JSON.stringify(calls));
+  assert.equal(calls.filter((call) => call.includes("replay-must-not-render")).length, 0);
+  const renderIndex = calls.indexOf("render:5:ACTIVE");
+  assert.ok(calls.slice(0, renderIndex).some((call) => call.includes("Pi session ended")));
+  assert.ok(calls.slice(0, renderIndex).some((call) => call.includes("Pi session started")));
+  assert.ok(calls.slice(0, renderIndex).some((call) => call.includes("printf replacement-live")));
+
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "replacement-stop", "session.shutdown"))}\n`);
+  const finalEvents = await attached;
+  assert.deepEqual(finalEvents.map((item) => item.id), [
+    "start", "history", "old-shutdown", "replacement-start", "replacement-request", "replacement-stop",
+  ]);
 });
 
 test("completed attach preserves plain static output in a TTY", async (t) => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { unlinkSync } from "node:fs";
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -115,16 +115,39 @@ async function waitForCondition(input: {
   throw new Error(`Timed out waiting for ${input.description}; captured=${JSON.stringify(input.diagnostics())}`);
 }
 
+async function settleAttach<T>(
+  promise: Promise<T>,
+  abort: AbortController,
+  diagnostics: () => unknown = () => ({}),
+  timeoutMs = 1_000,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          abort.abort();
+          reject(new Error(`Timed out waiting for attach settlement; captured=${JSON.stringify(diagnostics())}`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function startActiveAttach(
   t: test.TestContext,
   options: ParsedCommandArgs,
   runtime: AttachRunnerRuntime,
 ): { abort: AbortController; attached: Promise<BashGuardEvent[]> } {
   const abort = new AbortController();
-  const attached = runAttach(options, { ...runtime, signal: abort.signal });
+  const running = runAttach(options, { ...runtime, signal: abort.signal });
+  const attached = settleAttach(running, abort);
   t.after(async () => {
     abort.abort();
-    await attached;
+    await settleAttach(running, abort);
   });
   return { abort, attached };
 }
@@ -455,6 +478,130 @@ test("stdout resize redraws real wide, medium, and narrow line counts once and r
   assert.equal(output.listenerCount("resize"), 0);
 });
 
+test("rapid resize widths coalesce behind a blocked timeline write and finish at the latest width", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const output = ttyOutput();
+  const calls: string[] = [];
+  let releaseWrite!: () => void;
+  const blockedWrite = new Promise<void>((resolve) => { releaseWrite = resolve; });
+  let timelineStarted = false;
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    createController() {
+      return {
+        failed: false,
+        async render(model) { calls.push(`render:${model.eventCount}:${output.columns}`); },
+        async writeTimeline() {
+          timelineStarted = true;
+          await blockedWrite;
+        },
+        async resize() { calls.push(`resize:${output.columns}`); },
+      };
+    },
+  });
+  await waitForCondition({ description: "initial footer render", condition: () => calls.includes("render:2:80"), diagnostics: () => ({ calls }), abort });
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "blocked-resize", "bash.user_requested", { payload: { command: "echo blocked" } }))}\n`);
+  await waitForCondition({ description: "blocked timeline write", condition: () => timelineStarted, diagnostics: () => ({ calls }), abort });
+  output.columns = 50;
+  output.emit("resize");
+  output.columns = 30;
+  output.emit("resize");
+  releaseWrite();
+  await waitForCondition({ description: "latest resize", condition: () => calls.includes("resize:30"), diagnostics: () => ({ calls }), abort });
+  assert.deepEqual(calls.filter((call) => call.startsWith("resize:")), ["resize:30"]);
+  assert.ok(calls.includes("render:3:30"), JSON.stringify(calls));
+  await appendFile(eventsFile, `${JSON.stringify(event(4, "stop-blocked-resize", "session.shutdown"))}\n`);
+  await attached;
+});
+
+test("resize backpressure retains a newer dirty width and reruns", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const output = ttyOutput();
+  const widths: number[] = [];
+  let releaseResize!: () => void;
+  const blockedResize = new Promise<void>((resolve) => { releaseResize = resolve; });
+  let firstResizeStarted = false;
+  let initialized = false;
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    createController() {
+      return {
+        failed: false,
+        async render() { initialized = true; },
+        async writeTimeline() {},
+        async resize() {
+          widths.push(output.columns);
+          if (!firstResizeStarted) {
+            firstResizeStarted = true;
+            await blockedResize;
+          }
+        },
+      };
+    },
+  });
+  await waitForCondition({ description: "initial render before resize", condition: () => initialized, diagnostics: () => ({ widths }), abort });
+  output.columns = 50;
+  output.emit("resize");
+  await waitForCondition({ description: "first blocked resize", condition: () => firstResizeStarted, diagnostics: () => ({ widths }), abort });
+  output.columns = 30;
+  output.emit("resize");
+  releaseResize();
+  await waitForCondition({ description: "rerender at newest width", condition: () => widths.at(-1) === 30, diagnostics: () => ({ widths }), abort });
+  assert.deepEqual(widths, [50, 30]);
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "stop-resize-backpressure", "session.shutdown"))}\n`);
+  await attached;
+});
+
+test("concurrent resize and accepted timeline failure degrade atomically once", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  let rejectWrite!: (error: Error) => void;
+  const blockedWrite = new Promise<void>((_, reject) => { rejectWrite = reject; });
+  let timelineStarted = false;
+  let failed = false;
+  let resizeCalls = 0;
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    createController() {
+      return {
+        get failed() { return failed; },
+        async render() {},
+        async writeTimeline() {
+          timelineStarted = true;
+          await blockedWrite;
+        },
+        async resize() { resizeCalls += 1; },
+      };
+    },
+  });
+  await waitForText(captured.text, "Following live events", abort);
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "timeline-race", "bash.user_requested", { payload: { command: "echo race" } }))}\n`);
+  await waitForCondition({ description: "racing timeline write", condition: () => timelineStarted, diagnostics: () => ({ resizeCalls }), abort });
+  output.columns = 50;
+  output.emit("resize");
+  output.columns = 30;
+  output.emit("resize");
+  failed = true;
+  rejectWrite(Object.assign(new Error("accepted concurrent failure"), { accepted: true }));
+  await waitForText(captured.text, "Live footer unavailable", abort);
+  assert.equal(captured.text().match(/Live footer unavailable/gu)?.length, 1);
+  assert.equal(captured.text().match(/Live status\n/gu)?.length, 1);
+  assert.equal(resizeCalls, 0);
+  await appendFile(eventsFile, `${JSON.stringify(event(4, "stop-timeline-race", "session.shutdown"))}\n`);
+  await attached;
+  assert.equal(captured.text().match(/Live footer unavailable/gu)?.length, 1);
+});
+
 test("recorded shutdown clears sticky output and prints exactly one final grounded ordinary block", async (t) => {
   const { eventsFile, selection } = await fixture(t);
   const output = ttyOutput();
@@ -483,7 +630,7 @@ test("recorded shutdown finalizes from the accepted snapshot when confirmation s
   const signals = new EventEmitter();
   const abort = new AbortController();
   let removed = false;
-  const attached = runAttach({ command: "attach", sessionId: selection.selector }, {
+  const running = runAttach({ command: "attach", sessionId: selection.selector }, {
     selection,
     output,
     term: "xterm",
@@ -497,30 +644,119 @@ test("recorded shutdown finalizes from the accepted snapshot when confirmation s
       }
     },
   });
+  const attached = settleAttach(running, abort, () => ({ output: captured.text(), removed }));
   t.after(async () => {
     abort.abort();
-    await attached;
+    await settleAttach(running, abort);
   });
 
   await waitForText(captured.text, "ACTIVE ·", abort);
   assert.equal(signals.listenerCount("SIGINT"), 1);
   await appendFile(eventsFile, `${JSON.stringify(event(3, "removed-stop", "session.shutdown"))}\n`);
-  let timeoutHandle: NodeJS.Timeout | undefined;
-  const outcome = await Promise.race([
-    attached.then(() => "settled" as const),
-    new Promise<"timeout">((resolve) => {
-      timeoutHandle = setTimeout(() => resolve("timeout"), 500);
-    }),
-  ]);
-  if (timeoutHandle) clearTimeout(timeoutHandle);
-
-  assert.equal(outcome, "settled", "accepted shutdown must settle even when its events file disappears");
+  await attached;
   const text = captured.text();
   assert.equal(text.match(/Session status\n/gu)?.length, 1);
   assert.equal(text.match(/State\s+complete/gu)?.length, 1);
   assert.ok(text.includes(`${footerClearSequence(4)}\r\nSession status\n`), JSON.stringify(text));
   assert.equal(signals.listenerCount("SIGINT"), 0);
   assert.equal(output.listenerCount("resize"), 0);
+});
+
+test("accepted shutdown rereads replacement metadata after a failed confirmation stat", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const replacementPid = 424_242;
+  const output = ttyOutput();
+  const captured = collect(output);
+  let metadataReads = 0;
+  let failConfirmation = false;
+  const replacementMetadata = { ...selection.session.metadata, processId: replacementPid };
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector, attachHistory: 0 }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    isProcessAlive(pid) { return pid === process.pid || pid === replacementPid; },
+    async statEventsFile() {
+      if (failConfirmation) {
+        failConfirmation = false;
+        throw Object.assign(new Error("controlled missing stream"), { code: "ENOENT" });
+      }
+      return await stat(eventsFile);
+    },
+    async readSessionMetadata() {
+      metadataReads += 1;
+      if (metadataReads === 1) {
+        failConfirmation = true;
+        return selection.session.metadata;
+      }
+      if (metadataReads === 2) {
+        await appendFile(eventsFile, `${JSON.stringify(event(1, "raced-replacement-start", "session.started"))}\n`);
+        return replacementMetadata;
+      }
+      return replacementMetadata;
+    },
+  });
+  await waitForText(captured.text, "ACTIVE ·", abort);
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "old-raced-stop", "session.shutdown"))}\n`);
+  await waitForText(captured.text, "raced-re", abort);
+  assert.equal(metadataReads >= 2, true);
+  await appendFile(eventsFile, `${JSON.stringify(event(2, "raced-replacement-stop", "session.shutdown"))}\n`);
+  const finalEvents = await attached;
+  assert.ok(finalEvents.some((item) => item.id === "raced-replacement-start"));
+  assert.equal(captured.text().match(/Session status\n/gu)?.length, 1);
+});
+
+test("a pre-shutdown stat failure adopts a live replacement and keeps following", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const replacementPid = 515_151;
+  const output = ttyOutput();
+  let statCalls = 0;
+  let metadataReads = 0;
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    isProcessAlive(pid) { return pid === replacementPid; },
+    async statEventsFile() {
+      statCalls += 1;
+      if (statCalls === 1) throw Object.assign(new Error("transient missing stream"), { code: "ENOENT" });
+      return await stat(eventsFile);
+    },
+    async readSessionMetadata() {
+      metadataReads += 1;
+      return { ...selection.session.metadata, processId: replacementPid };
+    },
+  });
+  await waitForCondition({ description: "replacement adoption", condition: () => metadataReads === 1, diagnostics: () => ({ statCalls, metadataReads }), abort });
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "adopted-replacement-stop", "session.shutdown"))}\n`);
+  const finalEvents = await attached;
+  assert.ok(statCalls > 1);
+  assert.equal(finalEvents.at(-1)?.id, "adopted-replacement-stop");
+});
+
+test("PID death plus a missing events file settles without an unbounded poll", async (t) => {
+  const { selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  let statCalls = 0;
+  const { abort, attached } = startActiveAttach(t, { command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    isProcessAlive: () => false,
+    async statEventsFile() {
+      statCalls += 1;
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+    async readSessionMetadata() { return selection.session.metadata; },
+  });
+  await waitForText(captured.text, "ACTIVE ·", abort);
+  await attached;
+  assert.equal(statCalls, 1);
+  assert.equal(captured.text().match(/Session status\n/gu)?.length, 1);
+  assert.match(captured.text(), /State\s+complete/u);
 });
 
 test("PID death without shutdown finalizes honestly from process evidence", async (t) => {
@@ -551,15 +787,21 @@ test("injected SIGINT clears the footer, sets conventional status, stops the loo
   const captured = collect(output);
   const signals = new EventEmitter();
   let exitCode: number | undefined;
-  const attached = runAttach({ command: "attach", sessionId: selection.selector }, {
+  const abort = new AbortController();
+  const running = runAttach({ command: "attach", sessionId: selection.selector }, {
     selection,
     output,
     term: "xterm",
     pollMs: 60_000,
+    signal: abort.signal,
     signalSource: signals,
     setExitCode(code) { exitCode = code; },
   });
-  const abort = new AbortController();
+  const attached = settleAttach(running, abort, () => ({ output: captured.text(), exitCode }));
+  t.after(async () => {
+    abort.abort();
+    await settleAttach(running, abort);
+  });
   await waitForText(captured.text, "ACTIVE ·", abort);
   assert.equal(signals.listenerCount("SIGINT"), 1);
   signals.emit("SIGINT");
@@ -578,18 +820,24 @@ test("unexpected errors clear the footer before propagating and remove lifecycle
   const captured = collect(output);
   const signals = new EventEmitter();
   let snapshots = 0;
-  const attached = runAttach({ command: "attach", sessionId: selection.selector }, {
+  const abort = new AbortController();
+  const running = runAttach({ command: "attach", sessionId: selection.selector }, {
     selection,
     output,
     term: "xterm",
     pollMs: 5,
+    signal: abort.signal,
     signalSource: signals,
     onSnapshot() {
       snapshots += 1;
       if (snapshots > 1) throw new Error("snapshot exploded");
     },
   });
-  const abort = new AbortController();
+  const attached = settleAttach(running, abort, () => ({ output: captured.text(), snapshots }));
+  t.after(async () => {
+    abort.abort();
+    await settleAttach(running, abort).catch(() => undefined);
+  });
   await waitForText(captured.text, "ACTIVE ·", abort);
   await appendFile(eventsFile, `${JSON.stringify(event(3, "explode", "message.started"))}\n`);
   await assert.rejects(attached, /snapshot exploded/);
@@ -604,11 +852,13 @@ test("EPIPE degradation performs no recursive output or cleanup", async (t) => {
   const captured = collect(output);
   const error = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
   let cleanupCalls = 0;
-  await runAttach({ command: "attach", sessionId: selection.selector }, {
+  const abort = new AbortController();
+  const running = runAttach({ command: "attach", sessionId: selection.selector }, {
     selection,
     output,
     term: "xterm",
     pollMs: 5,
+    signal: abort.signal,
     createController() {
       return {
         failed: true,
@@ -618,6 +868,11 @@ test("EPIPE degradation performs no recursive output or cleanup", async (t) => {
       };
     },
   });
+  t.after(async () => {
+    abort.abort();
+    await settleAttach(running, abort);
+  });
+  await settleAttach(running, abort);
   assert.equal(cleanupCalls, 0);
   assert.doesNotMatch(captured.text(), /Live footer unavailable|broken pipe|Error:/u);
   assert.equal(output.listenerCount("resize"), 0);

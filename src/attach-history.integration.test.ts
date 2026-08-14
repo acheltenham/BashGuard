@@ -59,6 +59,7 @@ test("attach completes an event whose JSONL line was partial at the startup boun
   assert.match(stdout, /café-boundary/);
   assert.doesNotMatch(stdout, /�/);
   assert.match(stdout, /Pi session ended/);
+  assert.doesNotMatch(stdout, /\u001b\[(?:1A|2K)/u, "redirected attach output must remain ANSI-free");
 });
 
 test("attach preserves UTF-8 split across live polling cycles", async (t) => {
@@ -227,4 +228,5 @@ test("attach bounds startup history but streams every new narrated event", async
   assert.match(stdout, /live-one/);
   assert.match(stdout, /live-two/);
   assert.match(stdout, /Pi session ended/);
+  assert.doesNotMatch(stdout, /\u001b\[(?:1A|2K)/u, "plain attach must not emit sticky-footer ANSI");
 });

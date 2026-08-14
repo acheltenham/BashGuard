@@ -8,6 +8,7 @@ import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
+import { buildLiveFooterModel, createLiveFooterController, LIVE_FOOTER_REFRESH_MS, type LiveFooterController, type StructuralWritable } from "./live-footer.ts";
 import { sessionChoiceDisplay, shellQuoteArgument, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
 import { promptForSessionChoice } from "./session-picker.ts";
 
@@ -1824,67 +1825,133 @@ async function debrief(options: ParsedCommandArgs): Promise<void> {
   process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: effectiveSelector, sessionState: session.active ? "active" : "complete" }));
 }
 
-async function attach(options: ParsedCommandArgs): Promise<void> {
+export type AttachFooterController = Pick<LiveFooterController, "failed" | "render" | "writeTimeline">;
+
+export type AttachRunnerRuntime = {
+  input?: NodeJS.ReadableStream & { isTTY?: boolean };
+  output?: NodeJS.WritableStream & { isTTY?: boolean; columns?: number };
+  term?: string;
+  selection?: SessionSelectionResult;
+  pollMs?: number;
+  now?: () => number;
+  createController?: (options: Parameters<typeof createLiveFooterController>[0]) => AttachFooterController;
+  onSnapshot?: (events: readonly BashGuardEvent[], status: AttachStatus) => void;
+};
+
+function footerWriteWasAccepted(controller: AttachFooterController, error: unknown): boolean {
+  return controller.failed || (error as { accepted?: unknown } | undefined)?.accepted === true;
+}
+
+export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunnerRuntime = {}): Promise<BashGuardEvent[]> {
   const requestedId = options.sessionId;
   if (options.attachHistory !== undefined && (!Number.isInteger(options.attachHistory) || options.attachHistory < 0)) throw new Error("`--history` must be a non-negative integer");
   if (options.attachHistory !== undefined && options.allHistory) throw new Error("`--history` and `--all-history` cannot be combined");
   const history = options.attachHistory ?? 50;
-  const selection = await selectSessionForCommandResult("attach", requestedId, {
+  const input = runtime.input ?? process.stdin;
+  const output = runtime.output ?? process.stdout;
+  const selection = runtime.selection ?? await selectSessionForCommandResult("attach", requestedId, {
     exactSessionId: options.exactSessionId,
-    input: process.stdin,
-    output: process.stdout,
+    input,
+    output,
   });
   const { session } = selection;
   const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
   const snapshot = await readAttachSnapshot(session.eventsFile);
-  const existing = snapshot.events;
-  const active = sessionSnapshotIsActive(session.metadata, existing);
+  const events = [...snapshot.events];
+  const active = sessionSnapshotIsActive(session.metadata, events);
+  const stickyEnabled = shouldUseLiveFooter({
+    active,
+    stdoutIsTTY: output.isTTY === true,
+    term: runtime.term ?? process.env.TERM,
+    disabled: options.noLiveFooter === true,
+  });
+  const write = (text: string): void => { output.write(text); };
 
-  process.stdout.write(`BashGuard · ${active ? "live" : "completed"}\n`);
-  process.stdout.write(`Session ${singleLineDisplay(session.metadata.sessionId)}\n`);
-  process.stdout.write(`Repo    ${singleLineDisplay(repo)}\n`);
-  if (session.metadata.cwd) process.stdout.write(`Cwd     ${singleLineDisplay(session.metadata.cwd)}\n`);
-  process.stdout.write("─".repeat(60) + "\n");
+  write(`BashGuard · ${active ? "live" : "completed"}\n`);
+  write(`Session ${singleLineDisplay(session.metadata.sessionId)}\n`);
+  write(`Repo    ${singleLineDisplay(repo)}\n`);
+  if (session.metadata.cwd) write(`Cwd     ${singleLineDisplay(session.metadata.cwd)}\n`);
+  write("─".repeat(60) + "\n");
 
   let offset = snapshot.offset;
   let remainder = snapshot.remainder;
   let decoder = new StringDecoder("utf8");
-  const historySelection = selectAttachHistory(existing, history, options.allHistory ?? false);
+  const historySelection = selectAttachHistory(events, history, options.allHistory ?? false);
   const seenEventIds = historySelection.seenEventIds;
-  process.stdout.write(formatAttachStatus(buildAttachStatus(existing, active)));
-  process.stdout.write("─".repeat(60) + "\n");
+  if (!stickyEnabled) {
+    write(formatAttachStatus(buildAttachStatus(events, active, runtime.now?.())));
+    write("─".repeat(60) + "\n");
+  }
   for (const event of historySelection.visible) {
     const rendered = formatTimelineEvent(event);
-    if (rendered) process.stdout.write(`${rendered}\n`);
+    if (rendered) write(`${rendered}\n`);
   }
 
   const sessionSelector = selection.selector;
-  if (historySelection.visible.length > 0) process.stdout.write("─".repeat(60) + "\n");
-  if (!active) {
-    process.stdout.write(formatAttachGuidance(sessionSelector, {
-      recordedTotal: existing.length,
-      narratedTotal: historySelection.narratedTotal,
-      narratedShown: historySelection.visible.length,
-      active,
-    }));
-    return;
-  }
-
-  process.stdout.write(formatAttachGuidance(sessionSelector, {
-    recordedTotal: existing.length,
+  if (historySelection.visible.length > 0) write("─".repeat(60) + "\n");
+  write(formatAttachGuidance(sessionSelector, {
+    recordedTotal: events.length,
     narratedTotal: historySelection.narratedTotal,
     narratedShown: historySelection.visible.length,
     active,
   }));
+  if (!active) return events;
 
+  let controller: AttachFooterController | undefined;
+  let plainAfterFooterFailure = false;
+  let lastFooterModelAt: number | undefined;
+  const now = runtime.now ?? Date.now;
+  const currentStatus = (): AttachStatus => buildAttachStatus(events, true, now());
+  const publishSnapshot = (): AttachStatus => {
+    const status = currentStatus();
+    runtime.onSnapshot?.([...events], status);
+    return status;
+  };
+  const degradeFooter = (status: AttachStatus): void => {
+    controller = undefined;
+    plainAfterFooterFailure = true;
+    write("\r\nLive footer unavailable; continuing with plain status.\n");
+    write(formatAttachStatus(status));
+  };
+
+  if (stickyEnabled) {
+    controller = (runtime.createController ?? createLiveFooterController)({
+      output: output as StructuralWritable,
+      clock: runtime.now,
+      width: () => output.columns ?? 80,
+    });
+    const status = publishSnapshot();
+    try {
+      await controller.render(buildLiveFooterModel(status));
+      lastFooterModelAt = now();
+    } catch {
+      degradeFooter(status);
+    }
+  }
+
+  const refreshFooterIfDue = async (): Promise<void> => {
+    if (!controller) return;
+    const observedAt = now();
+    if (lastFooterModelAt !== undefined && observedAt >= lastFooterModelAt && observedAt - lastFooterModelAt < LIVE_FOOTER_REFRESH_MS) return;
+    const status = currentStatus();
+    try {
+      await controller.render(buildLiveFooterModel(status));
+      lastFooterModelAt = observedAt;
+    } catch {
+      degradeFooter(status);
+    }
+  };
+
+  const sleep = async (): Promise<void> => new Promise((resolve) => setTimeout(resolve, runtime.pollMs ?? POLL_MS));
   let followedProcessId = session.metadata.processId;
   while (true) {
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    await sleep();
 
     let info;
     try {
       info = await stat(session.eventsFile);
     } catch {
+      await refreshFooterIfDue();
       continue;
     }
 
@@ -1895,7 +1962,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     }
     if (info.size === offset) {
       if (!processIsAlive(followedProcessId)) {
-        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+        await sleep();
         const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
         if (replacementMetadata && processIsAlive(replacementMetadata.processId)) {
           followedProcessId = replacementMetadata.processId;
@@ -1906,9 +1973,10 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
         } catch {
           continue;
         }
-        process.stdout.write("Pi session ended.\n");
-        return;
+        if (!controller) write("Pi session ended.\n");
+        return events;
       }
+      await refreshFooterIfDue();
       continue;
     }
 
@@ -1922,23 +1990,56 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     remainder = lines.pop() ?? "";
 
     let latestLifecycleInBatch: "started" | "shutdown" | undefined;
+    const accepted: BashGuardEvent[] = [];
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
-        const event = JSON.parse(line) as BashGuardEvent;
-        if (seenEventIds.has(event.id)) continue;
+        const event = normalizeEvent(JSON.parse(line) as BashGuardEvent);
+        if (!validSessionId(event.id) || seenEventIds.has(event.id)) continue;
         seenEventIds.add(event.id);
+        events.push(event);
+        accepted.push(event);
         if (event.type === "session.started") latestLifecycleInBatch = "started";
         if (event.type === "session.shutdown") latestLifecycleInBatch = "shutdown";
-        const rendered = formatTimelineEvent(event);
-        if (rendered) process.stdout.write(`${rendered}\n`);
       } catch {
-        // Malformed complete lines are ignored in this first slice rather than crashing attachment.
+        // Malformed complete lines are ignored rather than changing grounded status.
+      }
+    }
+
+    if (accepted.length > 0) {
+      const status = publishSnapshot();
+      if (controller) {
+        let nextEventIndex = 0;
+        try {
+          // Timeline writes keep the previously grounded footer in place; the
+          // one batch model redraw then publishes the complete new snapshot.
+          for (; nextEventIndex < accepted.length; nextEventIndex += 1) {
+            const rendered = formatTimelineEvent(accepted[nextEventIndex]!);
+            if (rendered) await controller.writeTimeline(rendered);
+          }
+          await controller.render(buildLiveFooterModel(status));
+          lastFooterModelAt = now();
+        } catch (error) {
+          const acceptedWrite = footerWriteWasAccepted(controller, error);
+          degradeFooter(status);
+          if (!acceptedWrite) {
+            for (const event of accepted.slice(nextEventIndex)) {
+              const rendered = formatTimelineEvent(event);
+              if (rendered) write(`${rendered}\n`);
+            }
+          }
+        }
+      } else {
+        for (const event of accepted) {
+          const rendered = formatTimelineEvent(event);
+          if (rendered) write(`${rendered}\n`);
+        }
+        if (plainAfterFooterFailure) write(formatAttachStatus(status));
       }
     }
 
     if (latestLifecycleInBatch === "shutdown") {
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      await sleep();
       const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
       if (replacementMetadata && replacementMetadata.processId !== followedProcessId && processIsAlive(replacementMetadata.processId)) {
         followedProcessId = replacementMetadata.processId;
@@ -1949,7 +2050,7 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
       } catch {
         continue;
       }
-      return;
+      return events;
     }
   }
 }
@@ -1961,7 +2062,7 @@ async function main(): Promise<void> {
     if (command === "sessions") return await listSessions();
     if (command === "doctor") return await doctor();
     if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);
-    if (command === "attach") return await attach(options);
+    if (command === "attach") return void await runAttach(options);
     if (command === "inspect") return await inspect(options);
     if (command === "debrief") return await debrief(options);
     usage();

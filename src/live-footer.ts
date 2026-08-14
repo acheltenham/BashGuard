@@ -86,7 +86,10 @@ function addTokensWithin(tokens: string[], columns: number): { line: string; dro
   for (const token of tokens) {
     const candidate = line ? `${line} · ${token}` : token;
     if (candidate.length <= columns) line = candidate;
-    else dropped = true;
+    else {
+      dropped = true;
+      break;
+    }
   }
   return { line: bounded(line || tokens[0] || "", columns), dropped };
 }

@@ -120,6 +120,15 @@ test("width pressure drops event count before freshness and higher-priority fiel
   assert.doesNotMatch(output, /42 ev/);
 });
 
+test("width pressure never retains event count after freshness is dropped", () => {
+  const model = buildLiveFooterModel(status({
+    lastObserved: "a freshness value too long to fit beside the capture summary at this width",
+  }));
+  const output = formatLiveFooter(model, 72).join("\n");
+  assert.doesNotMatch(output, /a freshness value/);
+  assert.doesNotMatch(output, /42 ev/);
+});
+
 test("activity is control-free, single-line, Unicode-preserving, and ellipsized", () => {
   const unicode = formatLiveFooter(buildLiveFooterModel(status({ activity: "Running · café 東京" })), 72).join("\n");
   assert.match(unicode, /café 東京/);

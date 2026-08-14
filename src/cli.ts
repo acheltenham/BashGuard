@@ -8,6 +8,7 @@ import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
+import { buildLiveFooterModel, createLiveFooterController, FooterOperationError, LIVE_FOOTER_REFRESH_MS, type LiveFooterController, type StructuralWritable } from "./live-footer.ts";
 import { sessionChoiceDisplay, shellQuoteArgument, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
 import { promptForSessionChoice } from "./session-picker.ts";
 
@@ -125,6 +126,7 @@ export type ParsedCommandArgs = {
   format?: EvidenceFormat;
   attachHistory?: number;
   allHistory?: boolean;
+  noLiveFooter?: boolean;
   setupSubject?: string;
   setupScope?: "global" | "local";
 };
@@ -146,7 +148,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session=<session-selector> [--history <n>|--all-history]\n  bashguard attach --session-id=<exact-session-id> [--history <n>|--all-history]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-selector> --event <event-id-or-sequence>\n  bashguard inspect --session-id=<exact-session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-selector>\n  bashguard debrief --session-id=<exact-session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session=<session-selector> [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session-id=<exact-session-id> [--history <n>|--all-history] [--no-live-footer]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-selector> --event <event-id-or-sequence>\n  bashguard inspect --session-id=<exact-session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-selector>\n  bashguard debrief --session-id=<exact-session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -164,6 +166,11 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   let format: EvidenceFormat | undefined;
   let attachHistory: number | undefined;
   let allHistory = false;
+  let noLiveFooter = false;
+
+  if (command !== "attach" && args.includes("--no-live-footer")) {
+    throw new Error("`--no-live-footer` can only be used with `bashguard attach`");
+  }
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -250,6 +257,10 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       allHistory = true;
       continue;
     }
+    if (arg === "--no-live-footer") {
+      noLiveFooter = true;
+      continue;
+    }
     if (arg === "--format") {
       const rawFormat = args[++index];
       if (!rawFormat || rawFormat.startsWith("--")) throw new Error("`--format` requires a value");
@@ -276,8 +287,26 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   if (format !== undefined) parsed.format = format;
   if (attachHistory !== undefined) parsed.attachHistory = attachHistory;
   if (allHistory) parsed.allHistory = true;
+  if (noLiveFooter) parsed.noLiveFooter = true;
   if (command !== "attach" && (attachHistory !== undefined || allHistory)) throw new Error("attach history options can only be used with `bashguard attach`");
   return parsed;
+}
+
+export type LiveFooterPolicyInput = {
+  active: boolean;
+  stdoutIsTTY: boolean;
+  term: string | undefined;
+  disabled: boolean;
+};
+
+export function shouldUseLiveFooter(input: LiveFooterPolicyInput): boolean {
+  const term = input.term?.trim();
+  return input.active
+    && input.stdoutIsTTY
+    && term !== undefined
+    && term.length > 0
+    && term.toLocaleLowerCase() !== "dumb"
+    && !input.disabled;
 }
 
 async function readJsonFile<T>(path: string): Promise<T | undefined> {
@@ -374,6 +403,21 @@ function sessionSnapshotIsActive(metadata: SessionMetadata, events: BashGuardEve
 
 function validSessionId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && !value.includes("\0");
+}
+
+function eventIdForDedupe(event: BashGuardEvent): string | undefined {
+  return validSessionId(event.id) ? event.id : undefined;
+}
+
+function dedupeEventsById(events: readonly BashGuardEvent[]): BashGuardEvent[] {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    const id = eventIdForDedupe(event);
+    if (id === undefined) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 export function normalizeSessionMetadata(value: unknown): SessionMetadata | undefined {
@@ -629,7 +673,7 @@ function renderTimestamp(timestamp: string): string {
 export function formatTimelineEvent(event: BashGuardEvent): string | undefined {
   const rendered = renderEvent(event);
   if (!rendered) return undefined;
-  const eventSelector = event.id.slice(0, 8).padEnd(8);
+  const eventSelector = (typeof event.id === "string" ? event.id : "").slice(0, 8).padEnd(8);
   return `${String(event.sequence).padStart(2)}  ${eventSelector}  ${renderTimestamp(event.timestamp)}  ${rendered}`;
 }
 
@@ -719,6 +763,14 @@ export function formatInspectableEvents(sessionSelector: string, events: BashGua
   return `${lines.join("\n")}\n`;
 }
 
+export type AttachCaptureSummary = {
+  state: "ok" | "partial" | "unknown";
+  gaps: number;
+  missing: number;
+  redacted: number;
+  truncated: number;
+};
+
 export type AttachStatus = {
   state: "active" | "complete";
   activityLabel: "Current activity" | "Last activity";
@@ -727,6 +779,7 @@ export type AttachStatus = {
   capture: string;
   eventCount: number;
   lastObserved: string;
+  captureSummary: AttachCaptureSummary;
 };
 
 function relativeEventAge(timestamp: string | undefined, now: number): string {
@@ -778,7 +831,7 @@ export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now
     formatCaptureIssue(truncatedEvents, "truncated event"),
   ].filter((item): item is string => Boolean(item));
 
-  return {
+  const status: AttachStatus = {
     state: active ? "active" : "complete",
     activityLabel: currentRequest ? "Current activity" : "Last activity",
     activity: activityEvent ? renderEvent(activityEvent) ?? activityEvent.type : "No narrated activity recorded",
@@ -786,7 +839,15 @@ export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now
     capture: normalized.length === 0 ? "No capture metadata recorded" : captureIssues.length > 0 ? `Partial · ${captureIssues.join(" · ")}` : "No recorded capture limitations",
     eventCount: normalized.length,
     lastObserved: relativeEventAge(normalized.at(-1)?.timestamp, now),
+    captureSummary: {
+      state: normalized.length === 0 ? "unknown" : captureIssues.length > 0 ? "partial" : "ok",
+      gaps: captureGaps,
+      missing: missingEvents,
+      redacted: redactedEvents,
+      truncated: truncatedEvents,
+    },
   };
+  return status;
 }
 
 function compactStatusValue(value: string): string {
@@ -1779,69 +1840,354 @@ async function debrief(options: ParsedCommandArgs): Promise<void> {
   process.stdout.write(formatDebrief(buildDebrief(events), { sessionSelector: effectiveSelector, sessionState: session.active ? "active" : "complete" }));
 }
 
-async function attach(options: ParsedCommandArgs): Promise<void> {
+export type AttachFooterController = Pick<LiveFooterController, "failed" | "render" | "writeTimeline"> & {
+  resize?: () => Promise<void>;
+  cleanup?: () => Promise<void>;
+};
+
+type AttachSignalSource = {
+  on(event: "SIGINT", listener: () => void): unknown;
+  off(event: "SIGINT", listener: () => void): unknown;
+};
+
+type AttachOutput = NodeJS.WritableStream & {
+  isTTY?: boolean;
+  columns?: number;
+  destroyed?: boolean;
+  writable?: boolean;
+  writableEnded?: boolean;
+  on?(event: "resize", listener: () => void): unknown;
+  off?(event: "resize", listener: () => void): unknown;
+};
+
+export function terminalColumns(output: { columns?: number }, fallback = 80): number {
+  const columns = output.columns;
+  return Number.isFinite(columns) && columns !== undefined && columns > 0 ? columns : fallback;
+}
+
+export type AttachRunnerRuntime = {
+  input?: NodeJS.ReadableStream & { isTTY?: boolean };
+  output?: AttachOutput;
+  term?: string;
+  selection?: SessionSelectionResult;
+  pollMs?: number;
+  now?: () => number;
+  signal?: AbortSignal;
+  signalSource?: AttachSignalSource;
+  setExitCode?: (code: number) => void;
+  isProcessAlive?: (pid?: number) => boolean;
+  statEventsFile?: () => Promise<{ size: number }>;
+  readSessionMetadata?: () => Promise<SessionMetadata | undefined>;
+  createController?: (options: Parameters<typeof createLiveFooterController>[0]) => AttachFooterController;
+  onSnapshot?: (events: readonly BashGuardEvent[], status: AttachStatus) => void;
+};
+
+function footerTimelineWasAccepted(error: unknown): boolean {
+  return error instanceof FooterOperationError && error.timelineAccepted === true;
+}
+
+export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunnerRuntime = {}): Promise<BashGuardEvent[]> {
   const requestedId = options.sessionId;
   if (options.attachHistory !== undefined && (!Number.isInteger(options.attachHistory) || options.attachHistory < 0)) throw new Error("`--history` must be a non-negative integer");
   if (options.attachHistory !== undefined && options.allHistory) throw new Error("`--history` and `--all-history` cannot be combined");
   const history = options.attachHistory ?? 50;
-  const selection = await selectSessionForCommandResult("attach", requestedId, {
+  const input = runtime.input ?? process.stdin;
+  const output = runtime.output ?? process.stdout;
+  const selection = runtime.selection ?? await selectSessionForCommandResult("attach", requestedId, {
     exactSessionId: options.exactSessionId,
-    input: process.stdin,
-    output: process.stdout,
+    input,
+    output,
   });
   const { session } = selection;
   const repo = session.metadata.repository ?? basename(session.metadata.cwd ?? "unknown");
   const snapshot = await readAttachSnapshot(session.eventsFile);
-  const existing = snapshot.events;
-  const active = sessionSnapshotIsActive(session.metadata, existing);
+  const recordedEvents = [...snapshot.events];
+  const active = sessionSnapshotIsActive(session.metadata, recordedEvents);
+  const stickyEnabled = shouldUseLiveFooter({
+    active,
+    stdoutIsTTY: output.isTTY === true,
+    term: runtime.term ?? process.env.TERM,
+    disabled: options.noLiveFooter === true,
+  });
+  // Sticky views are an in-memory projection: one canonical event per valid
+  // nonempty ID, preserving the first append occurrence. Plain/static attach
+  // keeps the historical byte-compatible projection, including duplicates.
+  const events = stickyEnabled ? dedupeEventsById(recordedEvents) : recordedEvents;
+  const write = (text: string): void => { output.write(text); };
 
-  process.stdout.write(`BashGuard · ${active ? "live" : "completed"}\n`);
-  process.stdout.write(`Session ${singleLineDisplay(session.metadata.sessionId)}\n`);
-  process.stdout.write(`Repo    ${singleLineDisplay(repo)}\n`);
-  if (session.metadata.cwd) process.stdout.write(`Cwd     ${singleLineDisplay(session.metadata.cwd)}\n`);
-  process.stdout.write("─".repeat(60) + "\n");
+  write(`BashGuard · ${active ? "live" : "completed"}\n`);
+  write(`Session ${singleLineDisplay(session.metadata.sessionId)}\n`);
+  write(`Repo    ${singleLineDisplay(repo)}\n`);
+  if (session.metadata.cwd) write(`Cwd     ${singleLineDisplay(session.metadata.cwd)}\n`);
+  write("─".repeat(60) + "\n");
 
   let offset = snapshot.offset;
   let remainder = snapshot.remainder;
   let decoder = new StringDecoder("utf8");
-  const historySelection = selectAttachHistory(existing, history, options.allHistory ?? false);
-  const seenEventIds = historySelection.seenEventIds;
-  process.stdout.write(formatAttachStatus(buildAttachStatus(existing, active)));
-  process.stdout.write("─".repeat(60) + "\n");
+  const historySelection = selectAttachHistory(events, history, options.allHistory ?? false);
+  const seenEventIds = new Set(events.map(eventIdForDedupe).filter((id): id is string => id !== undefined));
+  if (!stickyEnabled) {
+    write(formatAttachStatus(buildAttachStatus(events, active, runtime.now?.())));
+    write("─".repeat(60) + "\n");
+  }
   for (const event of historySelection.visible) {
     const rendered = formatTimelineEvent(event);
-    if (rendered) process.stdout.write(`${rendered}\n`);
+    if (rendered) write(`${rendered}\n`);
   }
 
   const sessionSelector = selection.selector;
-  if (historySelection.visible.length > 0) process.stdout.write("─".repeat(60) + "\n");
-  if (!active) {
-    process.stdout.write(formatAttachGuidance(sessionSelector, {
-      recordedTotal: existing.length,
-      narratedTotal: historySelection.narratedTotal,
-      narratedShown: historySelection.visible.length,
-      active,
-    }));
-    return;
-  }
-
-  process.stdout.write(formatAttachGuidance(sessionSelector, {
-    recordedTotal: existing.length,
+  if (historySelection.visible.length > 0) write("─".repeat(60) + "\n");
+  write(formatAttachGuidance(sessionSelector, {
+    recordedTotal: events.length,
     narratedTotal: historySelection.narratedTotal,
     narratedShown: historySelection.visible.length,
     active,
   }));
+  if (!active) return events;
 
-  let followedProcessId = session.metadata.processId;
-  while (true) {
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-
-    let info;
-    try {
-      info = await stat(session.eventsFile);
-    } catch {
-      continue;
+  let controller: AttachFooterController | undefined;
+  let footerState: "active" | "degraded" | "released" = stickyEnabled ? "active" : "released";
+  let plainAfterFooterFailure = false;
+  let outputFailed = false;
+  let lastFooterModelAt: number | undefined;
+  let completed = false;
+  let interrupted = false;
+  let resizeDrainQueued = false;
+  let resizeDirty = false;
+  let pendingResizeWidth = terminalColumns(output);
+  let lifecycleTail: Promise<void> = Promise.resolve();
+  const interrupt = new AbortController();
+  const now = runtime.now ?? Date.now;
+  const isProcessAlive = runtime.isProcessAlive ?? processIsAlive;
+  const statEventsFile = runtime.statEventsFile ?? (() => stat(session.eventsFile));
+  const readSessionMetadata = runtime.readSessionMetadata
+    ?? (() => readJsonFile<SessionMetadata>(join(session.directory, "session.json")));
+  const currentStatus = (isActive = true): AttachStatus => buildAttachStatus(events, isActive, now());
+  const publishSnapshot = (): AttachStatus => {
+    const status = currentStatus();
+    runtime.onSnapshot?.([...events], status);
+    return status;
+  };
+  const enqueueLifecycle = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = lifecycleTail.then(operation);
+    lifecycleTail = result.then(() => undefined, () => undefined);
+    return result;
+  };
+  const removeFooterListeners = (): void => {
+    if (typeof output.off === "function") output.off("resize", onResize);
+    runtime.signalSource?.off("SIGINT", onSigint);
+  };
+  const writeSafeFallback = async (text: string): Promise<boolean> => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (output.destroyed === true || output.writable === false || output.writableEnded === true) return false;
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      let removalScheduled = false;
+      const removeErrorListener = () => output.removeListener("error", onError);
+      const finish = (success: boolean, awaitAssociatedError = false) => {
+        if (settled) return;
+        settled = true;
+        if (awaitAssociatedError && !removalScheduled) {
+          removalScheduled = true;
+          setImmediate(removeErrorListener);
+        } else {
+          removeErrorListener();
+        }
+        resolve(success);
+      };
+      const onError = () => finish(false);
+      output.once("error", onError);
+      try {
+        output.write(text, (writeError?: Error | null) => finish(writeError == null, writeError != null));
+      } catch {
+        finish(false);
+      }
+    });
+  };
+  const degradeFooter = async (owned: AttachFooterController, status: AttachStatus, error: unknown): Promise<void> => {
+    if (footerState !== "active" || controller !== owned) return;
+    footerState = "degraded";
+    controller = undefined;
+    plainAfterFooterFailure = true;
+    removeFooterListeners();
+    const acceptedFailure = error instanceof FooterOperationError && error.accepted;
+    if ((error as NodeJS.ErrnoException | undefined)?.code === "EPIPE") {
+      outputFailed = true;
+      interrupt.abort();
+      return;
     }
+    if (owned.cleanup && !acceptedFailure && !owned.failed) {
+      try {
+        await owned.cleanup();
+      } catch (cleanupError) {
+        if ((cleanupError as NodeJS.ErrnoException | undefined)?.code === "EPIPE") {
+          outputFailed = true;
+          interrupt.abort();
+          return;
+        }
+      }
+    }
+    const fallback = `\r\nLive footer unavailable; continuing with plain status.\n${formatAttachStatus(status)}`;
+    if (acceptedFailure) {
+      if (!await writeSafeFallback(fallback)) {
+        outputFailed = true;
+        interrupt.abort();
+      }
+    } else {
+      write(fallback);
+    }
+  };
+  const operateController = async <T>(
+    owned: AttachFooterController,
+    status: AttachStatus,
+    operation: (captured: AttachFooterController) => Promise<T>,
+  ): Promise<{ kind: "completed"; value: T } | { kind: "failed"; error: unknown } | { kind: "skipped" }> => {
+    if (footerState !== "active" || controller !== owned) return { kind: "skipped" };
+    try {
+      return { kind: "completed", value: await operation(owned) };
+    } catch (error) {
+      await degradeFooter(owned, status, error);
+      return { kind: "failed", error };
+    }
+  };
+  const queueController = <T>(
+    status: AttachStatus,
+    operation: (captured: AttachFooterController) => Promise<T>,
+  ): Promise<{ kind: "completed"; value: T } | { kind: "failed"; error: unknown } | { kind: "skipped" }> => {
+    const owned = controller;
+    if (!owned) return Promise.resolve({ kind: "skipped" });
+    return enqueueLifecycle(() => operateController(owned, status, operation));
+  };
+  const cleanupOwned = async (owned: AttachFooterController | undefined): Promise<void> => {
+    if (!owned || outputFailed || owned.failed || !owned.cleanup) return;
+    try {
+      await owned.cleanup();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code === "EPIPE") outputFailed = true;
+    }
+  };
+  const cleanupFooter = (): Promise<void> => {
+    const owned = controller;
+    return enqueueLifecycle(async () => {
+      if (owned && controller === owned) {
+        controller = undefined;
+        footerState = "released";
+      }
+      await cleanupOwned(owned);
+    });
+  };
+  const finishCompleted = async (): Promise<BashGuardEvent[]> => {
+    if (completed) return events;
+    completed = true;
+    const owned = controller;
+    await enqueueLifecycle(async () => {
+      if (owned && controller === owned) {
+        controller = undefined;
+        footerState = "released";
+      }
+      await cleanupOwned(owned);
+      if (stickyEnabled && !outputFailed) write(formatAttachStatus(currentStatus(false)));
+    });
+    return events;
+  };
+  const onResize = (): void => {
+    if (completed || interrupted || footerState !== "active") return;
+    pendingResizeWidth = terminalColumns(output);
+    resizeDirty = true;
+    if (resizeDrainQueued) return;
+    resizeDrainQueued = true;
+    const owned = controller;
+    if (!owned) {
+      resizeDrainQueued = false;
+      return;
+    }
+    void enqueueLifecycle(async () => {
+      try {
+        while (resizeDirty && footerState === "active" && controller === owned) {
+          resizeDirty = false;
+          const requestedWidth = pendingResizeWidth;
+          const result = await operateController(owned, currentStatus(), async (captured) => {
+            if (captured.resize) await captured.resize();
+          });
+          if (result.kind !== "completed") break;
+          if (terminalColumns(output) !== requestedWidth) {
+            pendingResizeWidth = terminalColumns(output);
+            resizeDirty = true;
+          }
+        }
+      } finally {
+        resizeDrainQueued = false;
+        if (resizeDirty && !completed && !interrupted && footerState === "active") onResize();
+      }
+    });
+  };
+  const onSigint = (): void => {
+    if (interrupted || completed) return;
+    interrupted = true;
+    (runtime.setExitCode ?? ((code: number) => { process.exitCode = code; }))(130);
+    interrupt.abort();
+  };
+
+  try {
+  if (stickyEnabled) {
+    controller = (runtime.createController ?? createLiveFooterController)({
+      output: output as StructuralWritable,
+      clock: runtime.now,
+      width: () => terminalColumns(output),
+    });
+    if (typeof output.on === "function" && typeof output.off === "function") output.on("resize", onResize);
+    runtime.signalSource?.on("SIGINT", onSigint);
+    const status = publishSnapshot();
+    const rendered = await queueController(status, async (owned) => {
+      await owned.render(buildLiveFooterModel(status));
+    });
+    if (rendered.kind === "completed") lastFooterModelAt = now();
+  }
+
+  const refreshFooterIfDue = async (): Promise<void> => {
+    if (!controller) return;
+    const observedAt = now();
+    if (lastFooterModelAt !== undefined && observedAt >= lastFooterModelAt && observedAt - lastFooterModelAt < LIVE_FOOTER_REFRESH_MS) return;
+    const status = currentStatus();
+    const rendered = await queueController(status, async (owned) => {
+      await owned.render(buildLiveFooterModel(status));
+    });
+    if (rendered.kind === "completed") lastFooterModelAt = observedAt;
+  };
+
+  const sleep = async (): Promise<boolean> => {
+    if (runtime.signal?.aborted || interrupt.signal.aborted) return false;
+    return await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => finish(true), runtime.pollMs ?? POLL_MS);
+      const onAbort = () => finish(false);
+      const finish = (completed: boolean) => {
+        clearTimeout(timer);
+        runtime.signal?.removeEventListener("abort", onAbort);
+        interrupt.signal.removeEventListener("abort", onAbort);
+        resolve(completed);
+      };
+      runtime.signal?.addEventListener("abort", onAbort, { once: true });
+      interrupt.signal.addEventListener("abort", onAbort, { once: true });
+    });
+  };
+  let followedProcessId = session.metadata.processId;
+    while (!runtime.signal?.aborted && !interrupt.signal.aborted) {
+      if (!await sleep()) break;
+
+      let info;
+      try {
+        info = await statEventsFile();
+      } catch {
+        const replacementMetadata = await readSessionMetadata();
+        if (replacementMetadata && isProcessAlive(replacementMetadata.processId)) {
+          followedProcessId = replacementMetadata.processId;
+          await refreshFooterIfDue();
+          continue;
+        }
+        if (!isProcessAlive(followedProcessId)) return await finishCompleted();
+        await refreshFooterIfDue();
+        continue;
+      }
 
     if (info.size < offset) {
       offset = 0;
@@ -1849,21 +2195,27 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
       decoder = new StringDecoder("utf8");
     }
     if (info.size === offset) {
-      if (!processIsAlive(followedProcessId)) {
-        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-        const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
-        if (replacementMetadata && processIsAlive(replacementMetadata.processId)) {
+      if (!isProcessAlive(followedProcessId)) {
+        if (!await sleep()) break;
+        const replacementMetadata = await readSessionMetadata();
+        if (replacementMetadata && isProcessAlive(replacementMetadata.processId)) {
           followedProcessId = replacementMetadata.processId;
           continue;
         }
         try {
-          if ((await stat(session.eventsFile)).size !== offset) continue;
+          if ((await statEventsFile()).size !== offset) continue;
         } catch {
-          continue;
+          const racedReplacement = await readSessionMetadata();
+          if (racedReplacement && isProcessAlive(racedReplacement.processId)) {
+            followedProcessId = racedReplacement.processId;
+            continue;
+          }
+          return await finishCompleted();
         }
-        process.stdout.write("Pi session ended.\n");
-        return;
+        if (!stickyEnabled && !controller) write("Pi session ended.\n");
+        return await finishCompleted();
       }
+      await refreshFooterIfDue();
       continue;
     }
 
@@ -1877,37 +2229,105 @@ async function attach(options: ParsedCommandArgs): Promise<void> {
     remainder = lines.pop() ?? "";
 
     let latestLifecycleInBatch: "started" | "shutdown" | undefined;
+    const accepted: BashGuardEvent[] = [];
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
-        const event = JSON.parse(line) as BashGuardEvent;
-        if (seenEventIds.has(event.id)) continue;
-        seenEventIds.add(event.id);
+        const event = normalizeEvent(JSON.parse(line) as BashGuardEvent);
+        const eventId = eventIdForDedupe(event);
+        if (stickyEnabled) {
+          if (eventId !== undefined && seenEventIds.has(eventId)) continue;
+          if (eventId !== undefined) seenEventIds.add(eventId);
+        } else {
+          // Preserve the established plain follower policy for malformed IDs.
+          if (eventId === undefined || seenEventIds.has(eventId)) continue;
+          seenEventIds.add(eventId);
+        }
+        events.push(event);
+        accepted.push(event);
         if (event.type === "session.started") latestLifecycleInBatch = "started";
         if (event.type === "session.shutdown") latestLifecycleInBatch = "shutdown";
-        const rendered = formatTimelineEvent(event);
-        if (rendered) process.stdout.write(`${rendered}\n`);
       } catch {
-        // Malformed complete lines are ignored in this first slice rather than crashing attachment.
+        // Malformed complete lines are ignored rather than changing grounded status.
+      }
+    }
+
+    if (accepted.length > 0) {
+      const status = publishSnapshot();
+      if (controller) {
+        let nextEventIndex = 0;
+        let acceptedWrite = false;
+        const result = await queueController(status, async (owned) => {
+          // Timeline writes keep the previously grounded footer in place; the
+          // one batch model redraw then publishes the complete new snapshot.
+          for (; nextEventIndex < accepted.length; nextEventIndex += 1) {
+            const rendered = formatTimelineEvent(accepted[nextEventIndex]!);
+            if (rendered) {
+              try {
+                await owned.writeTimeline(rendered);
+              } catch (error) {
+                acceptedWrite = footerTimelineWasAccepted(error);
+                throw error;
+              }
+            }
+          }
+          await owned.render(buildLiveFooterModel(status));
+        });
+        if (result.kind === "completed") {
+          lastFooterModelAt = now();
+        } else if (result.kind === "failed" && !outputFailed) {
+          const plainStart = nextEventIndex + (acceptedWrite ? 1 : 0);
+          for (const event of accepted.slice(plainStart)) {
+            const rendered = formatTimelineEvent(event);
+            if (rendered) write(`${rendered}\n`);
+          }
+        }
+      } else {
+        for (const event of accepted) {
+          const rendered = formatTimelineEvent(event);
+          if (rendered) write(`${rendered}\n`);
+        }
+        if (plainAfterFooterFailure) write(formatAttachStatus(status));
+      }
+    }
+
+    if (latestLifecycleInBatch === "started") {
+      const replacementMetadata = await readSessionMetadata();
+      if (replacementMetadata && replacementMetadata.processId !== followedProcessId && isProcessAlive(replacementMetadata.processId)) {
+        followedProcessId = replacementMetadata.processId;
       }
     }
 
     if (latestLifecycleInBatch === "shutdown") {
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-      const replacementMetadata = await readJsonFile<SessionMetadata>(join(session.directory, "session.json"));
-      if (replacementMetadata && replacementMetadata.processId !== followedProcessId && processIsAlive(replacementMetadata.processId)) {
+      if (!await sleep()) break;
+      const replacementMetadata = await readSessionMetadata();
+      if (replacementMetadata && replacementMetadata.processId !== followedProcessId && isProcessAlive(replacementMetadata.processId)) {
         followedProcessId = replacementMetadata.processId;
         continue;
       }
       try {
-        if ((await stat(session.eventsFile)).size !== offset) continue;
+        if ((await statEventsFile()).size !== offset) continue;
       } catch {
-        continue;
+        // Metadata can change after the first read but before the failed stat.
+        const racedReplacement = await readSessionMetadata();
+        if (racedReplacement && racedReplacement.processId !== followedProcessId && isProcessAlive(racedReplacement.processId)) {
+          followedProcessId = racedReplacement.processId;
+          continue;
+        }
+        return await finishCompleted();
       }
-      return;
+      return await finishCompleted();
     }
+    }
+    return events;
+  } finally {
+    if (typeof output.off === "function") output.off("resize", onResize);
+    runtime.signalSource?.off("SIGINT", onSigint);
+    await cleanupFooter();
   }
 }
+
+const cliOutputAbort = new AbortController();
 
 async function main(): Promise<void> {
   try {
@@ -1916,7 +2336,13 @@ async function main(): Promise<void> {
     if (command === "sessions") return await listSessions();
     if (command === "doctor") return await doctor();
     if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);
-    if (command === "attach") return await attach(options);
+    if (command === "attach") return void await runAttach(options, {
+      input: process.stdin,
+      output: process.stdout,
+      signal: cliOutputAbort.signal,
+      signalSource: process,
+      setExitCode: (code) => { process.exitCode = code; },
+    });
     if (command === "inspect") return await inspect(options);
     if (command === "debrief") return await debrief(options);
     usage();
@@ -1930,7 +2356,9 @@ async function main(): Promise<void> {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   process.stdout.on("error", (error: NodeJS.ErrnoException) => {
     if (error.code === "EPIPE") {
-      process.exit(0);
+      process.exitCode = 0;
+      cliOutputAbort.abort();
+      return;
     }
     throw error;
   });

@@ -36,5 +36,8 @@
     "@earendil-works/pi-coding-agent": "0.84.0",
     "@types/node": "latest",
     "typescript": "latest"
+  },
+  "dependencies": {
+    "string-width": "^8.2.2"
   }
 }

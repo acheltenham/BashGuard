@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { waitForExit } from "./test-process.ts";
+import { portablePtyUnavailableReason, runPortablePty, waitForExit } from "./test-process.ts";
 
 const cliArgs = ["--experimental-strip-types", "src/cli.ts"];
 
@@ -663,9 +663,9 @@ test("unknown inspect activity wins over non-TTY session ambiguity", async (t) =
 });
 
 test("real PTY selection through bin/bashguard honors a non-default global selector", async (t) => {
-  const lookup = spawnSync("/bin/sh", ["-c", "command -v script"], { encoding: "utf8" });
-  if (lookup.status !== 0 || !lookup.stdout.trim()) {
-    t.skip("system script utility is unavailable");
+  const unavailable = portablePtyUnavailableReason();
+  if (unavailable) {
+    t.skip(unavailable);
     return;
   }
 
@@ -675,38 +675,20 @@ test("real PTY selection through bin/bashguard honors a non-default global selec
     { id: "pty-selected-session", modifiedAt: now - 1_000, command: "echo pty-selected" },
   ]);
   const bin = join(process.cwd(), "bin", "bashguard");
-  const script = lookup.stdout.trim();
 
   for (const command of ["inspect", "debrief"] as const) {
-    const result = process.platform === "darwin"
-      ? spawnSync("/usr/bin/expect", ["-c", [
-        "set timeout 5",
-        "spawn -noecho $env(BG_SCRIPT) -q /dev/null $env(BG_BIN) $env(BG_COMMAND)",
-        "after 100",
-        "send -- \"2\\r\"",
-        "expect eof",
-        "set status [wait]",
-        "exit [lindex $status 3]",
-      ].join("\n")], {
-        cwd: process.cwd(),
-        env: { ...process.env, BASHGUARD_DATA_DIR: root, BG_SCRIPT: script, BG_BIN: bin, BG_COMMAND: command },
-        encoding: "utf8",
-        timeout: 5_000,
-      })
-      : spawnSync(script, ["-q", "-c", `\"${bin.replaceAll('"', '\\"')}\" ${command}`, "/dev/null"], {
-        cwd: process.cwd(),
-        env: { ...process.env, BASHGUARD_DATA_DIR: root },
-        encoding: "utf8",
-        input: "2\n",
-        timeout: 5_000,
-      });
-    const output = combined(result);
-    assert.equal(result.status, 0, output);
-    assert.match(output, /Select a session \[1, 2\]:/);
-    assert.match(output, /bashguard inspect pty-sele --event/);
-    if (command === "inspect") assert.match(output, /pty-selected/);
-    else assert.match(output, /Session complete/);
-    assert.doesNotMatch(output, /pty-first-event-2/);
+    const result = await runPortablePty({
+      timeoutMs: 5_000,
+      env: { BASHGUARD_DATA_DIR: root },
+      scenario: `exec '${bin.replaceAll("'", `'\"'\"'`)}' ${command}`,
+      send: [{ afterMs: 200, text: "2\n" }],
+    });
+    assert.equal(result.exitCode, 0, `raw=${result.raw}\ntranscript=${result.transcript}`);
+    assert.match(result.raw, /Select a session \[1, 2\]:/);
+    assert.match(result.raw, /bashguard inspect pty-sele --event/);
+    if (command === "inspect") assert.match(result.raw, /pty-selected/);
+    else assert.match(result.raw, /Session complete/);
+    assert.doesNotMatch(result.raw, /pty-first-event-2/);
   }
 });
 

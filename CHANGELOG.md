@@ -4,6 +4,16 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
+### Added
+
+- Active `bashguard attach` in a supported TTY now replaces the startup status snapshot with an adaptive sticky footer after the ordinary header, bounded history, and guidance. Recorded changes redraw immediately, freshness refreshes about once a second, and `--no-live-footer` opts out.
+- Footer layout uses measured terminal display cells and grapheme-aware truncation: 72+ columns shows three content lines, 40–71 shows up to four, and narrower terminals show one compact line. The implementation adds `string-width` as a runtime dependency.
+
+### Fixed
+
+- Live timeline writes and terminal resize now clear and redraw only the temporary footer. Typed footer failures preserve their cause/code plus operation phase and timeline-acceptance metadata, so plain degradation replays an event only when its payload was not accepted. Recorded shutdown leaves one ordinary completed status block; `Ctrl+C` and unaccepted ordinary errors clear the temporary footer and scoped handlers. Any accepted write failure makes cursor ownership unknowable, so BashGuard disables the footer and does not issue cursor-up cleanup; it emits only a safe newline/plain fallback when output remains writable. Accepted `EPIPE` additionally stops output quietly without another write or stack trace.
+- Completed sessions, non-TTY output, missing or `dumb` `TERM`, redirects, and `--no-live-footer` preserve plain output and emit no footer-generated ANSI or cursor-control sequences. Arbitrary recorded timeline payloads are not claimed to be universally ANSI-free.
+
 ## 0.4.0 - 2026-08-13
 
 ### Added

@@ -3,7 +3,14 @@ import test from "node:test";
 import stringWidth from "string-width";
 
 import { buildAttachStatus, type AttachStatus, type BashGuardEvent } from "./cli.ts";
-import { buildLiveFooterModel, formatLiveFooter, type LiveFooterModel } from "./live-footer.ts";
+import {
+  ANSI_CLEAR_LINE,
+  ANSI_CURSOR_UP,
+  buildLiveFooterModel,
+  createLiveFooterController,
+  formatLiveFooter,
+  type LiveFooterModel,
+} from "./live-footer.ts";
 
 function status(overrides: Partial<AttachStatus> = {}): AttachStatus {
   return {
@@ -223,4 +230,163 @@ test("activity controls are sanitized before display-width measurement", () => {
   for (const line of lines) assert.doesNotMatch(line, /[\u0000-\u001f\u007f-\u009f]|\[31m/u);
   assert.match(output, /東京 危険/);
   assert.match(output, /…/);
+});
+
+class RecordingWritable {
+  chunks: string[] = [];
+  error: unknown;
+
+  write(chunk: string): boolean {
+    if (this.error !== undefined) throw this.error;
+    this.chunks.push(chunk);
+    return false; // Backpressure does not change synchronous terminal ordering.
+  }
+
+  take(): string {
+    const output = this.chunks.join("");
+    this.chunks = [];
+    return output;
+  }
+}
+
+function footerModel(overrides: Partial<LiveFooterModel> = {}): LiveFooterModel {
+  return {
+    state: "ACTIVE",
+    activity: "Running tests",
+    evidence: "recorded",
+    capture: "capture ok",
+    captureDetails: [],
+    eventCount: 1,
+    freshness: "now",
+    ...overrides,
+  };
+}
+
+function controllerFixture() {
+  const output = new RecordingWritable();
+  let time = 10_000;
+  let columns = 80;
+  const controller = createLiveFooterController({
+    output,
+    formatter: (model, width) => [`${model.state} ${width}`, model.activity],
+    clock: () => time,
+    width: () => columns,
+  });
+  return {
+    controller,
+    output,
+    setTime(value: number) { time = value; },
+    setWidth(value: number) { columns = value; },
+  };
+}
+
+test("controller first render writes exact lines without a trailing newline and tracks state", () => {
+  const { controller, output } = controllerFixture();
+  const model = footerModel();
+  controller.render(model);
+
+  assert.equal(output.take(), "ACTIVE 80\nRunning tests");
+  assert.equal(controller.renderedLineCount, 2);
+  assert.equal(controller.lastRenderTime, 10_000);
+  assert.equal(controller.lastRenderWidth, 80);
+  assert.deepEqual(controller.model, model);
+});
+
+test("controller clearing emits exact ANSI for one and multiple tracked lines", () => {
+  // Use a one-line formatter for this case.
+  const oneLineOutput = new RecordingWritable();
+  const oneLine = createLiveFooterController({
+    output: oneLineOutput,
+    formatter: (model) => [model.state],
+    clock: () => 0,
+    width: () => 80,
+  });
+  oneLine.render(footerModel());
+  oneLineOutput.take();
+  oneLine.cleanup();
+  assert.equal(oneLineOutput.take(), `${ANSI_CLEAR_LINE}\n`);
+
+  const many = controllerFixture();
+  many.controller.render(footerModel());
+  many.output.take();
+  many.controller.cleanup();
+  assert.equal(many.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}\n`);
+});
+
+test("controller writeTimeline clears, writes one payload newline, then redraws", () => {
+  const { controller, output } = controllerFixture();
+  controller.render(footerModel());
+  output.take();
+
+  controller.writeTimeline("17 event happened");
+  assert.equal(
+    output.take(),
+    `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}17 event happened\nACTIVE 80\nRunning tests`,
+  );
+  assert.equal(controller.renderedLineCount, 2);
+});
+
+test("controller redraws changed models immediately and throttles unchanged freshness redraws", () => {
+  const fixture = controllerFixture();
+  fixture.controller.render(footerModel());
+  fixture.output.take();
+
+  fixture.setTime(10_100);
+  fixture.controller.render(footerModel({ activity: "Changed" }));
+  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 80\nChanged`);
+
+  fixture.setTime(10_999);
+  fixture.controller.render(footerModel({ activity: "Changed" }));
+  assert.equal(fixture.output.take(), "");
+
+  fixture.setTime(11_100);
+  fixture.controller.render(footerModel({ activity: "Changed" }));
+  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 80\nChanged`);
+
+  fixture.setTime(12_100);
+  fixture.controller.render(footerModel({ activity: "Changed", freshness: "2s ago" }));
+  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 80\nChanged`);
+});
+
+test("controller resize forces one redraw at the changed width", () => {
+  const fixture = controllerFixture();
+  fixture.controller.render(footerModel());
+  fixture.output.take();
+
+  fixture.setWidth(50);
+  fixture.controller.resize();
+  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 50\nRunning tests`);
+  fixture.controller.resize();
+  assert.equal(fixture.output.take(), "");
+});
+
+test("controller cleanup clears, leaves one normal newline, and is idempotent", () => {
+  const { controller, output } = controllerFixture();
+  controller.render(footerModel());
+  output.take();
+
+  controller.cleanup();
+  controller.cleanup();
+  assert.equal(output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}\n`);
+  assert.equal(controller.renderedLineCount, 0);
+});
+
+test("controller propagates writes including identifiable EPIPE and ignores backpressure", () => {
+  const ordinary = controllerFixture();
+  ordinary.output.error = new Error("write failed");
+  assert.throws(() => ordinary.controller.render(footerModel()), /write failed/);
+
+  const epiped = controllerFixture();
+  const error = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
+  epiped.output.error = error;
+  assert.throws(() => epiped.controller.render(footerModel()), (thrown) => thrown === error && (thrown as NodeJS.ErrnoException).code === "EPIPE");
+});
+
+test("controller emits no alternate-screen or cursor-hide sequences", () => {
+  const fixture = controllerFixture();
+  fixture.controller.render(footerModel());
+  fixture.controller.writeTimeline("event");
+  fixture.controller.cleanup();
+  const output = fixture.output.take();
+  assert.doesNotMatch(output, /\u001b\[\?(?:1049|25)[hl]/u);
 });

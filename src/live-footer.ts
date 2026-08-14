@@ -86,7 +86,7 @@ function addTokensWithin(tokens: string[], columns: number): { line: string; dro
 }
 
 export function formatLiveFooter(model: LiveFooterModel, columns: number): string[] {
-  const width = Number.isFinite(columns) && columns > 0 ? Math.max(1, Math.trunc(columns)) : 1;
+  const width = normalizeWidth(columns);
   const state = display(model.state);
   const activity = display(model.activity);
   const evidence = display(model.evidence);
@@ -139,4 +139,154 @@ export function formatLiveFooter(model: LiveFooterModel, columns: number): strin
   // lowest-priority event count before attempting to show more metadata.
   const trailing = addTokensWithin(captureLine.dropped ? [freshness] : [freshness, eventCount], width).line;
   return [separator, activityLine, evidenceLine, captureLine.line, trailing];
+}
+
+export const ANSI_CARRIAGE_RETURN = "\r";
+export const ANSI_ERASE_LINE = "\u001b[2K";
+export const ANSI_CURSOR_UP = "\u001b[1A";
+export const ANSI_CLEAR_LINE = `${ANSI_CARRIAGE_RETURN}${ANSI_ERASE_LINE}`;
+export const LIVE_FOOTER_REFRESH_MS = 1_000;
+
+export type StructuralWritable = {
+  write(chunk: string): unknown;
+};
+
+export type LiveFooterFormatter = (model: LiveFooterModel, width: number) => readonly string[];
+
+export type LiveFooterControllerOptions = {
+  output: StructuralWritable;
+  formatter?: LiveFooterFormatter;
+  clock?: () => number;
+  width: () => number;
+};
+
+function normalizeWidth(width: number): number {
+  return Number.isFinite(width) && width > 0 ? Math.max(1, Math.trunc(width)) : 1;
+}
+
+function copyModel(model: LiveFooterModel): LiveFooterModel {
+  return { ...model, captureDetails: [...model.captureDetails] };
+}
+
+function modelsEqual(left: LiveFooterModel | undefined, right: LiveFooterModel): boolean {
+  return left !== undefined
+    && left.state === right.state
+    && left.activity === right.activity
+    && left.evidence === right.evidence
+    && left.capture === right.capture
+    && left.eventCount === right.eventCount
+    && left.freshness === right.freshness
+    && left.captureDetails.length === right.captureDetails.length
+    && left.captureDetails.every((detail, index) => detail === right.captureDetails[index]);
+}
+
+export function footerClearSequence(lineCount: number): string {
+  const count = Number.isFinite(lineCount) ? Math.max(0, Math.trunc(lineCount)) : 0;
+  if (count === 0) return "";
+  return ANSI_CLEAR_LINE + `${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`.repeat(count - 1);
+}
+
+/**
+ * Synchronous terminal adapter for a footer rendered at the current cursor.
+ * Process listeners and lifecycle policy intentionally remain with the caller.
+ */
+export class LiveFooterController {
+  readonly #output: StructuralWritable;
+  readonly #formatter: LiveFooterFormatter;
+  readonly #clock: () => number;
+  readonly #width: () => number;
+  #model: LiveFooterModel | undefined;
+  #renderedLineCount = 0;
+  #lastRenderTime: number | undefined;
+  #lastRenderWidth: number | undefined;
+  #cleaned = false;
+
+  constructor(options: LiveFooterControllerOptions) {
+    this.#output = options.output;
+    this.#formatter = options.formatter ?? formatLiveFooter;
+    this.#clock = options.clock ?? Date.now;
+    this.#width = options.width;
+  }
+
+  get model(): LiveFooterModel | undefined {
+    return this.#model === undefined ? undefined : copyModel(this.#model);
+  }
+
+  get renderedLineCount(): number {
+    return this.#renderedLineCount;
+  }
+
+  get lastRenderTime(): number | undefined {
+    return this.#lastRenderTime;
+  }
+
+  get lastRenderWidth(): number | undefined {
+    return this.#lastRenderWidth;
+  }
+
+  render(model: LiveFooterModel): void {
+    if (this.#cleaned) return;
+    const width = normalizeWidth(this.#width());
+    const now = this.#clock();
+    const changed = !modelsEqual(this.#model, model);
+    const widthChanged = this.#lastRenderWidth !== width;
+    const freshnessDue = this.#lastRenderTime === undefined || now - this.#lastRenderTime >= LIVE_FOOTER_REFRESH_MS;
+    if (!changed && !widthChanged && !freshnessDue) return;
+    this.#redraw(model, width, now);
+  }
+
+  writeTimeline(payload: string): void {
+    if (this.#cleaned) return;
+    const width = normalizeWidth(this.#width());
+    const now = this.#clock();
+    const lines = this.#model === undefined ? undefined : this.#formatter(this.#model, width);
+
+    this.#clearRendered();
+    this.#output.write(`${payload}\n`);
+    if (this.#model !== undefined && lines !== undefined) {
+      this.#writeFooter(lines);
+      this.#lastRenderTime = now;
+      this.#lastRenderWidth = width;
+    }
+  }
+
+  resize(): void {
+    if (this.#cleaned || this.#model === undefined) return;
+    const width = normalizeWidth(this.#width());
+    if (width === this.#lastRenderWidth) return;
+    this.#redraw(this.#model, width, this.#clock());
+  }
+
+  cleanup(): void {
+    if (this.#cleaned) return;
+    this.#cleaned = true;
+    this.#clearRendered();
+    this.#output.write("\n");
+  }
+
+  #redraw(model: LiveFooterModel, width: number, now: number): void {
+    const snapshot = copyModel(model);
+    const lines = this.#formatter(snapshot, width);
+    this.#clearRendered();
+    this.#writeFooter(lines);
+    this.#model = snapshot;
+    this.#lastRenderTime = now;
+    this.#lastRenderWidth = width;
+  }
+
+  #clearRendered(): void {
+    const sequence = footerClearSequence(this.#renderedLineCount);
+    if (sequence) this.#output.write(sequence);
+    this.#renderedLineCount = 0;
+  }
+
+  #writeFooter(lines: readonly string[]): void {
+    if (lines.length === 0) return;
+    this.#output.write(lines.join("\n"));
+    this.#renderedLineCount = lines.length;
+  }
+}
+
+export function createLiveFooterController(options: LiveFooterControllerOptions): LiveFooterController {
+  return new LiveFooterController(options);
 }

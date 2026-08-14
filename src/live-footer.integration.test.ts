@@ -982,10 +982,48 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+function stripAnsiControls(value: string): string {
+  return value.replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|[@-_])/gu, "");
+}
+
 function stripTerminalControls(value: string): string {
-  return value
-    .replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|[@-_])/gu, "")
-    .replace(/\r/gu, "");
+  return stripAnsiControls(value).replace(/\r/gu, "");
+}
+
+type ParsedPtyFooter = { start: number; end: number; separator: string; content: string[] };
+
+function parseSeparatedPtyFooters(raw: string, width: number): ParsedPtyFooter[] {
+  const pattern = new RegExp(`(?<!─)(─{${width}})(?!─)\\r+\\n([^\\u001b]*)`, "gu");
+  return [...raw.matchAll(pattern)].map((match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+    separator: match[1],
+    content: match[2]
+      .split(/\r+\n/gu)
+      .map((line) => line.replace(/\r+$/u, ""))
+      .filter((line) => line.length > 0),
+  }));
+}
+
+function outputOccurrenceTimes(
+  chunks: readonly { afterMs: number; stream: "stdout" | "stderr"; text: string }[],
+  needle: string,
+): { index: number; afterMs: number }[] {
+  const ordered = chunks.filter((chunk) => chunk.stream === "stdout");
+  const combined = ordered.map((chunk) => chunk.text).join("");
+  const chunkEnds: { end: number; afterMs: number }[] = [];
+  let end = 0;
+  for (const chunk of ordered) {
+    end += chunk.text.length;
+    chunkEnds.push({ end, afterMs: chunk.afterMs });
+  }
+
+  const occurrences: { index: number; afterMs: number }[] = [];
+  for (let index = combined.indexOf(needle); index >= 0; index = combined.indexOf(needle, index + needle.length)) {
+    const completion = index + needle.length;
+    occurrences.push({ index, afterMs: chunkEnds.find((chunk) => chunk.end >= completion)?.afterMs ?? -1 });
+  }
+  return occurrences;
 }
 
 async function writePtyEvent(path: string, value: BashGuardEvent): Promise<void> {
@@ -1046,26 +1084,65 @@ test("real PTY live footer updates, resizes, stays bounded, and finalizes ordina
 
   const plain = stripTerminalControls(result.raw);
   assert.match(result.raw, /\u001b\[(?:1A|2K)/u, "real TTY should use sticky-footer controls");
-  assert.match(plain, /─{80}/u, "80-column PTY should render the full separator");
-  assert.match(plain, /awaiting completion evidence/u);
-  assert.match(plain, /recorded/u);
-  assert.match(plain, /Running · printf pty-live-update/u);
-  assert.match(plain, /Command complete · exit 0/u);
-  assert.ok(plain.indexOf("Running · printf pty-live-update") < plain.indexOf("awaiting completion evidence"));
-  assert.ok(plain.indexOf("Command complete · exit 0") < plain.lastIndexOf("recorded"));
 
-  const beforeRequest = result.raw.slice(0, result.raw.indexOf("Running · printf pty-live-update"));
-  const freshnessRenders = beforeRequest.match(/─{80}/gu)?.length ?? 0;
-  assert.ok(freshnessRenders >= 2 && freshnessRenders <= 4, `expected near-1s refreshes, not 250ms spam; renders=${freshnessRenders}`);
+  const requestTimeline = / 3  pty-requ  \d{2}:\d{2}:\d{2}  Running · printf pty-live-update/u.exec(result.raw);
+  const completionTimeline = / 4  pty-comp  \d{2}:\d{2}:\d{2}  Command complete · exit 0/u.exec(result.raw);
+  assert.ok(requestTimeline?.index !== undefined, "prefixed request timeline line must exist");
+  assert.ok(completionTimeline?.index !== undefined, "prefixed completion timeline line must exist");
 
-  assert.match(plain, /─{50}/u, "resize should render the medium separator");
-  const mediumLines = plain.split("\n").filter((line) => line.includes("─") && stringWidth(line.trim()) === 50);
-  assert.ok(mediumLines.length > 0, JSON.stringify(plain));
-  const activeLines = [...result.raw.matchAll(/ACTIVE[^\r\n\u001b]*/gu)].map((match) => match[0]);
-  const narrowLines = activeLines.filter((line) => stringWidth(line) <= 35);
-  assert.ok(narrowLines.length > 0, JSON.stringify(activeLines));
-  assert.ok(narrowLines.some((line) => line === "ACTIVE · Command complete · exit 0"), JSON.stringify(narrowLines));
-  assert.ok(narrowLines.every((line) => stringWidth(line) <= 35), `narrow footer exceeded PTY width: ${JSON.stringify(narrowLines)}`);
+  const wideFooters = parseSeparatedPtyFooters(result.raw, 80);
+  assert.ok(wideFooters.length >= 2, `missing 80-column footer renders: ${JSON.stringify(result.raw)}`);
+  for (const footer of wideFooters) {
+    assert.equal(footer.separator.length, 80);
+    assert.equal(footer.content.length, 3, `80-column footer must have separator + 3 content lines: ${JSON.stringify(footer)}`);
+    assert.ok(footer.content.every((line) => stringWidth(line) <= 80), JSON.stringify(footer));
+  }
+  const requestFooter = wideFooters.find((footer) => footer.start > requestTimeline.index
+    && footer.content.includes("ACTIVE · Running · printf pty-live-update"));
+  assert.ok(requestFooter, "request timeline line must precede its subsequent activity footer render");
+  assert.ok(requestTimeline.index < requestFooter.start);
+
+  const wideSeparator = "─".repeat(80);
+  const wideTimes = outputOccurrenceTimes(result.outputChunks, wideSeparator);
+  const requestChunkTime = outputOccurrenceTimes(result.outputChunks, requestTimeline[0])[0];
+  const idleWideTimes = requestChunkTime === undefined
+    ? []
+    : wideTimes.filter((render) => render.index < requestChunkTime.index);
+  assert.ok(idleWideTimes.length >= 2, `expected an idle freshness redraw: ${JSON.stringify(idleWideTimes)}`);
+  assert.ok(
+    idleWideTimes[1].afterMs - idleWideTimes[0].afterMs >= 750,
+    `idle redraw was too fast: ${JSON.stringify(idleWideTimes)}`,
+  );
+  assert.ok(idleWideTimes.length <= 4, `idle footer wrote too often (possible 250ms spam): ${JSON.stringify(idleWideTimes)}`);
+
+  const mediumFooters = parseSeparatedPtyFooters(result.raw, 50);
+  assert.ok(mediumFooters.length > 0, "resize must render a 50-column footer");
+  for (const footer of mediumFooters) {
+    assert.ok(footer.content.length >= 1 && footer.content.length <= 4, `unexpected medium footer lines: ${JSON.stringify(footer)}`);
+    assert.ok(
+      [footer.separator, ...footer.content].every((line) => stringWidth(line) <= 50),
+      `50-column footer overflowed: ${JSON.stringify(footer)}`,
+    );
+  }
+  const completionFooter = mediumFooters.find((footer) => footer.start > completionTimeline.index
+    && footer.content.includes("ACTIVE · Command complete · exit 0"));
+  assert.ok(completionFooter, "completion timeline line must precede its subsequent activity footer render");
+  assert.ok(completionTimeline.index < completionFooter.start);
+
+  const lastMediumEnd = mediumFooters.at(-1)?.end ?? -1;
+  const shutdownTimelineIndex = result.raw.search(/ 5  pty-shut  \d{2}:\d{2}:\d{2}  Pi session ended/u);
+  assert.ok(lastMediumEnd >= 0 && shutdownTimelineIndex > lastMediumEnd, "narrow resize boundaries must exist");
+  const narrowResizeRegion = result.raw.slice(lastMediumEnd, shutdownTimelineIndex);
+  assert.doesNotMatch(narrowResizeRegion, /─/u, "35-column layout has no separator");
+  const narrowRenderLines = stripAnsiControls(narrowResizeRegion)
+    .split(/\r+\n?/gu)
+    .filter((line) => line.length > 0);
+  assert.ok(narrowRenderLines.length > 0, `missing 35-column resize render: ${JSON.stringify(narrowResizeRegion)}`);
+  assert.ok(
+    narrowRenderLines.every((line) => line === "ACTIVE · Command complete · exit 0"),
+    `each 35-column render must contain exactly one status line: ${JSON.stringify(narrowResizeRegion)}`,
+  );
+  assert.ok(narrowRenderLines.every((line) => stringWidth(line) <= 35), `35-column footer overflowed: ${JSON.stringify(narrowRenderLines)}`);
 
   const finalStatus = plain.lastIndexOf("Session status");
   assert.ok(finalStatus > plain.lastIndexOf("ACTIVE"), "final ordinary status must replace the temporary footer");
@@ -1087,11 +1164,22 @@ test("real PTY Ctrl+C clears the footer without terminal-mode leakage or a dangl
     ].join("\n"),
     send: [{ afterMs: 1_200, text: "\u0003" }],
   });
-  const plain = stripTerminalControls(result.raw);
-  assert.match(result.raw, /\u001b\[(?:1A|2K)/u, JSON.stringify(result.raw));
+  const footerRenders = parseSeparatedPtyFooters(result.raw, 80);
+  const finalRender = footerRenders.at(-1);
+  assert.ok(finalRender, `expected a final footer render: ${JSON.stringify(result.raw)}`);
+  const finalClearPattern = /\u001b\[2K(?:\u001b\[1A\r\u001b\[2K){3}/gu;
+  const finalClear = [...result.raw.matchAll(finalClearPattern)]
+    .find((match) => match.index >= finalRender.end);
+  assert.ok(finalClear, `footer clear must follow the final render: ${JSON.stringify(result.raw)}`);
+  const afterFinalClear = result.raw.slice(finalClear.index + finalClear[0].length);
+  assert.match(afterFinalClear, /^\r{1,2}\n/u, `footer clear must be followed by a normal CRLF: ${JSON.stringify(afterFinalClear)}`);
+  assert.doesNotMatch(
+    stripTerminalControls(afterFinalClear),
+    /ACTIVE|─{3}|awaiting completion evidence|capture ok|recorded/u,
+    `footer content appeared after final clear: ${JSON.stringify(afterFinalClear)}`,
+  );
   assert.doesNotMatch(result.raw, /\u001b\[\?(?:25l|47h|1047h|1049h)/u);
   assert.ok(/(?:\r?\n)+$/u.test(result.transcript), `expected normal final newline: ${JSON.stringify(result.transcript)}`);
-  assert.ok(!plain.trimEnd().endsWith("ACTIVE ·"), `dangling footer fragment: ${JSON.stringify(plain.slice(-200))}`);
   assert.ok([0, 2, 130].includes(result.exitCode ?? -1), `unexpected Ctrl+C wrapper status ${result.exitCode}; ${JSON.stringify(result.raw)}`);
 });
 

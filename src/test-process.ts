@@ -8,6 +8,7 @@ export type PortablePtyResult = {
   transcript: string;
   exitCode: number | null;
   signal: NodeJS.Signals | null;
+  outputChunks: { afterMs: number; stream: "stdout" | "stderr"; text: string }[];
 };
 
 export function portablePtyUnavailableReason(): string | undefined {
@@ -60,6 +61,7 @@ export async function runPortablePty(input: {
     args = ["-c", expectProgram];
   }
 
+  const startedAt = Date.now();
   const child = spawn(executable, args, {
     cwd: process.cwd(),
     env: { ...process.env, ...input.env },
@@ -67,8 +69,15 @@ export async function runPortablePty(input: {
   });
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
-  child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-  child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+  const outputChunks: PortablePtyResult["outputChunks"] = [];
+  child.stdout.on("data", (chunk: Buffer) => {
+    stdout.push(chunk);
+    outputChunks.push({ afterMs: Date.now() - startedAt, stream: "stdout", text: chunk.toString() });
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr.push(chunk);
+    outputChunks.push({ afterMs: Date.now() - startedAt, stream: "stderr", text: chunk.toString() });
+  });
   const sends = process.platform === "darwin" ? [] : (input.send ?? []).map(({ afterMs, text }) => setTimeout(() => child.stdin.write(text), afterMs));
   const diagnostics = () => ({
     stdout: Buffer.concat(stdout).toString(),
@@ -81,7 +90,7 @@ export async function runPortablePty(input: {
     child.stdin.end();
     const raw = Buffer.concat([...stdout, ...stderr]).toString();
     const transcript = await readFile(transcriptPath).then((value) => value.toString()).catch(() => "");
-    return { raw, transcript, exitCode, signal: child.signalCode };
+    return { raw, transcript, exitCode, signal: child.signalCode, outputChunks };
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}\ntranscript:\n${await readFile(transcriptPath, "utf8").catch(() => "<unavailable>")}`);
   } finally {

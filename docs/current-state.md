@@ -13,7 +13,7 @@ When the BashGuard Pi extension is loaded before a session starts:
 - uses a per-session ownership lock so redundant BashGuard extension instances do not record duplicate events;
 - discovers active and completed BashGuard-recorded sessions;
 - selects sessions interactively for selector-less `attach`, `inspect`, and `debrief` when multiple candidates exist and both stdin and stdout are TTYs; a sole eligible session is automatic, while explicit current-snapshot selectors and exact-only `--session-id` values bypass the picker;
-- follows a session from another terminal with `bashguard attach`, beginning with a grounded session/activity/capture snapshot, using bounded narrated startup history, and continuing to show every new narrated event;
+- follows a session from another terminal with `bashguard attach`; supported active TTYs print the header, bounded narrated history, and guidance before an adaptive evidence-grounded sticky footer, while every new narrated event still appears above the redrawn footer;
 - inspects individual events by sequence or event ID prefix;
 - filters recorded evidence by activity category, exact event type, and case-insensitive text search, with latest-N/all controls and JSONL export;
 - reports missing, redacted, truncated, and capture-gap evidence;
@@ -36,9 +36,11 @@ All narrative output is grounded in recorded local events. BashGuard does not li
 - Risk notices are non-blocking review notes. BashGuard does not currently approve, block, interrupt, or sandbox commands.
 - There is no pre-execution resolved-command preview yet.
 - There is no recovery/restore workflow, event replay, browser UI, cloud service, or multi-harness support.
-- The session picker and current CLI are structured text, not a full-screen split-pane TUI; the richer split-pane experience remains planned separately.
+- The session picker and current CLI are structured text, not a full-screen split-pane TUI. The active footer does not use an alternate screen, hide the cursor, or create a split view; the richer split-pane experience remains planned separately.
 - Selector-less attach considers active sessions first and offers only active rows when any are active; with no active sessions, all discovered completed sessions become candidates. Selector-less inspect and debrief consider all discovered recorded sessions. Non-TTY scripts, pipes, and redirected output never prompt because both stdin and stdout must be TTYs; ambiguity exits nonzero with eligible rows and durable exact `--session-id=<full-session-id>` commands. Automation that allocates a PTY is interactive by contract and must pass an explicit selector to avoid waiting for input. Positional and `--session` numbers/prefixes resolve against the current discovery snapshot; `--session-id` matches only the complete metadata ID and is the durable automation form.
-- Local validation measured approximately 251 ms median append-to-attach visibility with the current 250 ms polling interval and approximately 521 JSONL bytes/event for a seven-event representative fixture. These are documented local observations, not performance or storage guarantees.
+- In supported active TTY mode, accepted event changes update the footer immediately and idle freshness updates at about a one-second cadence. An unmatched correlated request is labelled `awaiting completion evidence`, not asserted to be executing. Capture limitations use compact recorded counts. The layout uses terminal display-cell measurement and grapheme-aware truncation: 72+ columns has three content lines, 40–71 up to four, and below 40 one line.
+- Completed sessions, non-TTY output, redirected output, missing `TERM`, `TERM=dumb`, and `--no-live-footer` keep the ordinary completed/plain status presentation. Redirected output has no footer ANSI. Resize clears and redraws the footer; recorded shutdown clears it and prints a final ordinary completed block. `Ctrl+C`, errors, and `EPIPE` clean up temporary terminal state.
+- Local validation measured approximately 251 ms median append-to-attach visibility with the current 250 ms polling interval and approximately 521 JSONL bytes/event for a seven-event representative fixture. These are documented local observations, not performance or storage guarantees. The sticky footer PTY flow was exercised on macOS; its Linux PTY adapter was not exercised locally, so this is not a portability guarantee.
 - Provider-specific activity labels are not the core model; recorded commands and outputs are the evidence.
 
 ## Recommended reporting language

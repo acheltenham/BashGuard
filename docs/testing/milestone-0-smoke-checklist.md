@@ -203,9 +203,16 @@ Confirm:
 
 ### `bashguard attach 1`
 
-Confirm:
+In a real PTY attached to an active recorded session, confirm:
 
-- the startup status snapshot shows active/complete state, current or last activity, evidence wording, capture summary, event count, and freshness;
+- at 80 columns, header, bounded history, and guidance appear before a separator plus exactly three footer content lines; an unmatched correlated request says `awaiting completion evidence`, capture is compact, and an accepted request/completion changes the footer immediately while idle freshness changes at about one second;
+- append a narrated event and confirm BashGuard clears the temporary footer, prints the event above it, and redraws the footer without using alternate-screen or cursor-hide sequences;
+- resize to 50 columns and confirm the footer redraws within 40–71 display cells with no more than four content lines; resize to 39 columns and confirm exactly one bounded, grapheme-safe content line;
+- record shutdown and confirm the temporary footer disappears and exactly one ordinary completed status block remains;
+- press `Ctrl+C` during a separate active attach and confirm clean detach with no dangling fragment, hidden cursor, alternate screen, or stack trace;
+- run active attach with `--no-live-footer`, with `TERM=dumb`, and with `TERM` unset; confirm ordinary static status and no footer cursor-up/erase sequences;
+- redirect active attach stdout to a file and confirm ordinary plain output with no ANSI escape bytes; repeat through a pipe/non-TTY;
+- the ordinary status snapshot in completed/plain modes shows active/complete state, current or last activity, evidence wording, capture summary, event count, and freshness;
 - `Current activity` appears only for a correlated tool request without a later matching completion and explicitly says completion is not recorded yet;
 - completed sessions use `Last activity` and do not claim current execution;
 - default startup output shows at most the latest 50 narrated historical events and reports the total;

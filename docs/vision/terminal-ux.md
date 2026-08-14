@@ -1,7 +1,7 @@
 # BashGuard Terminal UX
 
 **Status:** Draft  
-**Last updated:** August 13, 2026
+**Last updated:** August 14, 2026
 
 ## UX Decision
 
@@ -30,30 +30,28 @@ Purpose:
 - show current state and capture completeness;
 - remain useful at a glance.
 
-Default layout:
+Current active-TTY layout:
 
 ```text
 Header
-  Session · repository · branch · elapsed time · connection state
+  session · repository · branch · connection context
 
-Status snapshot
-  current activity only from an unmatched correlated tool request
-  otherwise latest narrated activity
-  evidence wording · capture state · event count · freshness
-
-Narrative stream
+Bounded history and guidance
   grouped meaningful events in chronological order
 
-Current activity
-  one clear statement of what Pi is doing now
-
-Footer
-  commands · files · warnings · checkpoints · capture completeness
+────────────────────────────────────────
+ACTIVE · compact current/last activity
+awaiting completion evidence | recorded
+capture state/counts · freshness · event count
 ```
 
-The initial status snapshot is deterministic and evidence-grounded. It must not infer execution from recency alone: current activity requires a recorded tool request without a later matching completion, and the UI must say completion is not recorded yet. The first slice is a startup snapshot; continuous status redraw remains later Phase 1 work.
+The sticky footer replaces the startup static status block only for an active session when stdout is a TTY, `TERM` is present and not `dumb`, and `--no-live-footer` is absent. Header, requested history, and guidance remain ordinary output and appear first. A timeline event clears the footer, prints above it, and triggers an immediate redraw; unchanged freshness updates about once a second. Resize recalculates the layout. Recorded shutdown clears the temporary region and leaves one final ordinary completed status block. `Ctrl+C`, unexpected errors, and `EPIPE` clean up without leaving a footer fragment.
 
-Live Mode should avoid raw payloads, noisy lifecycle events, full-history terminal floods, and continuously scrolling command output. Users can request a custom startup history, no startup history, or explicit full history; complete evidence remains available through inspect and JSONL export.
+Status is deterministic and evidence-grounded. Current activity requires an unmatched correlated tool request in the current lifecycle segment, and compact wording says `awaiting completion evidence`; it does not claim execution is continuing. Capture limitations use compact recorded counts. At 72+ columns the footer uses three content lines, at 40–71 up to four, and below 40 one line. Width bounds use measured display cells and grapheme-aware truncation rather than the original character-count approximation.
+
+Completed sessions, non-TTY output, pipes/redirects, missing `TERM`, `TERM=dumb`, and `--no-live-footer` keep the ordinary static status and timeline behavior; redirected output is ANSI-free. The footer uses neither an alternate screen nor a hidden cursor and is not the planned full split-pane TUI. Users may refine the labels and prioritization after using it in real sessions.
+
+Live Mode should avoid raw payloads, noisy lifecycle events, full-history terminal floods, and continuously scrolling command output. Users can request a custom startup history, no startup history, explicit full history, or plain presentation with `--no-live-footer`; complete evidence remains available through inspect and JSONL export.
 
 ### Open Mode
 

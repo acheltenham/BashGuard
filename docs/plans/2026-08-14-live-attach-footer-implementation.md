@@ -69,7 +69,7 @@ export type LiveFooterModel = {
 
 `formatLiveFooter(model, columns)` returns an array of lines including a separator. Use `singleLineDisplay`, a width-aware truncate helper, and compact tokens. No ANSI or I/O belongs here.
 
-Treat JavaScript string length as an initial terminal-width approximation; document/test this limitation rather than adding a width dependency in this slice.
+Implementation divergence: the initial JavaScript string-length approximation was replaced before completion with the `string-width` runtime dependency plus `Intl.Segmenter` grapheme boundaries. Formatter tests therefore assert measured terminal display-cell bounds for ASCII, CJK, combining text, and emoji.
 
 **Step 4: Verify GREEN**
 
@@ -432,10 +432,10 @@ Cover:
 - event-driven updates plus one-second freshness;
 - evidence-grounded current/last activity;
 - final ordinary completed status;
-- plain behavior for completed/non-TTY/TERM=dumb;
+- plain behavior for completed/non-TTY/missing or dumb `TERM`;
 - `--no-live-footer`;
 - no alternate screen/full TUI;
-- width approximation limitations observed in testing;
+- display-cell and grapheme-aware width behavior (replacing the original approximation);
 - exact commands for smoke validation.
 
 Keep v0.4.0 install pins until a later release exists.

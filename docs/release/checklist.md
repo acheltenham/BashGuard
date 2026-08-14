@@ -52,6 +52,7 @@ If there is at least one recorded session:
 ./bin/bashguard attach 1
 ./bin/bashguard attach 1 --history 0
 ./bin/bashguard attach 1 --all-history
+./bin/bashguard attach 1 --no-live-footer
 ./bin/bashguard inspect
 ./bin/bashguard inspect 1
 ./bin/bashguard debrief
@@ -69,7 +70,11 @@ Confirm:
 - Enter has no default, invalid input retries, and EOF/`Ctrl+C` cancels concisely, with no prompt timeout;
 - unknown inspect activity, missing `--session`, `--session-id`, or `--event` values, and mixed exact/snapshot selectors fail before session selection;
 - rows and attach headers contain no raw C0/C1 or Unicode format controls while preserving ordinary Unicode letters and emoji;
-- `attach 1` shows an evidence-grounded state/activity/capture/freshness snapshot;
+- in an active real PTY at 80 columns, attach prints header/history/guidance before exactly three footer content lines; request/completion events update immediately, freshness updates around one second, and timeline events clear then redraw above the footer;
+- resize the active PTY to 50 columns and confirm no more than four bounded content lines, then to 39 columns and confirm one display-cell-bounded, grapheme-safe line;
+- recorded shutdown leaves exactly one ordinary completed status block; `Ctrl+C` leaves no footer fragment, stack trace, alternate-screen state, or hidden cursor;
+- `--no-live-footer`, `TERM=dumb`, and missing `TERM` retain ordinary static status without footer cursor control; redirected and piped active attach are plain and contain no ANSI bytes;
+- completed/plain `attach 1` shows an evidence-grounded state/activity/capture/freshness snapshot;
 - default `attach 1` bounds narrated startup history, `--history 0` skips it, and `--all-history` restores it;
 - `inspect 1` lists events with sequence and event ID prefix examples;
 - `debrief 1` renders evidence completeness and next inspect commands when applicable.

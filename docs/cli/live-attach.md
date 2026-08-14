@@ -2,7 +2,7 @@
 
 `bashguard attach` is the second-terminal live companion for a BashGuard-recorded Pi session.
 
-Attach begins with an evidence-grounded status snapshot. By default it then shows the latest 50 narrated events that already exist when attach starts and displays every new narrated event as it is appended.
+By default attach shows the latest 50 narrated events that already exist when it starts and displays every new narrated event as it is appended. For an active session in a supported TTY, the ordinary header, bounded history, and guidance appear first, followed by an evidence-grounded sticky footer that replaces the startup static status block.
 
 ```bash
 bashguard attach 1
@@ -24,29 +24,32 @@ The picker requires an exact displayed number. Enter has no default, invalid inp
 
 Non-TTY scripts, pipes, and redirected output never prompt. With multiple eligible sessions, attach exits nonzero and prints eligible rows plus copyable commands using a globally unique ID prefix or full ID. Automation that allocates a PTY is interactive by contract and must pass an explicit selector to avoid prompting; explicit selectors are recommended for all automation. With no recorded sessions, attach uses the existing `No BashGuard sessions found` error and does not print candidate rows or commands. Selection uses one discovery snapshot: rows retain their global positions within that snapshot and are not locally renumbered. Numbers can change after discovery ordering changes and an explicit number resolves against the current order unless it exactly matches a session ID; globally unique ID prefixes or full IDs remain durable against the full snapshot, including completed sessions hidden by an active-only picker. This is a structured-text prompt, not the planned full-screen split-pane TUI.
 
-## Status snapshot
+## Live status footer
 
-Active sessions show:
+Sticky mode activates only for a selected active session when stdout is a TTY, `TERM` is present and not `dumb`, and `--no-live-footer` is not supplied. A wide terminal shows compact output such as:
 
 ```text
-Live status
-State             active
-Current activity  Running · npm test
-Evidence          request recorded; completion not recorded yet
-Capture           No recorded capture limitations
-Events            42
-Last observed     2s ago
+────────────────────────────────────────
+ACTIVE · Running · npm test
+awaiting completion evidence
+capture ok · 2s ago · 42 ev
 ```
 
-`Current activity` appears only when BashGuard recorded a tool request with a `toolCallId` and has not recorded a later matching completion in the latest recorded session lifecycle segment. It means completion evidence is absent; it does not prove the tool is still executing. Older requests before a later `session.started` event are not treated as current.
+`Current activity` appears only when BashGuard recorded a tool request with a `toolCallId` and has not recorded a later matching completion in the latest recorded session lifecycle segment. The compact footer says `awaiting completion evidence`: completion evidence is absent, but this does not prove the tool is still executing. Older requests before a later `session.started` event are not current. With no correlated outstanding request, the footer shows the latest narrated activity as `recorded`.
 
-If there is no correlated outstanding request, attach shows `Last activity` from the latest narrated event and labels it `recorded event`. Completed sessions always use `Last activity` and a `Session status` heading; activity projection stops at the latest shutdown in the current lifecycle segment so post-shutdown legacy appends do not masquerade as completed-session activity.
+Capture is compactly summarized as `capture ok`, `capture partial`, or `capture unknown`, with available gap, missing, redacted, and truncated counts. Freshness uses the latest event timestamp and falls back to `unknown` when unavailable or malformed. Accepted event changes update immediately; when nothing else changes, freshness redraws at about a one-second cadence rather than every 250 ms poll.
 
-Capture is summarized from recorded `capture.gap` events and event-level missing, redacted, and truncated metadata. Empty sessions say `No capture metadata recorded`. Freshness uses the latest event timestamp and falls back to `unknown` when unavailable or malformed.
+The adaptive layout is bounded by measured terminal display cells and truncates only at grapheme boundaries:
 
-Long or multiline activity is compacted to one bounded status line; inspect/JSONL retains the fuller recorded evidence subject to original capture limits.
+- 72 columns or wider: three content lines below a separator;
+- 40–71 columns: up to four content lines below a separator;
+- below 40 columns: one compact line.
 
-The snapshot is calculated when attach starts. This first Phase 1 slice does not redraw the block while new events arrive; the timeline remains the live-updating surface. Attach drains final recorded appends and follows a replacement recorder when replacement evidence is visible during shutdown confirmation. An authoritative shutdown otherwise ends attach; a later restart requires running attach again.
+On resize BashGuard clears its tracked footer lines and redraws at the new width. Before printing a new narrated event, it clears the footer, writes the timeline event, and redraws the footer beneath it. Recorded shutdown stops refresh, clears the temporary footer, and prints one final ordinary completed status block. `Ctrl+C`, unexpected errors, and `EPIPE` clean up the temporary terminal region and scoped handlers.
+
+Completed sessions and active attaches with non-TTY output, piped/redirected stdout, missing `TERM`, `TERM=dumb`, or `--no-live-footer` retain the ordinary status block and timeline behavior. Redirected output contains no footer ANSI sequences. The footer never enters the alternate screen or hides the cursor and is not a full split-pane TUI.
+
+Long or multiline activity is compacted for presentation only; inspect/JSONL retains fuller recorded evidence subject to original capture limits. Attach drains final recorded appends and follows a replacement recorder when replacement evidence is visible during shutdown confirmation. An authoritative shutdown otherwise ends attach; a later restart requires running attach again.
 
 ## History options
 
@@ -66,10 +69,11 @@ bashguard attach 1 --all-history
 
 `--history` must be a non-negative integer. `--history` and `--all-history` cannot be combined.
 
-The same options work with `--session`:
+The same options work with `--session`. Use `--no-live-footer` when ordinary static text is preferable:
 
 ```bash
 bashguard attach --session 1 --history 25
+bashguard attach --session 1 --no-live-footer
 ```
 
 ## What is bounded
@@ -132,7 +136,7 @@ For an active session:
 Following live events. Every new narrated event will be shown. Ctrl-C to detach.
 ```
 
-`Ctrl-C` stops the observer only. It does not stop, interrupt, approve, or block Pi.
+`Ctrl-C` clears the temporary footer and stops the observer only. It does not stop, interrupt, approve, or block Pi.
 
 ## Evidence and ordering
 

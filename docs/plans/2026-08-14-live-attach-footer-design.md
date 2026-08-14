@@ -1,6 +1,6 @@
 # Live-Updating Attach Footer Design
 
-**Status:** Approved  
+**Status:** Implemented
 **Date:** August 14, 2026  
 **Phase:** Phase 1 — Live Terminal Companion
 
@@ -49,9 +49,9 @@ Optional counts are removed before important evidence wording. Activity may be e
 
 - 72 columns or wider: full three-line footer.
 - 40–71 columns: compact labels with bounded wrapping, up to four lines.
-- Below 40 columns: one concise line such as `ACTIVE · npm test · 2s ago · capture partial`.
+- Below 40 columns: one concise line, retaining state and as much higher-priority activity/status evidence as fits.
 
-Formatting uses a width budget rather than fixed wordy columns. It avoids horizontal scrolling and recalculates after terminal resize. These thresholds and tokens are initial usability choices and may change after real-session testing.
+Formatting uses a width budget rather than fixed wordy columns. The original design assumed approximate character-width truncation; the implementation instead uses the `string-width` runtime dependency for terminal display-cell measurement and `Intl.Segmenter` grapheme boundaries so CJK and emoji do not split or overflow. It avoids horizontal scrolling and recalculates after terminal resize. Users can still pivot the thresholds, vocabulary, and priority after real-session use.
 
 ## Refresh behavior
 
@@ -156,7 +156,7 @@ Write tests first for:
 - real PTY active attach with resize, live events, and shutdown;
 - narrow-terminal PTY smoke testing.
 
-Final validation includes the full automated gate, baseline, and a real Pi active-session smoke.
+Automated real-PTY validation exercised wide, medium, narrow, resize, live event, shutdown, `Ctrl+C`, opt-out, and redirect paths on macOS. The Linux PTY adapter is covered in code but was not exercised locally; portability beyond the exercised environment is not claimed.
 
 ## Documentation scope
 

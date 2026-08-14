@@ -106,8 +106,8 @@ test("medium footer is bounded to at most four content lines", () => {
 test("narrow footer keeps the complete state whenever it fits", () => {
   const active = buildLiveFooterModel(status());
   const done = buildLiveFooterModel(status({ state: "complete" }));
-  const activeExpected = ["ACT…", "ACTI…", "ACTIVE", "ACTIVE", "ACTIVE", "ACTIVE", "ACTIVE", "ACTIVE", "ACTIVE"];
-  const doneExpected = ["DONE", "DONE", "DONE", "DONE", "DONE", "DONE", "DONE", "DONE", "DONE"];
+  const activeExpected = ["ACT…", "ACTI…", "ACTIVE", "ACTIVE", "ACTIVE", "ACTIVE", "ACTIVE · …", "ACTIVE · R…", "ACTIVE · Ru…"];
+  const doneExpected = ["DONE", "DONE", "DONE", "DONE", "DONE · …", "DONE · R…", "DONE · Ru…", "DONE · Run…", "DONE · Runn…"];
 
   for (const [index, columns] of Array.from({ length: 9 }, (_, offset) => offset + 4).entries()) {
     assert.equal(formatLiveFooter(active, columns)[0], activeExpected[index]);
@@ -116,6 +116,25 @@ test("narrow footer keeps the complete state whenever it fits", () => {
 
   assert.equal(formatLiveFooter(active, 2)[0], "A…");
   assert.match(formatLiveFooter(active, 39)[0], /^ACTIVE/);
+});
+
+test("narrow footer retains ellipsized ASCII, CJK, and emoji activity after the full state", () => {
+  const samples = [
+    { activity: "Running a deliberately long command that remains visible", visible: /Running/ },
+    { activity: "東京東京東京東京東京東京東京東京東京東京東京東京", visible: /東京/ },
+    { activity: "👩‍👩‍👧‍👦".repeat(24), visible: /👩‍👩‍👧‍👦/ },
+  ];
+
+  for (const columns of [20, 30, 39]) {
+    for (const sample of samples) {
+      const [line] = formatLiveFooter(buildLiveFooterModel(status({ activity: sample.activity })), columns);
+      assert.match(line, /^ACTIVE · /);
+      assert.match(line, sample.visible);
+      assert.match(line, /…$/);
+      assert.doesNotMatch(line, /(?:\u200d|\p{M})…$/u);
+      assert.ok(stringWidth(line) <= columns, `${JSON.stringify(line)} exceeds ${columns} cells`);
+    }
+  }
 });
 
 test("columns normalize to a finite positive integer with a minimum of one", () => {

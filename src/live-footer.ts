@@ -98,9 +98,15 @@ export function formatLiveFooter(model: LiveFooterModel, columns: number): strin
   if (width < 40) {
     if (stringWidth(state) > width) return [bounded(state, width)];
 
+    const tokenSeparator = " · ";
     let line = state;
-    for (const token of [activity, evidence, capture, freshness, eventCount]) {
-      const candidate = `${line} · ${token}`;
+    const activityBudget = width - stringWidth(state) - stringWidth(tokenSeparator);
+    if (activityBudget > 0) {
+      line += `${tokenSeparator}${bounded(activity, activityBudget)}`;
+    }
+
+    for (const token of [evidence, capture, freshness, eventCount]) {
+      const candidate = `${line}${tokenSeparator}${token}`;
       if (stringWidth(candidate) > width) break;
       line = candidate;
     }

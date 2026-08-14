@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, eligibleSessionChoices, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, indexSessionChoices, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, resolveSessionChoice, selectAttachHistory, selectSessionForCommand, selectSessionForCommandResult, type SessionChoice, type SessionSummary } from "./cli.ts";
+import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, eligibleSessionChoices, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, indexSessionChoices, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, resolveSessionChoice, selectAttachHistory, selectSessionForCommand, selectSessionForCommandResult, shouldUseLiveFooter, type SessionChoice, type SessionSummary } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -641,6 +642,57 @@ test("parseCommandArgs accepts positional, snapshot, and exact session selectors
   assert.deepEqual(parseCommandArgs(["setup", "cli", "--global"]), { command: "setup", setupSubject: "cli", setupScope: "global" });
   assert.deepEqual(parseCommandArgs(["setup", "cli", "--local"]), { command: "setup", setupSubject: "cli", setupScope: "local" });
   assert.deepEqual(parseCommandArgs(["doctor"]), { command: "doctor" });
+});
+
+test("parseCommandArgs accepts --no-live-footer for attach positional and selector forms", () => {
+  assert.deepEqual(parseCommandArgs(["attach", "--no-live-footer"]), { command: "attach", noLiveFooter: true });
+  assert.deepEqual(parseCommandArgs(["attach", "1", "--no-live-footer"]), { command: "attach", sessionId: "1", noLiveFooter: true });
+  assert.deepEqual(parseCommandArgs(["attach", "--no-live-footer", "--session=prefix"]), { command: "attach", sessionId: "prefix", noLiveFooter: true });
+  assert.deepEqual(parseCommandArgs(["attach", "--session-id=exact", "--no-live-footer"]), { command: "attach", exactSessionId: "exact", noLiveFooter: true });
+});
+
+test("parseCommandArgs rejects --no-live-footer for every non-attach command", () => {
+  for (const argv of [
+    ["inspect", "1", "--no-live-footer"],
+    ["debrief", "--no-live-footer"],
+    ["sessions", "--no-live-footer"],
+    ["doctor", "--no-live-footer"],
+    ["setup", "cli", "--no-live-footer"],
+    ["unknown", "--no-live-footer"],
+  ]) {
+    assert.throws(
+      () => parseCommandArgs(argv),
+      new Error("`--no-live-footer` can only be used with `bashguard attach`"),
+    );
+  }
+});
+
+test("live footer policy matrix requires an active capable terminal without opt-out", () => {
+  const supported = { active: true, stdoutIsTTY: true, term: "xterm-256color", disabled: false };
+  assert.equal(shouldUseLiveFooter(supported), true);
+
+  for (const overrides of [
+    { active: false },
+    { stdoutIsTTY: false },
+    { term: undefined },
+    { term: "" },
+    { term: "dumb" },
+    { term: "DuMb" },
+    { term: " DUMB " },
+    { disabled: true },
+  ]) {
+    assert.equal(shouldUseLiveFooter({ ...supported, ...overrides }), false, JSON.stringify(overrides));
+  }
+});
+
+test("CLI usage advertises --no-live-footer on every attach selector form", () => {
+  const result = spawnSync(process.execPath, ["--experimental-strip-types", join(import.meta.dirname, "cli.ts"), "unknown"], { encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr.match(/--no-live-footer/g)?.length, 3);
+  assert.match(result.stderr, /bashguard attach \[session-id\].*\[--no-live-footer\]/);
+  assert.match(result.stderr, /bashguard attach --session=<session-selector>.*\[--no-live-footer\]/);
+  assert.match(result.stderr, /bashguard attach --session-id=<exact-session-id>.*\[--no-live-footer\]/);
 });
 
 test("parseCommandArgs rejects missing filter values and unknown options", () => {

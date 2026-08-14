@@ -125,6 +125,7 @@ export type ParsedCommandArgs = {
   format?: EvidenceFormat;
   attachHistory?: number;
   allHistory?: boolean;
+  noLiveFooter?: boolean;
   setupSubject?: string;
   setupScope?: "global" | "local";
 };
@@ -146,7 +147,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history]\n  bashguard attach --session=<session-selector> [--history <n>|--all-history]\n  bashguard attach --session-id=<exact-session-id> [--history <n>|--all-history]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-selector> --event <event-id-or-sequence>\n  bashguard inspect --session-id=<exact-session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-selector>\n  bashguard debrief --session-id=<exact-session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session=<session-selector> [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session-id=<exact-session-id> [--history <n>|--all-history] [--no-live-footer]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-selector> --event <event-id-or-sequence>\n  bashguard inspect --session-id=<exact-session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-selector>\n  bashguard debrief --session-id=<exact-session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -164,6 +165,11 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   let format: EvidenceFormat | undefined;
   let attachHistory: number | undefined;
   let allHistory = false;
+  let noLiveFooter = false;
+
+  if (command !== "attach" && args.includes("--no-live-footer")) {
+    throw new Error("`--no-live-footer` can only be used with `bashguard attach`");
+  }
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -250,6 +256,10 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       allHistory = true;
       continue;
     }
+    if (arg === "--no-live-footer") {
+      noLiveFooter = true;
+      continue;
+    }
     if (arg === "--format") {
       const rawFormat = args[++index];
       if (!rawFormat || rawFormat.startsWith("--")) throw new Error("`--format` requires a value");
@@ -276,8 +286,26 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   if (format !== undefined) parsed.format = format;
   if (attachHistory !== undefined) parsed.attachHistory = attachHistory;
   if (allHistory) parsed.allHistory = true;
+  if (noLiveFooter) parsed.noLiveFooter = true;
   if (command !== "attach" && (attachHistory !== undefined || allHistory)) throw new Error("attach history options can only be used with `bashguard attach`");
   return parsed;
+}
+
+export type LiveFooterPolicyInput = {
+  active: boolean;
+  stdoutIsTTY: boolean;
+  term: string | undefined;
+  disabled: boolean;
+};
+
+export function shouldUseLiveFooter(input: LiveFooterPolicyInput): boolean {
+  const term = input.term?.trim();
+  return input.active
+    && input.stdoutIsTTY
+    && term !== undefined
+    && term.length > 0
+    && term.toLocaleLowerCase() !== "dumb"
+    && !input.disabled;
 }
 
 async function readJsonFile<T>(path: string): Promise<T | undefined> {

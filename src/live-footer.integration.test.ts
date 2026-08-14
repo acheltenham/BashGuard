@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { unlinkSync } from "node:fs";
 import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -473,6 +474,53 @@ test("recorded shutdown clears sticky output and prints exactly one final ground
   assert.equal(text.match(/State\s+complete/gu)?.length, 1);
   assert.ok(text.includes(`${footerClearSequence(4)}\r\nSession status\n`), JSON.stringify(text));
   assert.doesNotMatch(text, /State\s+active[^]*Session status\n[^]*State\s+active/u);
+});
+
+test("recorded shutdown finalizes from the accepted snapshot when confirmation stat fails", async (t) => {
+  const { eventsFile, selection } = await fixture(t);
+  const output = ttyOutput();
+  const captured = collect(output);
+  const signals = new EventEmitter();
+  const abort = new AbortController();
+  let removed = false;
+  const attached = runAttach({ command: "attach", sessionId: selection.selector }, {
+    selection,
+    output,
+    term: "xterm",
+    pollMs: 5,
+    signal: abort.signal,
+    signalSource: signals,
+    onSnapshot(events) {
+      if (!removed && events.some((item) => item.type === "session.shutdown")) {
+        removed = true;
+        unlinkSync(eventsFile);
+      }
+    },
+  });
+  t.after(async () => {
+    abort.abort();
+    await attached;
+  });
+
+  await waitForText(captured.text, "ACTIVE ·", abort);
+  assert.equal(signals.listenerCount("SIGINT"), 1);
+  await appendFile(eventsFile, `${JSON.stringify(event(3, "removed-stop", "session.shutdown"))}\n`);
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const outcome = await Promise.race([
+    attached.then(() => "settled" as const),
+    new Promise<"timeout">((resolve) => {
+      timeoutHandle = setTimeout(() => resolve("timeout"), 500);
+    }),
+  ]);
+  if (timeoutHandle) clearTimeout(timeoutHandle);
+
+  assert.equal(outcome, "settled", "accepted shutdown must settle even when its events file disappears");
+  const text = captured.text();
+  assert.equal(text.match(/Session status\n/gu)?.length, 1);
+  assert.equal(text.match(/State\s+complete/gu)?.length, 1);
+  assert.ok(text.includes(`${footerClearSequence(4)}\r\nSession status\n`), JSON.stringify(text));
+  assert.equal(signals.listenerCount("SIGINT"), 0);
+  assert.equal(output.listenerCount("resize"), 0);
 });
 
 test("PID death without shutdown finalizes honestly from process evidence", async (t) => {

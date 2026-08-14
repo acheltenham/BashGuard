@@ -2178,7 +2178,10 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
       try {
         if ((await stat(session.eventsFile)).size !== offset) continue;
       } catch {
-        continue;
+        // The accepted in-memory shutdown is authoritative when its backing
+        // stream disappears before confirmation. Readable replacement
+        // metadata was checked above; otherwise finalize from this snapshot.
+        return await finishCompleted();
       }
       return await finishCompleted();
     }

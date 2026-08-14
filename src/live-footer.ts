@@ -148,7 +148,13 @@ export const ANSI_CLEAR_LINE = `${ANSI_CARRIAGE_RETURN}${ANSI_ERASE_LINE}`;
 export const LIVE_FOOTER_REFRESH_MS = 1_000;
 
 export type StructuralWritable = {
-  write(chunk: string): unknown;
+  write(chunk: string): boolean;
+  once(event: "drain", listener: () => void): unknown;
+  once(event: "error", listener: (error: unknown) => void): unknown;
+  once(event: "close", listener: () => void): unknown;
+  removeListener(event: "drain", listener: () => void): unknown;
+  removeListener(event: "error", listener: (error: unknown) => void): unknown;
+  removeListener(event: "close", listener: () => void): unknown;
 };
 
 export type LiveFooterFormatter = (model: LiveFooterModel, width: number) => readonly string[];
@@ -187,7 +193,7 @@ export function footerClearSequence(lineCount: number): string {
 }
 
 /**
- * Synchronous terminal adapter for a footer rendered at the current cursor.
+ * Sequenced terminal adapter for a footer rendered at the current cursor.
  * Process listeners and lifecycle policy intentionally remain with the caller.
  */
 export class LiveFooterController {
@@ -195,6 +201,7 @@ export class LiveFooterController {
   readonly #formatter: LiveFooterFormatter;
   readonly #clock: () => number;
   readonly #width: () => number;
+  #tail: Promise<void> = Promise.resolve();
   #model: LiveFooterModel | undefined;
   #renderedLineCount = 0;
   #lastRenderTime: number | undefined;
@@ -224,66 +231,132 @@ export class LiveFooterController {
     return this.#lastRenderWidth;
   }
 
-  render(model: LiveFooterModel): void {
-    if (this.#cleaned) return;
-    const width = normalizeWidth(this.#width());
-    const now = this.#clock();
-    const changed = !modelsEqual(this.#model, model);
-    const widthChanged = this.#lastRenderWidth !== width;
-    const freshnessDue = this.#lastRenderTime === undefined || now - this.#lastRenderTime >= LIVE_FOOTER_REFRESH_MS;
-    if (!changed && !widthChanged && !freshnessDue) return;
-    this.#redraw(model, width, now);
+  render(model: LiveFooterModel): Promise<void> {
+    const snapshot = copyModel(model);
+    return this.#enqueue(async () => {
+      if (this.#cleaned) return;
+      const width = normalizeWidth(this.#width());
+      const now = this.#clock();
+      const changed = !modelsEqual(this.#model, snapshot);
+      const widthChanged = this.#lastRenderWidth !== width;
+      const freshnessDue = this.#lastRenderTime === undefined
+        || now < this.#lastRenderTime
+        || now - this.#lastRenderTime >= LIVE_FOOTER_REFRESH_MS;
+      if (!changed && !widthChanged && !freshnessDue) return;
+      await this.#redraw(snapshot, width, now);
+    });
   }
 
-  writeTimeline(payload: string): void {
-    if (this.#cleaned) return;
-    const width = normalizeWidth(this.#width());
-    const now = this.#clock();
-    const lines = this.#model === undefined ? undefined : this.#formatter(this.#model, width);
-
-    this.#clearRendered();
-    this.#output.write(`${payload}\n`);
-    if (this.#model !== undefined && lines !== undefined) {
-      this.#writeFooter(lines);
-      this.#lastRenderTime = now;
-      this.#lastRenderWidth = width;
-    }
+  refresh(): Promise<void> {
+    return this.#enqueue(async () => {
+      if (this.#cleaned || this.#model === undefined) return;
+      const width = normalizeWidth(this.#width());
+      const now = this.#clock();
+      const widthChanged = this.#lastRenderWidth !== width;
+      const freshnessDue = this.#lastRenderTime === undefined
+        || now < this.#lastRenderTime
+        || now - this.#lastRenderTime >= LIVE_FOOTER_REFRESH_MS;
+      if (!widthChanged && !freshnessDue) return;
+      await this.#redraw(this.#model, width, now);
+    });
   }
 
-  resize(): void {
-    if (this.#cleaned || this.#model === undefined) return;
-    const width = normalizeWidth(this.#width());
-    if (width === this.#lastRenderWidth) return;
-    this.#redraw(this.#model, width, this.#clock());
+  writeTimeline(payload: string): Promise<void> {
+    return this.#enqueue(async () => {
+      if (this.#cleaned) return;
+      const width = normalizeWidth(this.#width());
+      const now = this.#clock();
+      const model = this.#model === undefined ? undefined : copyModel(this.#model);
+      const lines = model === undefined ? undefined : this.#formatter(model, width);
+
+      await this.#clearRendered();
+      await this.#write(`${payload.replace(/\r\n|\r|\n/gu, "\r\n")}\r\n`);
+      if (model !== undefined && lines !== undefined) {
+        await this.#writeFooter(lines);
+        this.#lastRenderTime = now;
+        this.#lastRenderWidth = width;
+      }
+    });
   }
 
-  cleanup(): void {
-    if (this.#cleaned) return;
-    this.#cleaned = true;
-    this.#clearRendered();
-    this.#output.write("\n");
+  resize(): Promise<void> {
+    return this.#enqueue(async () => {
+      if (this.#cleaned || this.#model === undefined) return;
+      const width = normalizeWidth(this.#width());
+      if (width === this.#lastRenderWidth) return;
+      await this.#redraw(this.#model, width, this.#clock());
+    });
   }
 
-  #redraw(model: LiveFooterModel, width: number, now: number): void {
+  cleanup(): Promise<void> {
+    return this.#enqueue(async () => {
+      if (this.#cleaned) return;
+      await this.#clearRendered();
+      await this.#write("\r\n");
+      this.#cleaned = true;
+    });
+  }
+
+  #enqueue(operation: () => Promise<void>): Promise<void> {
+    const result = this.#tail.then(operation);
+    this.#tail = result.catch(() => undefined);
+    return result;
+  }
+
+  async #redraw(model: LiveFooterModel, width: number, now: number): Promise<void> {
     const snapshot = copyModel(model);
     const lines = this.#formatter(snapshot, width);
-    this.#clearRendered();
-    this.#writeFooter(lines);
+    await this.#clearRendered();
+    await this.#writeFooter(lines);
     this.#model = snapshot;
     this.#lastRenderTime = now;
     this.#lastRenderWidth = width;
   }
 
-  #clearRendered(): void {
+  async #clearRendered(): Promise<void> {
     const sequence = footerClearSequence(this.#renderedLineCount);
-    if (sequence) this.#output.write(sequence);
+    if (!sequence) return;
+    await this.#write(sequence);
     this.#renderedLineCount = 0;
+    this.#lastRenderTime = undefined;
   }
 
-  #writeFooter(lines: readonly string[]): void {
-    if (lines.length === 0) return;
-    this.#output.write(lines.join("\n"));
+  async #writeFooter(lines: readonly string[]): Promise<void> {
+    if (lines.length === 0) {
+      this.#renderedLineCount = 0;
+      return;
+    }
+    await this.#write(lines.join("\r\n"));
     this.#renderedLineCount = lines.length;
+  }
+
+  #write(chunk: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: unknown) => {
+        if (settled) return;
+        settled = true;
+        this.#output.removeListener("drain", onDrain);
+        this.#output.removeListener("error", onError);
+        this.#output.removeListener("close", onClose);
+        if (error === undefined) resolve();
+        else reject(error);
+      };
+      const onDrain = () => finish();
+      const onError = (error: unknown) => finish(error);
+      const onClose = () => finish(Object.assign(new Error("Writable closed before drain"), {
+        code: "ERR_STREAM_PREMATURE_CLOSE",
+      }));
+
+      this.#output.once("drain", onDrain);
+      this.#output.once("error", onError);
+      this.#output.once("close", onClose);
+      try {
+        if (this.#output.write(chunk)) finish();
+      } catch (error) {
+        finish(error);
+      }
+    });
   }
 }
 

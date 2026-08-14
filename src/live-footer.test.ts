@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import stringWidth from "string-width";
 
@@ -232,14 +233,15 @@ test("activity controls are sanitized before display-width measurement", () => {
   assert.match(output, /…/);
 });
 
-class RecordingWritable {
+class RecordingWritable extends EventEmitter {
   chunks: string[] = [];
-  error: unknown;
+  plans: Array<boolean | Error> = [];
 
   write(chunk: string): boolean {
-    if (this.error !== undefined) throw this.error;
+    const plan = this.plans.shift() ?? true;
+    if (plan instanceof Error) throw plan;
     this.chunks.push(chunk);
-    return false; // Backpressure does not change synchronous terminal ordering.
+    return plan;
   }
 
   take(): string {
@@ -262,13 +264,13 @@ function footerModel(overrides: Partial<LiveFooterModel> = {}): LiveFooterModel 
   };
 }
 
-function controllerFixture() {
+function controllerFixture(formatter = (model: LiveFooterModel, width: number) => [`${model.state} ${width}`, model.activity]) {
   const output = new RecordingWritable();
   let time = 10_000;
   let columns = 80;
   const controller = createLiveFooterController({
     output,
-    formatter: (model, width) => [`${model.state} ${width}`, model.activity],
+    formatter,
     clock: () => time,
     width: () => columns,
   });
@@ -280,113 +282,197 @@ function controllerFixture() {
   };
 }
 
-test("controller first render writes exact lines without a trailing newline and tracks state", () => {
+test("controller first render writes one exact CRLF-delimited chunk and tracks state", async () => {
   const { controller, output } = controllerFixture();
   const model = footerModel();
-  controller.render(model);
+  await controller.render(model);
 
-  assert.equal(output.take(), "ACTIVE 80\nRunning tests");
+  assert.deepEqual(output.chunks, ["ACTIVE 80\r\nRunning tests"]);
   assert.equal(controller.renderedLineCount, 2);
   assert.equal(controller.lastRenderTime, 10_000);
   assert.equal(controller.lastRenderWidth, 80);
   assert.deepEqual(controller.model, model);
 });
 
-test("controller clearing emits exact ANSI for one and multiple tracked lines", () => {
-  // Use a one-line formatter for this case.
-  const oneLineOutput = new RecordingWritable();
-  const oneLine = createLiveFooterController({
-    output: oneLineOutput,
-    formatter: (model) => [model.state],
-    clock: () => 0,
-    width: () => 80,
-  });
-  oneLine.render(footerModel());
-  oneLineOutput.take();
-  oneLine.cleanup();
-  assert.equal(oneLineOutput.take(), `${ANSI_CLEAR_LINE}\n`);
+test("controller clearing emits exact ANSI and cleanup CRLF", async () => {
+  const oneLine = controllerFixture((model) => [model.state]);
+  await oneLine.controller.render(footerModel());
+  oneLine.output.take();
+  await oneLine.controller.cleanup();
+  assert.equal(oneLine.output.take(), `${ANSI_CLEAR_LINE}\r\n`);
 
   const many = controllerFixture();
-  many.controller.render(footerModel());
+  await many.controller.render(footerModel());
   many.output.take();
-  many.controller.cleanup();
-  assert.equal(many.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}\n`);
+  await many.controller.cleanup();
+  assert.equal(many.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}\r\n`);
 });
 
-test("controller writeTimeline clears, writes one payload newline, then redraws", () => {
+test("controller writeTimeline uses an explicit CRLF, then redraws with CRLF", async () => {
   const { controller, output } = controllerFixture();
-  controller.render(footerModel());
+  await controller.render(footerModel());
   output.take();
 
-  controller.writeTimeline("17 event happened");
-  assert.equal(
-    output.take(),
-    `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}17 event happened\nACTIVE 80\nRunning tests`,
-  );
+  await controller.writeTimeline("17 event happened");
+  assert.deepEqual(output.chunks, [
+    `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`,
+    "17 event happened\r\n",
+    "ACTIVE 80\r\nRunning tests",
+  ]);
   assert.equal(controller.renderedLineCount, 2);
 });
 
-test("controller redraws changed models immediately and throttles unchanged freshness redraws", () => {
+test("backpressure blocks later timeline and redraw writes, then preserves exact call order", async () => {
   const fixture = controllerFixture();
-  fixture.controller.render(footerModel());
+  await fixture.controller.render(footerModel());
+  fixture.output.take();
+  fixture.output.plans.push(false);
+
+  const timeline = fixture.controller.writeTimeline("event");
+  const redraw = fixture.controller.render(footerModel({ activity: "Changed" }));
+  await Promise.resolve();
+  assert.deepEqual(fixture.output.chunks, [`${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`]);
+  assert.equal(fixture.output.listenerCount("drain"), 1);
+  assert.equal(fixture.output.listenerCount("error"), 1);
+  assert.equal(fixture.output.listenerCount("close"), 1);
+
+  fixture.output.emit("drain");
+  await Promise.all([timeline, redraw]);
+  assert.deepEqual(fixture.output.chunks, [
+    `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`,
+    "event\r\n",
+    "ACTIVE 80\r\nRunning tests",
+    `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`,
+    "ACTIVE 80\r\nChanged",
+  ]);
+  assert.equal(fixture.output.listenerCount("drain"), 0);
+  assert.equal(fixture.output.listenerCount("error"), 0);
+  assert.equal(fixture.output.listenerCount("close"), 0);
+});
+
+test("controller redraws changes, throttles freshness, and resets after a backward clock", async () => {
+  const fixture = controllerFixture();
+  await fixture.controller.render(footerModel());
   fixture.output.take();
 
   fixture.setTime(10_100);
-  fixture.controller.render(footerModel({ activity: "Changed" }));
-  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 80\nChanged`);
+  await fixture.controller.render(footerModel({ activity: "Changed" }));
+  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 80\r\nChanged`);
 
   fixture.setTime(10_999);
-  fixture.controller.render(footerModel({ activity: "Changed" }));
+  await fixture.controller.refresh();
   assert.equal(fixture.output.take(), "");
 
-  fixture.setTime(11_100);
-  fixture.controller.render(footerModel({ activity: "Changed" }));
-  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 80\nChanged`);
+  fixture.setTime(9_000);
+  await fixture.controller.refresh();
+  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 80\r\nChanged`);
+  assert.equal(fixture.controller.lastRenderTime, 9_000);
 
-  fixture.setTime(12_100);
-  fixture.controller.render(footerModel({ activity: "Changed", freshness: "2s ago" }));
-  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 80\nChanged`);
+  fixture.setTime(10_000);
+  await fixture.controller.refresh();
+  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 80\r\nChanged`);
 });
 
-test("controller resize forces one redraw at the changed width", () => {
-  const fixture = controllerFixture();
-  fixture.controller.render(footerModel());
+test("real formatter resize wide to medium to narrow clears the prior line count", async () => {
+  const fixture = controllerFixture(formatLiveFooter);
+  await fixture.controller.render(footerModel());
+  assert.equal(fixture.controller.renderedLineCount, 4);
   fixture.output.take();
 
-  fixture.setWidth(50);
-  fixture.controller.resize();
-  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 50\nRunning tests`);
-  fixture.controller.resize();
+  fixture.setWidth(60);
+  await fixture.controller.resize();
+  assert.equal(fixture.output.chunks[0], footerClearSequenceForTest(4));
+  assert.equal(fixture.output.chunks[0].split(ANSI_CURSOR_UP).length - 1, 3);
+  assert.equal(fixture.controller.renderedLineCount, 5);
+  fixture.output.take();
+
+  fixture.setWidth(30);
+  await fixture.controller.resize();
+  assert.equal(fixture.output.chunks[0], footerClearSequenceForTest(5));
+  assert.equal(fixture.output.chunks[0].split(ANSI_CURSOR_UP).length - 1, 4);
+  assert.equal(fixture.controller.renderedLineCount, 1);
+});
+
+function footerClearSequenceForTest(lines: number): string {
+  return ANSI_CLEAR_LINE + `${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`.repeat(lines - 1);
+}
+
+test("failed clear, timeline, and redraw writes reject without stalling queued operations", async () => {
+  const clear = controllerFixture();
+  await clear.controller.render(footerModel());
+  clear.output.take();
+  clear.output.plans.push(new Error("clear failed"));
+  await assert.rejects(clear.controller.render(footerModel({ activity: "Changed" })), /clear failed/);
+  assert.equal(clear.controller.renderedLineCount, 2);
+  await clear.controller.render(footerModel({ activity: "Recovered" }));
+  assert.match(clear.output.take(), /Recovered$/u);
+
+  const timeline = controllerFixture();
+  await timeline.controller.render(footerModel());
+  timeline.output.take();
+  timeline.output.plans.push(true, new Error("timeline failed"));
+  await assert.rejects(timeline.controller.writeTimeline("event"), /timeline failed/);
+  assert.equal(timeline.controller.renderedLineCount, 0);
+  await timeline.controller.render(footerModel({ activity: "Recovered" }));
+  assert.equal(timeline.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}ACTIVE 80\r\nRecovered`);
+
+  const redraw = controllerFixture();
+  await redraw.controller.render(footerModel());
+  redraw.output.take();
+  redraw.output.plans.push(true, true, new Error("redraw failed"));
+  await assert.rejects(redraw.controller.writeTimeline("event"), /redraw failed/);
+  assert.equal(redraw.controller.renderedLineCount, 0);
+  await redraw.controller.render(footerModel());
+  assert.equal(redraw.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}event\r\nACTIVE 80\r\nRunning tests`);
+});
+
+test("cleanup becomes idempotent only after clear and newline succeed", async () => {
+  const fixture = controllerFixture();
+  await fixture.controller.render(footerModel());
+  fixture.output.take();
+  fixture.output.plans.push(new Error("clear failed"));
+  await assert.rejects(fixture.controller.cleanup(), /clear failed/);
+  assert.equal(fixture.controller.renderedLineCount, 2);
+
+  fixture.output.plans.push(true, new Error("newline failed"));
+  await assert.rejects(fixture.controller.cleanup(), /newline failed/);
+  assert.equal(fixture.controller.renderedLineCount, 0);
+  assert.equal(fixture.output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}`);
+
+  await Promise.all([fixture.controller.cleanup(), fixture.controller.cleanup()]);
+  assert.equal(fixture.output.take(), "\r\n");
+  await fixture.controller.cleanup();
   assert.equal(fixture.output.take(), "");
 });
 
-test("controller cleanup clears, leaves one normal newline, and is idempotent", () => {
-  const { controller, output } = controllerFixture();
-  controller.render(footerModel());
-  output.take();
-
-  controller.cleanup();
-  controller.cleanup();
-  assert.equal(output.take(), `${ANSI_CLEAR_LINE}${ANSI_CURSOR_UP}${ANSI_CLEAR_LINE}\n`);
-  assert.equal(controller.renderedLineCount, 0);
-});
-
-test("controller propagates writes including identifiable EPIPE and ignores backpressure", () => {
-  const ordinary = controllerFixture();
-  ordinary.output.error = new Error("write failed");
-  assert.throws(() => ordinary.controller.render(footerModel()), /write failed/);
-
+test("backpressure rejects on error or close and preserves EPIPE identity", async () => {
   const epiped = controllerFixture();
   const error = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
-  epiped.output.error = error;
-  assert.throws(() => epiped.controller.render(footerModel()), (thrown) => thrown === error && (thrown as NodeJS.ErrnoException).code === "EPIPE");
+  epiped.output.plans.push(false);
+  const render = epiped.controller.render(footerModel());
+  const epipeRejection = assert.rejects(render, (thrown) => thrown === error && (thrown as NodeJS.ErrnoException).code === "EPIPE");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(epiped.output.listenerCount("error"), 1);
+  epiped.output.emit("error", error);
+  await epipeRejection;
+
+  const closed = controllerFixture();
+  closed.output.plans.push(false);
+  const closedRender = closed.controller.render(footerModel());
+  const closeRejection = assert.rejects(closedRender, (thrown: unknown) => (thrown as NodeJS.ErrnoException).code === "ERR_STREAM_PREMATURE_CLOSE");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(closed.output.listenerCount("close"), 1);
+  closed.output.emit("close");
+  await closeRejection;
 });
 
-test("controller emits no alternate-screen or cursor-hide sequences", () => {
+test("controller emits no process listeners, alternate-screen, or cursor-hide sequences", async () => {
+  const before = { SIGINT: process.listenerCount("SIGINT"), SIGTERM: process.listenerCount("SIGTERM") };
   const fixture = controllerFixture();
-  fixture.controller.render(footerModel());
-  fixture.controller.writeTimeline("event");
-  fixture.controller.cleanup();
+  await fixture.controller.render(footerModel());
+  await fixture.controller.writeTimeline("event");
+  await fixture.controller.cleanup();
   const output = fixture.output.take();
+  assert.deepEqual({ SIGINT: process.listenerCount("SIGINT"), SIGTERM: process.listenerCount("SIGTERM") }, before);
   assert.doesNotMatch(output, /\u001b\[\?(?:1049|25)[hl]/u);
 });

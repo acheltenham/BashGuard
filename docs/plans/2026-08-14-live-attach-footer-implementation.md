@@ -111,7 +111,7 @@ Cover:
 - resize/width change forces one redraw with new bounded layout;
 - cleanup clears temporary lines and leaves exactly one normal newline position;
 - repeated cleanup is idempotent;
-- write failure propagates ordinary errors but identifies `EPIPE` for caller degradation;
+- typed write failure preserves cause/code and identifies phase, acceptance, and timeline replay safety; accepted ordinary failures and `EPIPE` both relinquish cursor ownership;
 - controller never emits alternate-screen or cursor-hide sequences.
 
 **Step 2: Verify RED**

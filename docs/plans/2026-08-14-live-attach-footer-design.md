@@ -91,8 +91,8 @@ A terminal-only adapter tracks rendered line count and last render time. It:
 - writes/redraws around timeline events;
 - suppresses unchanged redraws except one-second freshness refresh;
 - responds to terminal resize;
-- clears its tracked region on normal completion, `Ctrl+C`, and ordinary errors;
-- on a stream-accepted `EPIPE`, disables further output and relinquishes tracked terminal state so cleanup cannot write recursively;
+- clears its tracked region on normal completion, `Ctrl+C`, and synchronous/unaccepted ordinary errors;
+- on any stream-accepted failure, disables the footer and relinquishes tracked terminal state so cleanup cannot issue speculative cursor movement; accepted `EPIPE` also disables further output;
 - removes its scoped stream listeners on every exit path, while attach integration removes its scoped process handlers;
 - never uses the alternate screen, hides the cursor, or requires mouse input.
 
@@ -102,7 +102,7 @@ The controller does not interpret BashGuard events or evidence.
 
 The active attach loop maintains one in-memory append-order event snapshot. Each accepted complete event updates the snapshot and rebuilds the existing grounded `AttachStatus` projection. Presentation changes never modify JSONL or inspect/debrief evidence.
 
-Timeline writes in sticky mode flow through the controller so new events cannot overwrite the footer.
+Timeline writes in sticky mode flow through the controller so new events cannot overwrite the footer. Typed operation failures preserve cause/code, operation phase, write acceptance, and—when a timeline event is involved—whether its payload was accepted. Attach uses the caught timeline metadata, never the controller-wide failed flag, to replay a narrated event once after pre-accept clear/payload failure and to avoid duplicate-risk replay after payload acceptance or redraw failure.
 
 ## Mode selection
 
@@ -117,20 +117,20 @@ In sticky mode, the footer replaces the startup static status block to avoid dup
 
 Completed-session attach, redirected output, piped output, `TERM=dumb`, and explicit `--no-live-footer` retain the existing ordinary status block and timeline behavior.
 
-If terminal capabilities become uncertain while output remains writable, BashGuard visibly degrades to plain text rather than emitting speculative ANSI sequences. An accepted `EPIPE` is the exception: output itself is disabled, so degradation must be silent.
+If terminal capabilities become uncertain while output remains writable, BashGuard visibly degrades to plain text rather than emitting speculative ANSI sequences. After an accepted ordinary write failure it emits only a safe newline/plain fallback if the stream is subsequently writable, never cursor-up cleanup. Accepted `EPIPE` additionally disables output, so degradation is silent.
 
 ## Lifecycle and cleanup
 
 - No alternate screen.
 - Cursor remains visible.
 - Resize triggers one recalculation/redraw.
-- `Ctrl+C`, shutdown, and unexpected ordinary errors clear temporary footer lines and leave a normal newline/cursor position.
+- `Ctrl+C`, shutdown, and synchronous/unaccepted unexpected ordinary errors clear temporary footer lines and leave a normal newline/cursor position.
 - Shutdown renders one final ordinary completed status block where appropriate.
 - Cleanup handlers are scoped to attach and removed afterward.
 
 **Approved cleanup target:** The original design included `EPIPE` with the paths that clear temporary lines and restore a normal cursor position.
 
-**Actual accepted-`EPIPE` degradation:** Once a write has been accepted and then fails, BashGuard cannot know what reached the stream or terminal. It disables footer/output, drops tracked rendered-line ownership, aborts attach, and removes scoped stream/process handlers and listeners without another cleanup write or stack trace. It therefore does **not** guarantee that already-visible temporary footer lines are cleared.
+**Actual accepted-write degradation:** Once any write has been accepted and then fails, BashGuard cannot know what reached the stream or terminal. It disables the footer, drops tracked rendered-line ownership, and removes scoped stream/process handlers and listeners without cursor-up cleanup. An ordinary accepted failure may emit only a safe newline/plain fallback if the stream later reports writable; accepted `EPIPE` also disables output and aborts attach without another write or stack trace. Neither path guarantees that already-visible temporary footer lines are cleared.
 
 ## CLI
 
@@ -157,7 +157,7 @@ Write tests first for:
 - disabled behavior for non-TTY, completed sessions, `TERM=dumb`, and `--no-live-footer`;
 - partial JSONL boundaries and malformed lines;
 - shutdown finalization and cleanup;
-- `Ctrl+C` and unexpected-error cleanup, plus accepted-`EPIPE` output disablement and listener removal without recursive writes;
+- `Ctrl+C` and synchronous/unaccepted unexpected-error cleanup, plus accepted-write footer disablement, no cursor-up cleanup, listener removal, ordinary safe fallback, and quiet `EPIPE` output stop;
 - regression that redirected attach emits no known footer CSI cursor-up/erase sequences or sticky separator/redraw behavior (without making a universal claim about arbitrary recorded payload bytes);
 - real PTY active attach with resize, live events, and shutdown;
 - narrow-terminal PTY smoke testing.

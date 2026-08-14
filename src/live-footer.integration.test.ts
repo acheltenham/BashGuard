@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ import {
   type SessionSelectionResult,
 } from "./cli.ts";
 import type { LiveFooterModel } from "./live-footer.ts";
+import { waitForExit } from "./test-process.ts";
 
 const ANSI_FOOTER = /\u001b\[(?:1A|2K)/u;
 
@@ -57,6 +59,40 @@ function collect(output: PassThrough): { text: () => string } {
   let value = "";
   output.on("data", (chunk) => { value += chunk.toString(); });
   return { text: () => value };
+}
+
+type ProcessResult = { stdout: Buffer; stderr: Buffer; exitCode: number | null };
+
+async function runCompletedAttach(dataRoot: string, sessionId: string, noLiveFooter: boolean): Promise<ProcessResult> {
+  const runner = [
+    'import { parseCommandArgs, runAttach } from "./src/cli.ts";',
+    'const output = { isTTY: true, columns: 80, write: (chunk) => process.stdout.write(chunk) };',
+    'await runAttach(parseCommandArgs(process.argv.slice(1)), { output, now: () => Date.parse("2026-08-13T12:00:10.000Z") });',
+  ].join("\n");
+  const args = [
+    "--experimental-strip-types",
+    "--input-type=module",
+    "--eval",
+    runner,
+    "attach",
+    `--session-id=${sessionId}`,
+    ...(noLiveFooter ? ["--no-live-footer"] : []),
+  ];
+  const child = spawn(process.execPath, args, {
+    cwd: process.cwd(),
+    env: { ...process.env, BASHGUARD_DATA_DIR: dataRoot },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer) => { stdout.push(chunk); });
+  child.stderr.on("data", (chunk: Buffer) => { stderr.push(chunk); });
+  const diagnostics = (): { stdout: string; stderr: string } => ({
+    stdout: Buffer.concat(stdout).toString(),
+    stderr: Buffer.concat(stderr).toString(),
+  });
+  const exitCode = await waitForExit(child, diagnostics);
+  return { stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), exitCode };
 }
 
 async function waitFor(read: () => string, needle: string): Promise<void> {
@@ -284,4 +320,40 @@ test("completed attach preserves plain static output in a TTY", async (t) => {
   assert.match(captured.text(), /Session status\n/u);
   assert.match(captured.text(), /State\s+complete/u);
   assert.doesNotMatch(captured.text(), ANSI_FOOTER);
+});
+
+test("completed attach output is byte-identical with the live footer enabled or disabled", async (t) => {
+  const dataRoot = await mkdtemp(join(tmpdir(), "bashguard-completed-footer-parity-"));
+  t.after(async () => rm(dataRoot, { recursive: true, force: true }));
+  const sessionId = "completed-footer-parity-session";
+  const directory = join(dataRoot, sessionId);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "session.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    sessionId,
+    cwd: "/tmp/completed-footer-parity",
+    repository: "completed-footer-parity",
+    processId: 999_999_999,
+  })}\n`);
+  const completedEvents = [
+    event(1, "parity-start", "session.started", { sessionId, timestamp: "2026-08-13T12:00:00.000Z" }),
+    event(2, "parity-command", "bash.user_requested", {
+      sessionId,
+      timestamp: "2026-08-13T12:00:01.000Z",
+      payload: { command: "printf deterministic-completed-output" },
+    }),
+    event(3, "parity-stop", "session.shutdown", { sessionId, timestamp: "2026-08-13T12:00:02.000Z" }),
+  ];
+  await writeFile(join(directory, "events.jsonl"), `${completedEvents.map((item) => JSON.stringify(item)).join("\n")}\n`);
+
+  const [normal, disabled] = await Promise.all([
+    runCompletedAttach(dataRoot, sessionId, false),
+    runCompletedAttach(dataRoot, sessionId, true),
+  ]);
+
+  assert.equal(normal.exitCode, 0, normal.stderr.toString());
+  assert.equal(disabled.exitCode, normal.exitCode);
+  assert.deepEqual(disabled.stderr, normal.stderr);
+  assert.deepEqual(disabled.stdout, normal.stdout);
+  assert.doesNotMatch(normal.stdout.toString(), /\u001b\[[0-?]*[ -/]*[@-~]/u);
 });

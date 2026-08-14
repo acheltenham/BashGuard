@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import stringWidth from "string-width";
 
 import { buildAttachStatus, type AttachStatus, type BashGuardEvent } from "./cli.ts";
 import { buildLiveFooterModel, formatLiveFooter, type LiveFooterModel } from "./live-footer.ts";
@@ -31,7 +32,9 @@ function event(sequence: number, type: string, overrides: Partial<BashGuardEvent
 }
 
 function assertBounded(lines: string[], columns: number): void {
-  for (const line of lines) assert.ok(line.length <= columns, `${JSON.stringify(line)} exceeds ${columns}`);
+  for (const line of lines) {
+    assert.ok(stringWidth(line) <= columns, `${JSON.stringify(line)} occupies ${stringWidth(line)} cells, exceeding ${columns}`);
+  }
 }
 
 test("buildLiveFooterModel maps current unmatched and completed recorded evidence", () => {
@@ -73,7 +76,7 @@ test("buildLiveFooterModel reports unknown and structured partial capture honest
     capture: "prose is not parsed",
     captureSummary: { state: "partial", gaps: 2, missing: 3, redacted: 1, truncated: 4 },
   }));
-  assert.deepEqual(structured.captureDetails, ["2 gap", "4 truncated", "3 missing", "1 redacted"]);
+  assert.deepEqual(structured.captureDetails, ["2 gaps", "4 truncated", "3 missing", "1 redacted"]);
 });
 
 test("wide footer has a separator and exactly three content lines", () => {
@@ -153,15 +156,52 @@ test("wide width pressure reserves freshness before optional capture details and
   assert.doesNotMatch(output, /42 ev/);
 });
 
-test("activity is control-free, single-line, Unicode-preserving, and ellipsized", () => {
-  const unicode = formatLiveFooter(buildLiveFooterModel(status({ activity: "Running · café 東京" })), 72).join("\n");
-  assert.match(unicode, /café 東京/);
+test("ordinary ASCII footer formatting is unchanged", () => {
+  assert.deepEqual(formatLiveFooter(buildLiveFooterModel(status()), 72), [
+    "─".repeat(72),
+    "ACTIVE · Running · npm test",
+    "awaiting completion evidence",
+    "capture ok · 2s ago · 42 ev",
+  ]);
+  assert.equal(formatLiveFooter(buildLiveFooterModel(status()), 39)[0], "ACTIVE · Running · npm test");
+});
 
+test("CJK, emoji, ZWJ emoji, and combining accents obey display-cell budgets", () => {
+  const samples = [
+    "編集中 東京東京東京東京東京東京東京東京東京東京",
+    "Running 😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+    `Family ${"👩‍👩‍👧‍👦".repeat(16)}`,
+    `Combining ${("e\u0301").repeat(40)}`,
+  ];
+
+  for (const activity of samples) {
+    const model = buildLiveFooterModel(status({ activity }));
+    for (const columns of [72, 50, 39, 18, 8, 3, 2, 1]) {
+      assertBounded(formatLiveFooter(model, columns), columns);
+    }
+  }
+});
+
+test("truncation preserves grapheme clusters and fits the ellipsis cell", () => {
+  const family = "👩‍👩‍👧‍👦";
+  const zwjLine = formatLiveFooter(buildLiveFooterModel(status({ activity: family.repeat(20) })), 40)[1];
+  assert.equal(zwjLine, `ACTIVE · ${family.repeat(15)}…`);
+  assert.doesNotMatch(zwjLine, /(?:\u200d|\p{M})…$/u);
+
+  const combiningLine = formatLiveFooter(buildLiveFooterModel(status({ activity: ("e\u0301").repeat(40) })), 41)[1];
+  assert.doesNotMatch(combiningLine, /(?<!\u0301)…$/u);
+  assert.match(combiningLine, /e\u0301…$/u);
+
+  assert.deepEqual(formatLiveFooter(buildLiveFooterModel(status()), 1), ["…"]);
+});
+
+test("activity controls are sanitized before display-width measurement", () => {
   const lines = formatLiveFooter(buildLiveFooterModel(status({
-    activity: `Running\n\u001b[31m dangerous\t${"x".repeat(100)}`,
+    activity: `東京\n\u001b[31m危険\t${"界".repeat(40)}`,
   })), 40);
   assertBounded(lines, 40);
   const output = lines.join("\n");
-  assert.doesNotMatch(output, /\u001b|\[31m/);
+  for (const line of lines) assert.doesNotMatch(line, /[\u0000-\u001f\u007f-\u009f]|\[31m/u);
+  assert.match(output, /東京 危険/);
   assert.match(output, /…/);
 });

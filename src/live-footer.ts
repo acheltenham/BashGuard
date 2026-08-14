@@ -1,5 +1,6 @@
+import stringWidth from "string-width";
+
 import type { AttachStatus } from "./cli.ts";
-import { singleLineDisplay } from "./session-format.ts";
 
 export type LiveFooterModel = {
   state: "ACTIVE" | "DONE";
@@ -12,18 +13,23 @@ export type LiveFooterModel = {
 };
 
 function display(value: string): string {
-  // Remove terminal escape sequences before singleLineDisplay removes remaining controls.
-  return singleLineDisplay(value.replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|[@-_])/gu, ""));
+  // Preserve emoji joiners while removing terminal escapes and unsafe controls.
+  return value
+    .replace(/\u001b(?:\[[0-?]*[ -/]*[@-~]|[@-_])/gu, "")
+    .replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ")
+    .replace(/\p{Cf}/gu, (character) => character === "\u200d" ? character : "")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
-function countLabel(count: number, label: string): string | undefined {
-  return count > 0 ? `${count} ${label}` : undefined;
+function countLabel(count: number, singular: string, plural = singular): string | undefined {
+  return count > 0 ? `${count} ${count === 1 ? singular : plural}` : undefined;
 }
 
 export function buildLiveFooterModel(status: AttachStatus): LiveFooterModel {
   const summary = status.captureSummary;
   const captureDetails = [
-    countLabel(summary.gaps, "gap"),
+    countLabel(summary.gaps, "gap", "gaps"),
     countLabel(summary.truncated, "truncated"),
     countLabel(summary.missing, "missing"),
     countLabel(summary.redacted, "redacted"),
@@ -44,19 +50,25 @@ export function buildLiveFooterModel(status: AttachStatus): LiveFooterModel {
   };
 }
 
-/**
- * Footer width is approximated with JavaScript string length. This intentionally
- * avoids a display-width dependency for now, so some wide/combining glyphs may
- * occupy a different number of terminal cells than their measured length.
- */
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 function bounded(value: string, columns: number): string {
-  if (value.length <= columns) return value;
+  if (stringWidth(value) <= columns) return value;
   if (columns <= 0) return "";
-  if (columns === 1) return "…";
-  let prefix = value.slice(0, columns - 1);
-  const finalCodeUnit = prefix.charCodeAt(prefix.length - 1);
-  if (finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff) prefix = prefix.slice(0, -1);
-  return `${prefix}…`;
+
+  const ellipsis = "…";
+  const ellipsisWidth = stringWidth(ellipsis);
+  if (ellipsisWidth > columns) return "";
+
+  let prefix = "";
+  let prefixWidth = 0;
+  for (const { segment } of graphemeSegmenter.segment(value)) {
+    const segmentWidth = stringWidth(segment);
+    if (prefixWidth + segmentWidth + ellipsisWidth > columns) break;
+    prefix += segment;
+    prefixWidth += segmentWidth;
+  }
+  return `${prefix}${ellipsis}`;
 }
 
 function addTokensWithin(tokens: string[], columns: number): { line: string; dropped: boolean } {
@@ -64,7 +76,7 @@ function addTokensWithin(tokens: string[], columns: number): { line: string; dro
   let dropped = false;
   for (const token of tokens) {
     const candidate = line ? `${line} · ${token}` : token;
-    if (candidate.length <= columns) line = candidate;
+    if (stringWidth(candidate) <= columns) line = candidate;
     else {
       dropped = true;
       break;
@@ -84,12 +96,12 @@ export function formatLiveFooter(model: LiveFooterModel, columns: number): strin
   const eventCount = `${Math.max(0, Math.trunc(model.eventCount) || 0)} ev`;
 
   if (width < 40) {
-    if (state.length > width) return [bounded(state, width)];
+    if (stringWidth(state) > width) return [bounded(state, width)];
 
     let line = state;
     for (const token of [activity, evidence, capture, freshness, eventCount]) {
       const candidate = `${line} · ${token}`;
-      if (candidate.length > width) break;
+      if (stringWidth(candidate) > width) break;
       line = candidate;
     }
     return [line];
@@ -101,19 +113,19 @@ export function formatLiveFooter(model: LiveFooterModel, columns: number): strin
 
   if (width >= 72) {
     const essentialSummary = `${capture} · ${freshness}`;
-    if (essentialSummary.length > width) {
+    if (stringWidth(essentialSummary) > width) {
       return [separator, activityLine, evidenceLine, bounded(essentialSummary, width)];
     }
 
     const includedDetails: string[] = [];
     for (const detail of details) {
       const candidate = [capture, ...includedDetails, detail, freshness].join(" · ");
-      if (candidate.length > width) break;
+      if (stringWidth(candidate) > width) break;
       includedDetails.push(detail);
     }
     const summary = [capture, ...includedDetails, freshness];
     const withEventCount = [...summary, eventCount].join(" · ");
-    return [separator, activityLine, evidenceLine, withEventCount.length <= width ? withEventCount : summary.join(" · ")];
+    return [separator, activityLine, evidenceLine, stringWidth(withEventCount) <= width ? withEventCount : summary.join(" · ")];
   }
 
   const captureLine = addTokensWithin([capture, ...details], width);

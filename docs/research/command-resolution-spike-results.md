@@ -11,7 +11,7 @@ Which command representation can BashGuard observe between a model's `bash` tool
 
 ## Test environment
 
-- BashGuard branch based on merge commit `08a7ab1`, with the spike harness through `f29013c`
+- BashGuard branch based on merge commit `08a7ab1`, with the final evidence rerun using harness commit `99f96ff`
 - `@earendil-works/pi-coding-agent` 0.84.0
 - macOS (`darwin`)
 - OpenAI Codex provider, `gpt-5.4-mini`, thinking off
@@ -136,6 +136,8 @@ Authorization can still evaluate the command visible at BashGuard's hook, but th
 ## Harness validation
 
 The first real smoke exposed one harness-only portability issue: macOS canonicalizes temporary paths (for example `/tmp` to `/private/tmp`). A failing regression test was added before canonicalizing confinement checks. The simple smoke and all eleven matrix scenarios then passed.
+
+The final full matrix was rerun after restricting spawned Pi processes to an allowlisted environment and requiring a fresh root beneath an operating-system temporary directory.
 
 The harness also verified:
 

@@ -13,6 +13,10 @@ Read these before changing behavior:
 - `docs/architecture/overview.md`
 - `docs/product/requirements.md`
 
+## Local agent learnings
+
+If `LEARNINGS.local.md` exists at the repository root, read it before planning or implementation. Keep that file local, concise, and evidence-based. Do not commit it or quote sensitive content. Promote generally useful, non-sensitive guidance into tracked project documentation.
+
 ## Local development
 
 Use npm from the repository root.

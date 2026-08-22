@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { buildPiInvocation, extensionOrderForScenario, parseRunnerArgs } from "./run.ts";
+import { buildPiInvocation, createFreshTemporaryRoot, extensionOrderForScenario, parseRunnerArgs } from "./run.ts";
 import { buildScenarioDefinitions } from "./model.ts";
 
 const repositoryRoot = resolve("/tmp/bashguard-repository");
@@ -22,6 +24,7 @@ test("extensionOrderForScenario places BashGuard around mutation and before repl
 
 test("buildPiInvocation isolates Pi and preserves extension order and exact command prompt", () => {
   const target = scenario("bashguard-before-mutator");
+  process.env.BASHGUARD_REVIEW_SECRET = "must-not-leak";
   const invocation = buildPiInvocation({
     scenario: target,
     repositoryRoot,
@@ -30,6 +33,7 @@ test("buildPiInvocation isolates Pi and preserves extension order and exact comm
     model: "gpt-5.4-mini",
     timeoutMs: 90_000,
   });
+  delete process.env.BASHGUARD_REVIEW_SECRET;
 
   assert.equal(invocation.command, "pi");
   assert.equal(invocation.cwd, fixtureRoot);
@@ -57,6 +61,18 @@ test("buildPiInvocation isolates Pi and preserves extension order and exact comm
   assert.match(invocation.prompt, new RegExp(target.command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(invocation.env.BASHGUARD_DATA_DIR, resolve(fixtureRoot, "artifacts/attempt-1/bashguard-data"));
   assert.equal(invocation.env.BASHGUARD_SPIKE_PROBE_FILE, resolve(fixtureRoot, "artifacts/attempt-1/probe.jsonl"));
+  assert.equal(invocation.env.BASHGUARD_REVIEW_SECRET, undefined);
+});
+
+test("createFreshTemporaryRoot refuses existing or non-temporary roots", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "bashguard-spike-parent-"));
+  const fresh = join(parent, "fresh-run");
+
+  await createFreshTemporaryRoot(fresh);
+  await assert.rejects(() => createFreshTemporaryRoot(fresh), /must not already exist/);
+  const commonTmpRoot = `/tmp/bashguard-spike-${process.pid}-${Date.now()}`;
+  await createFreshTemporaryRoot(commonTmpRoot);
+  await assert.rejects(() => createFreshTemporaryRoot(resolve("/Users/bashguard-not-temporary")), /outside temporary root/);
 });
 
 test("parseRunnerArgs applies safe defaults and validates bounded options", () => {

@@ -2,6 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { chmod, copyFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,6 +35,8 @@ export type BuildInvocationInput = {
   model: string;
   timeoutMs: number;
 };
+
+const SAFE_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "XDG_CONFIG_HOME", "PI_CODING_AGENT_DIR"] as const;
 
 const EXTENSION_FILES: Record<string, string> = {
   early: "early-observer.ts",
@@ -82,21 +85,25 @@ export function buildPiInvocation(input: BuildInvocationInput): PiInvocation {
     "-p",
     prompt,
   ];
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of SAFE_ENV_KEYS) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  Object.assign(env, {
+    BASHGUARD_DATA_DIR: dataDir,
+    BASHGUARD_SPIKE_ROOT: input.fixtureRoot,
+    BASHGUARD_SPIKE_PROBE_FILE: probeFile,
+    BASHGUARD_SPIKE_RUN_ID: basename(input.attemptRoot),
+    BASHGUARD_SPIKE_SCENARIO: input.scenario.name,
+    BASHGUARD_SPIKE_EXTENSION_ORDER: JSON.stringify(order),
+    PI_SKIP_VERSION_CHECK: "1",
+    PI_TELEMETRY: "0",
+  });
   return {
     command: "pi",
     args,
     cwd: input.scenario.cwd,
-    env: {
-      ...process.env,
-      BASHGUARD_DATA_DIR: dataDir,
-      BASHGUARD_SPIKE_ROOT: input.fixtureRoot,
-      BASHGUARD_SPIKE_PROBE_FILE: probeFile,
-      BASHGUARD_SPIKE_RUN_ID: basename(input.attemptRoot),
-      BASHGUARD_SPIKE_SCENARIO: input.scenario.name,
-      BASHGUARD_SPIKE_EXTENSION_ORDER: JSON.stringify(order),
-      PI_SKIP_VERSION_CHECK: "1",
-      PI_TELEMETRY: "0",
-    },
+    env,
     timeoutMs: input.timeoutMs,
     prompt,
   };
@@ -144,8 +151,26 @@ export function parseRunnerArgs(argv: string[]): RunnerOptions {
   return { root, scenario, model, maxAttempts, timeoutMs };
 }
 
+export async function createFreshTemporaryRoot(root: string): Promise<void> {
+  const temporaryParents = process.platform === "win32" ? [tmpdir()] : [tmpdir(), "/tmp"];
+  const allowed = temporaryParents.some((parent) => {
+    try {
+      assertPathWithinRoot(parent, root);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!allowed) throw new Error(`path is outside temporary root: ${root}`);
+  try {
+    await mkdir(root, { recursive: false, mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`command resolution root must not already exist: ${root}`);
+    throw error;
+  }
+}
+
 async function prepareFixtures(root: string, repositoryRoot: string): Promise<void> {
-  await mkdir(root, { recursive: true, mode: 0o700 });
   await mkdir(join(root, "nested"), { recursive: true });
   await mkdir(join(root, "delete-target"), { recursive: true });
   await writeFile(join(root, "delete-target", "sentinel.txt"), "safe disposable fixture\n", { mode: 0o600 });
@@ -231,6 +256,7 @@ export async function runSpike(options: RunnerOptions): Promise<ScenarioAnalysis
   const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
   const fixtureRoot = resolve(options.root);
   const artifactsRoot = join(fixtureRoot, "artifacts");
+  await createFreshTemporaryRoot(fixtureRoot);
   await prepareFixtures(fixtureRoot, repositoryRoot);
   const all = buildScenarioDefinitions(fixtureRoot);
   const selected = options.scenario === "all" ? all : all.filter((scenario) => scenario.name === options.scenario);

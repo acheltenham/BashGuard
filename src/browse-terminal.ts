@@ -211,12 +211,13 @@ export async function runBrowserTerminal(options: BrowserTerminalOptions): Promi
   signalSource.on("SIGTERM", onTerminate);
   signalSource.on("SIGHUP", onHangup);
   try {
-    await writeTerminal(output, BROWSER_ENTER_SEQUENCE);
+    const entered = writeTerminal(output, BROWSER_ENTER_SEQUENCE);
     input.setRawMode?.(true);
     rawEnabled = true;
     input.resume();
     input.on("data", onData);
     output.on("resize", onResize);
+    await entered;
     await redraw();
     return await exit;
   } catch (error) {

@@ -79,6 +79,31 @@ test("terminal enters alternate screen, redraws whole frames, and restores on qu
   assert.ok(transcript.indexOf("\u001b[?25h") < transcript.indexOf("\u001b[?1049l"));
 });
 
+test("terminal owns input immediately after queuing the enter-screen write", async () => {
+  const input = new FakeInput();
+  const output = new FakeOutput();
+  let releaseEnter: (() => void) | undefined;
+  output.write = (chunk: string, callback?: (error?: Error | null) => void): boolean => {
+    output.writes.push(chunk);
+    if (!releaseEnter) releaseEnter = () => callback?.();
+    else queueMicrotask(() => callback?.());
+    return true;
+  };
+  const running = runBrowserTerminal({
+    input,
+    output,
+    frame: () => ["frame"],
+    onKey: async (key) => key.name === "character" && key.value === "q" ? "quit" : undefined,
+  });
+  await tick();
+  assert.deepEqual(input.raw, [true]);
+  assert.equal(input.listenerCount("data"), 1);
+  releaseEnter?.();
+  await tick();
+  input.emit("data", Buffer.from("q"));
+  assert.equal(await running, "quit");
+});
+
 test("resize redraws are coalesced and use the latest dimensions", async () => {
   const input = new FakeInput();
   const output = new FakeOutput();

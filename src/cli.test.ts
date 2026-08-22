@@ -642,6 +642,13 @@ test("parseCommandArgs accepts positional, snapshot, and exact session selectors
   assert.deepEqual(parseCommandArgs(["setup", "cli", "--global"]), { command: "setup", setupSubject: "cli", setupScope: "global" });
   assert.deepEqual(parseCommandArgs(["setup", "cli", "--local"]), { command: "setup", setupSubject: "cli", setupScope: "local" });
   assert.deepEqual(parseCommandArgs(["doctor"]), { command: "doctor" });
+  assert.deepEqual(parseCommandArgs(["boundary"]), { command: "boundary" });
+});
+
+test("parseCommandArgs rejects arguments to the session-independent boundary command", () => {
+  for (const argv of [["boundary", "session-a"], ["boundary", "--session=1"], ["boundary", "--unknown"]]) {
+    assert.throws(() => parseCommandArgs(argv), new Error("`bashguard boundary` does not accept arguments"));
+  }
 });
 
 test("parseCommandArgs accepts --no-live-footer for attach positional and selector forms", () => {
@@ -695,14 +702,28 @@ test("terminal columns preserve positive widths and default unknown widths", () 
   assert.equal(terminalColumns({}, 100), 100);
 });
 
-test("CLI usage advertises --no-live-footer on every attach selector form", () => {
+test("CLI usage advertises boundary and --no-live-footer on every attach selector form", () => {
   const result = spawnSync(process.execPath, ["--experimental-strip-types", join(import.meta.dirname, "cli.ts"), "unknown"], { encoding: "utf8" });
 
   assert.equal(result.status, 1);
+  assert.match(result.stderr, /bashguard boundary/);
   assert.equal(result.stderr.match(/--no-live-footer/g)?.length, 3);
   assert.match(result.stderr, /bashguard attach \[session-id\].*\[--no-live-footer\]/);
   assert.match(result.stderr, /bashguard attach --session=<session-selector>.*\[--no-live-footer\]/);
   assert.match(result.stderr, /bashguard attach --session-id=<exact-session-id>.*\[--no-live-footer\]/);
+});
+
+test("boundary command reports current no-detection evidence without session output or ANSI", () => {
+  const result = spawnSync(process.execPath, ["--experimental-strip-types", join(import.meta.dirname, "cli.ts"), "boundary"], { encoding: "utf8" });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr, "");
+  assert.match(result.stdout, /^Boundary$/m);
+  assert.match(result.stdout, /none detected · unknown/);
+  assert.match(result.stdout, /Without an outer boundary, Pi tools run with the permissions of your user account\./);
+  assert.match(result.stdout, /any outer container or VM, which BashGuard cannot characterize from inside/);
+  assert.doesNotMatch(result.stdout, /\u001b/);
+  assert.doesNotMatch(result.stdout, /Session/);
 });
 
 test("parseCommandArgs rejects missing filter values and unknown options", () => {

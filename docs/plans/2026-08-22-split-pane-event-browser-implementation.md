@@ -1,5 +1,7 @@
 # Split-Pane Event Browser Implementation Plan
 
+**Status:** Complete — implementation, real-PTY validation, and isolated real-Pi dogfood finished August 22, 2026
+
 > **REQUIRED SUB-SKILL:** Use the executing-plans skill to implement this plan task-by-task.
 
 **Goal:** Add an opt-in, keyboard-driven `bashguard inspect [session] --browse` snapshot browser while preserving every existing plain-text and JSONL workflow.

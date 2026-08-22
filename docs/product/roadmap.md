@@ -1,6 +1,6 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.5; Command Resolution Spike 2 complete; split-pane event browser in progress
+**Status:** Draft v0.5; split-pane event browser complete; Phase 3 authorization next
 **Last updated:** August 22, 2026
 
 ## Current execution sequence
@@ -9,15 +9,15 @@ This section is the source of truth for near-term sequencing. The numbered produ
 
 1. **Complete — Boundary Reporting Slice 1:** `SandboxAdapter`, `NoSandboxAdapter`, and the current-environment `bashguard boundary` command shipped together.
 2. **Complete — Command Resolution Spike 2:** BashGuard observes the mutable command present when its handler runs; extension order, replacement-tool internals, and shell runtime can still change execution. See the [results](../research/command-resolution-spike-results.md).
-3. **In progress — Resume Phase 1 with the split-pane event browser:** implement the approved `bashguard inspect --browse` design under [issue #85](https://github.com/acheltenham/BashGuard/issues/85).
-4. **Then — Phase 3 authorization:** begin narrow allow, notice, approve, and block behavior only after the spike and resumed Phase 1 slice.
+3. **Complete — Resume Phase 1 with the split-pane event browser:** the approved opt-in snapshot `bashguard inspect --browse` design shipped under [issue #85](https://github.com/acheltenham/BashGuard/issues/85).
+4. **Next — Phase 3 authorization:** begin narrow allow, notice, approve, and block behavior now that the spike and resumed Phase 1 slice are complete.
 5. **Later — Backend integration:** implement the Anthropic sandbox runtime adapter and grounded session/debrief boundary evidence after the first authorization slice.
 
 When work pauses mid-slice, update the status here and the corresponding plan before starting a different slice. Completed items should remain visible until the next item has started, so the restart point is unambiguous.
 
 ## Milestone 0: Observe a Real Pi Session
 
-The recording, attach, inspect, debrief, capture-completeness, risk-notice, file-activity, Git-snapshot, provider-neutral shell-activity, filtering, JSONL export, duplicate-recorder protection, and measurable validation foundation is implemented. Latency, storage, failure behavior, active attach, and inside-Pi workflows are documented in [`docs/testing/milestone-0-validation-baseline.md`](../testing/milestone-0-validation-baseline.md). The split-pane TUI is explicitly deferred to Phase 1. See [`docs/current-state.md`](../current-state.md) for public capability and limitation wording.
+The recording, attach, inspect, debrief, capture-completeness, risk-notice, file-activity, Git-snapshot, provider-neutral shell-activity, filtering, JSONL export, duplicate-recorder protection, and measurable validation foundation is implemented. Latency, storage, failure behavior, active attach, and inside-Pi workflows are documented in [`docs/testing/milestone-0-validation-baseline.md`](../testing/milestone-0-validation-baseline.md). The opt-in split-pane snapshot browser is implemented in Phase 1. See [`docs/current-state.md`](../current-state.md) for public capability and limitation wording.
 
 Goal: build the smallest end-to-end BashGuard experience that can observe a real Pi session from a second terminal.
 
@@ -50,7 +50,7 @@ Implementation reference: [`Milestone 0 plan`](../plans/milestone-0-observe-a-re
 
 ## Phase 1: Live Terminal Companion
 
-**Status:** Resumption point reached. The split-pane event browser is the next implementation slice, as recorded in the current execution sequence above.
+**Status:** Split-pane event browser implemented; further live-companion refinements remain iterative.
 
 Deterministic evidence filtering and JSONL export shipped during Milestone 0. Bounded startup history, a grounded attach status snapshot, interactive selection for ambiguous selector-less session commands, and the active-TTY adaptive sticky footer are implemented Phase 1 slices.
 
@@ -60,12 +60,12 @@ Goal: make a running Pi session understandable at a glance.
 - show an evidence-grounded startup snapshot in plain mode and an adaptive sticky status footer for supported active TTY attach, with immediate event changes, approximately one-second freshness, resize handling, and clean shutdown/opt-out behavior; **implemented**
 - refine the CLI and TUI architecture from Milestone 0 usage;
 - continue refining active-session selection after shipping the structured-text TTY picker with snapshot-local numbers and durable unique-prefix selectors;
-- add split-pane timeline and event detail views (the picker is not this full-screen TUI);
+- add opt-in snapshot split-pane timeline and event detail views with narrow replacement layout; **implemented**
 - add grounded narrative projection;
 - add current activity and session status footer; **implemented for active supported TTY attach**
 - improve capture-completeness indicators;
-- support graceful narrow-terminal layouts; **implemented for the attach footer; broader TUI remains planned**
-- retain plain-text output mode; **implemented for completed/non-TTY/missing-or-dumb-TERM/opt-out attach**
+- support graceful narrow-terminal layouts; **implemented for the attach footer and inspect browser**
+- retain plain-text output mode; **implemented for attach and unchanged inspect/JSONL paths**
 - retain regression and real-TTY smoke coverage for simultaneous active sessions;
 - make installation and local development straightforward.
 
@@ -78,7 +78,7 @@ Exit criteria:
 
 ## Phase 2: Investigation and Debrief
 
-**Implemented foundation:** individual event inspection, evidence completeness, debrief review sections, activity/type filters, case-insensitive recorded-evidence search, latest-N/all controls, and JSONL export. Interactive timeline browsing and expandable details remain planned.
+**Implemented foundation:** individual event inspection, evidence completeness, debrief review sections, activity/type filters, case-insensitive recorded-evidence search, latest-N/all controls, JSONL export, and opt-in snapshot timeline/detail browsing.
 
 Goal: make a Pi session understandable after it happens.
 

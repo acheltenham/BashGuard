@@ -1,12 +1,12 @@
 # Split-Pane Event Browser Design
 
-**Status:** Approved — implementation in progress
+**Status:** Implemented and validated
 **Date:** August 17, 2026  
 **Phase:** Phase 1 — Live Terminal Companion
 
 ## Sequencing note
 
-This is the active Phase 1 resumption slice. Boundary Reporting Slice 1 and Command Resolution Spike 2 are complete. Implementation is tracked in [issue #85](https://github.com/acheltenham/BashGuard/issues/85).
+This Phase 1 resumption slice is implemented under [issue #85](https://github.com/acheltenham/BashGuard/issues/85). Unit, integration, repeated real-PTY, and isolated real-Pi dogfood validation cover the snapshot browser and terminal restoration contract.
 
 ## Goal
 

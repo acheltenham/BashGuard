@@ -73,6 +73,7 @@ Command:
 
 ```bash
 bashguard inspect [session-id]
+bashguard inspect [session-id] --browse
 ```
 
 Purpose:
@@ -96,7 +97,7 @@ Suggested layout:
 Status / key help / active filters
 ```
 
-The layout must collapse cleanly in narrow terminals. A single-pane mode should show the event list first and open details as a replacement view.
+The opt-in `--browse` implementation uses this layout at 80+ columns. Below 80 columns it shows the event list first and Enter opens detail as a replacement view; Escape returns. It is a recorded-event snapshot, not a live tail: `r` explicitly reloads while `attach` remains the live surface. Arrow keys or `j`/`k` navigate, PgUp/PgDn page, `g`/`G` jump, `/` searches recorded evidence, `n`/`N` move among matches, `a` cycles activity views, `c` clears, `?` toggles help, and `q` or `Ctrl+C` exits. On exit BashGuard restores raw mode, cursor visibility, and the normal screen before printing the exact selected-event inspect command. Plain inspect and JSONL behavior are unchanged.
 
 ### Replay Mode
 
@@ -118,7 +119,7 @@ Replay is event replay, not hidden-reasoning capture, shell re-execution, or vid
 
 `bashguard attach`, `bashguard inspect`, and `bashguard debrief` may omit the session selector. A sole eligible session is selected automatically. For attach, active sessions are eligible when any exist; if none are active, all discovered completed sessions are eligible. Inspect and debrief consider all discovered recorded sessions, active and completed.
 
-When multiple sessions are eligible, BashGuard opens a numbered picker only if both stdin and stdout are TTYs. It is structured text, not the planned full-screen split-pane TUI. Enter does not choose a default: the user must type an exact displayed number. Blank, nonnumeric, whitespace-padded, or unavailable numbers receive concise guidance and retry; EOF and `Ctrl+C` cancel concisely.
+When multiple sessions are eligible, BashGuard opens a numbered picker only if both stdin and stdout are TTYs. It is structured text, not the separate opt-in `inspect --browse` full-screen view. Enter does not choose a default: the user must type an exact displayed number. Blank, nonnumeric, whitespace-padded, or unavailable numbers receive concise guidance and retry; EOF and `Ctrl+C` cancel concisely.
 
 Pipes, redirected streams, scripts, and other non-TTY use never prompt or silently choose the newest session. When multiple sessions are eligible, they exit nonzero with eligible rows and shell-quoted commands using `--session-id=<full-session-id>`. This exact-only selector never falls back to a row or prefix, so a copied command either selects the same metadata identity in a future snapshot or fails not-found. Automation that allocates a PTY is interactive by contract and must pass an explicit selector to avoid prompting; explicit selectors are recommended for all automation. With no recorded sessions, BashGuard reports the existing no-sessions error without candidate rows or commands.
 

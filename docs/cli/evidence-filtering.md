@@ -118,6 +118,18 @@ bashguard inspect 1 --all --format jsonl |
 
 JSONL preserves evidence and capture metadata but does not restore values that were never captured, redacted, or truncated.
 
+## Interactive snapshot browser
+
+In a capable interactive terminal, opt into a keyboard-driven view of the same recorded evidence:
+
+```bash
+bashguard inspect 1 --browse
+```
+
+The browser is a snapshot. Use `r` to re-read the JSONL stream; use `bashguard attach` for live following. At 80+ columns it shows timeline and selected-event detail side by side; below 80 columns Enter replaces the list with detail and Escape returns. `/` searches recorded event envelopes, `n`/`N` navigate matches, `a` cycles activity categories and all-recorded evidence, `?` shows help, and `q` exits. After restoring the terminal it prints an exact `--session-id` command for the selected event.
+
+`--browse` cannot be combined with `--event`, filtering, limits, or formatting. It requires TTY input/output, a capable non-dumb `TERM`, and at least eight rows. Unsupported explicit use exits nonzero with plain alternatives and emits no browser ANSI. Existing text and JSONL commands are unchanged.
+
 ## Text output and event inspection
 
 Human-readable filtered output shows sequence numbers and event ID prefixes. Inspect one result for full recorded details:

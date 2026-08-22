@@ -1,3 +1,5 @@
+import { StringDecoder } from "node:string_decoder";
+
 export const BROWSER_ENTER_SEQUENCE = "\u001b[?1049h\u001b[?25l";
 export const BROWSER_RESTORE_SEQUENCE = "\u001b[?25h\u001b[?1049l";
 const FRAME_PREFIX = "\u001b[H\u001b[2J";
@@ -51,25 +53,63 @@ const escapeKeys = new Map<string, BrowserTerminalKey>([
   ["\u001bOF", { name: "end" }],
 ]);
 
-export function decodeBrowserKeys(value: string): BrowserTerminalKey[] {
-  const keys: BrowserTerminalKey[] = [];
-  for (let index = 0; index < value.length;) {
-    const escape = [...escapeKeys.entries()].find(([sequence]) => value.startsWith(sequence, index));
-    if (escape) {
-      keys.push(escape[1]);
-      index += escape[0].length;
-      continue;
+function characterKey(character: string): BrowserTerminalKey | undefined {
+  if (character === "\u001b") return { name: "escape" };
+  if (character === "\u0003") return { name: "interrupt" };
+  if (character === "\r" || character === "\n") return { name: "enter" };
+  if (character === "\t") return { name: "tab" };
+  if (character === "\u007f" || character === "\b") return { name: "backspace" };
+  if (character >= " ") return { name: "character", value: character };
+  return undefined;
+}
+
+export type BrowserKeyDecoder = {
+  push(chunk: Buffer | string): BrowserTerminalKey[];
+  flush(): BrowserTerminalKey[];
+  readonly hasPending: boolean;
+};
+
+export function createBrowserKeyDecoder(): BrowserKeyDecoder {
+  const utf8 = new StringDecoder("utf8");
+  let pending = "";
+
+  const parse = (flush: boolean): BrowserTerminalKey[] => {
+    const keys: BrowserTerminalKey[] = [];
+    while (pending.length > 0) {
+      const escape = [...escapeKeys.entries()].find(([sequence]) => pending.startsWith(sequence));
+      if (escape) {
+        keys.push(escape[1]);
+        pending = pending.slice(escape[0].length);
+        continue;
+      }
+      if (!flush && pending.startsWith("\u001b") && [...escapeKeys.keys()].some((sequence) => sequence.startsWith(pending))) break;
+      const [character] = [...pending];
+      if (!character) break;
+      const key = characterKey(character);
+      if (key) keys.push(key);
+      pending = pending.slice(character.length);
     }
-    const character = value[index]!;
-    if (character === "\u001b") keys.push({ name: "escape" });
-    else if (character === "\u0003") keys.push({ name: "interrupt" });
-    else if (character === "\r" || character === "\n") keys.push({ name: "enter" });
-    else if (character === "\t") keys.push({ name: "tab" });
-    else if (character === "\u007f" || character === "\b") keys.push({ name: "backspace" });
-    else if (character >= " ") keys.push({ name: "character", value: character });
-    index += 1;
-  }
-  return keys;
+    return keys;
+  };
+
+  return {
+    push(chunk) {
+      pending += typeof chunk === "string" ? chunk : utf8.write(chunk);
+      return parse(false);
+    },
+    flush() {
+      pending += utf8.end();
+      return parse(true);
+    },
+    get hasPending() {
+      return pending.length > 0;
+    },
+  };
+}
+
+export function decodeBrowserKeys(value: string): BrowserTerminalKey[] {
+  const decoder = createBrowserKeyDecoder();
+  return [...decoder.push(value), ...decoder.flush()];
 }
 
 function writeTerminal(output: BrowserTerminalOutput, text: string): Promise<void> {
@@ -105,6 +145,8 @@ export async function runBrowserTerminal(options: BrowserTerminalOptions): Promi
   });
   let work = Promise.resolve();
   let resizeQueued = false;
+  const keyDecoder = createBrowserKeyDecoder();
+  let keyFlushTimer: NodeJS.Timeout | undefined;
 
   const dimensions = () => ({
     columns: Number.isFinite(output.columns) && (output.columns ?? 0) > 0 ? Math.floor(output.columns!) : 80,
@@ -122,8 +164,7 @@ export async function runBrowserTerminal(options: BrowserTerminalOptions): Promi
   const enqueue = (operation: () => Promise<void>) => {
     work = work.then(operation).catch(fail);
   };
-  const onData = (chunk: Buffer | string) => {
-    const keys = decodeBrowserKeys(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+  const enqueueKeys = (keys: BrowserTerminalKey[]) => {
     for (const key of keys) {
       enqueue(async () => {
         if (stopped) return;
@@ -135,6 +176,17 @@ export async function runBrowserTerminal(options: BrowserTerminalOptions): Promi
         }
         await redraw();
       });
+    }
+  };
+  const onData = (chunk: Buffer | string) => {
+    if (keyFlushTimer) clearTimeout(keyFlushTimer);
+    keyFlushTimer = undefined;
+    enqueueKeys(keyDecoder.push(chunk));
+    if (keyDecoder.hasPending) {
+      keyFlushTimer = setTimeout(() => {
+        keyFlushTimer = undefined;
+        enqueueKeys(keyDecoder.flush());
+      }, 25);
     }
   };
   const onResize = () => {
@@ -176,6 +228,7 @@ export async function runBrowserTerminal(options: BrowserTerminalOptions): Promi
     output.off("resize", onResize);
     signalSource.off("SIGTERM", onTerminate);
     signalSource.off("SIGHUP", onHangup);
+    if (keyFlushTimer) clearTimeout(keyFlushTimer);
     await work.catch(() => undefined);
     if (rawEnabled) input.setRawMode?.(false);
     input.pause();

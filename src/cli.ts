@@ -1880,6 +1880,7 @@ async function runEventBrowser(session: SessionSummary): Promise<void> {
       dependencies,
       {
         timeline: (event) => formatTimelineEvent(event as BashGuardEvent) ?? `${event.sequence} ${event.id} ${event.type}`,
+        narrative: (event) => renderEvent(event as BashGuardEvent) ?? event.type,
         detail: (event) => formatEventInspection(event as BashGuardEvent).trimEnd(),
       },
       { sessionId: session.metadata.sessionId, repository: session.metadata.repository, snapshotTime },

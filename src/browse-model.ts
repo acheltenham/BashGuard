@@ -2,6 +2,7 @@ export type BrowserEvent = {
   id: string;
   sequence: number;
   type: string;
+  timestamp?: string;
   toolName?: string;
   payload?: Record<string, unknown>;
 };
@@ -42,9 +43,11 @@ export function visibleBrowserEvents(model: BrowserModel, dependencies: BrowserD
   return model.events.filter((event) => dependencies.matchesActivity(event, model.filter));
 }
 
-function matchIds(events: BrowserEvent[], query: string, dependencies: BrowserDependencies): string[] {
+function matchIds(model: BrowserModel, query: string, dependencies: BrowserDependencies): string[] {
   if (!query) return [];
-  return events.filter((event) => dependencies.matchesSearch(event, query)).map((event) => event.id);
+  return visibleBrowserEvents(model, dependencies)
+    .filter((event) => dependencies.matchesSearch(event, query))
+    .map((event) => event.id);
 }
 
 function validSelection(model: BrowserModel, dependencies: BrowserDependencies, preferred = model.selectedId): string | undefined {
@@ -102,7 +105,7 @@ export function transitionBrowser(
     return { model: { ...cleared, selectedId: validSelection(cleared, dependencies) } };
   }
   if (input.type === "set-search") {
-    const ids = matchIds(model.events, input.query, dependencies);
+    const ids = matchIds(model, input.query, dependencies);
     const selectedId = model.selectedId && ids.includes(model.selectedId) ? model.selectedId : ids[0] ?? model.selectedId;
     return { model: { ...model, search: input.query, searchMatchIds: ids, selectedId, detailScroll: 0 } };
   }
@@ -112,7 +115,12 @@ export function transitionBrowser(
     const filters = ["narrated", ...dependencies.activities, "all-recorded"];
     const index = Math.max(0, filters.indexOf(model.filter));
     const cycled = { ...model, filter: filters[(index + 1) % filters.length]!, detailScroll: 0 };
-    return { model: { ...cycled, selectedId: validSelection(cycled, dependencies) } };
+    const selectedId = validSelection(cycled, dependencies);
+    return { model: {
+      ...cycled,
+      selectedId,
+      searchMatchIds: matchIds(cycled, cycled.search, dependencies),
+    } };
   }
   if (input.type === "enter") {
     return options.split
@@ -140,8 +148,12 @@ export function replaceBrowserEvents(model: BrowserModel, events: BrowserEvent[]
   const replaced = {
     ...model,
     events: [...events],
-    searchMatchIds: matchIds(events, model.search, dependencies),
+    searchMatchIds: [] as string[],
     detailScroll: 0,
   };
-  return { ...replaced, selectedId: validSelection(replaced, dependencies, model.selectedId) };
+  return {
+    ...replaced,
+    selectedId: validSelection(replaced, dependencies, model.selectedId),
+    searchMatchIds: matchIds(replaced, model.search, dependencies),
+  };
 }

@@ -20,6 +20,7 @@ const deps = {
 };
 const projectors = {
   timeline: (event: BrowserEvent) => `${event.sequence} ${event.id} ${String(event.payload?.text ?? event.type)}`,
+  narrative: (event: BrowserEvent) => String(event.payload?.text ?? event.type),
   detail: (event: BrowserEvent) => `Sequence ${event.sequence}\nEvent ID ${event.id}\nType ${event.type}\nPayload\n${JSON.stringify(event.payload, null, 2)}`,
 };
 
@@ -59,6 +60,17 @@ test("rows follow selection and retain grapheme-safe bounds under pressure", () 
   assertBounded(frame, 39, 8);
   assert.ok(frame.some((line) => line.startsWith("▸") && line.includes("event-10")));
   assert.doesNotMatch(frame.join("\n"), /\uFFFD/);
+});
+
+test("single-pane rows drop event ID and timestamp before truncating narration", () => {
+  const compressedProjectors = {
+    ...projectors,
+    timeline: () => `1 ${"long-event-id".repeat(8)} 12:00:00 essential narration`,
+    narrative: () => "essential narration",
+  };
+  const frame = renderBrowserFrame(createBrowserModel(events, deps), { width: 79, height: 8 }, deps, compressedProjectors, { sessionId: "session-1", snapshotTime: "19:45:03" });
+  assert.ok(frame.some((line) => line.includes("essential narration")));
+  assert.ok(frame.every((line) => !line.includes("long-event-id")));
 });
 
 test("help replaces the body without changing frame dimensions", () => {

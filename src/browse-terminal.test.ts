@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { decodeBrowserKeys, runBrowserTerminal, type BrowserTerminalKey } from "./browse-terminal.ts";
+import { createBrowserKeyDecoder, decodeBrowserKeys, runBrowserTerminal, type BrowserTerminalKey } from "./browse-terminal.ts";
 
 class FakeInput extends EventEmitter {
   isTTY = true;
@@ -35,6 +35,17 @@ test("key decoder recognizes navigation, control, and printable input", () => {
     { name: "character", value: "?" }, { name: "character", value: "q" },
     { name: "character", value: "/" }, { name: "character", value: "x" },
   ]);
+});
+
+test("key decoder preserves split escape sequences and UTF-8 code points across chunks", () => {
+  const decoder = createBrowserKeyDecoder();
+  assert.deepEqual(decoder.push(Buffer.from("\u001b[")), []);
+  assert.deepEqual(decoder.push(Buffer.from("A")), [{ name: "up" }]);
+  const emoji = Buffer.from("👩🏽‍💻");
+  assert.deepEqual(decoder.push(emoji.subarray(0, 2)), []);
+  assert.deepEqual(decoder.push(emoji.subarray(2)), [..."👩🏽‍💻"].map((value) => ({ name: "character", value })));
+  assert.deepEqual(decoder.push(Buffer.from("\u001b")), []);
+  assert.deepEqual(decoder.flush(), [{ name: "escape" }]);
 });
 
 test("terminal enters alternate screen, redraws whole frames, and restores on quit", async () => {

@@ -5,6 +5,7 @@ import { visibleBrowserEvents, type BrowserDependencies, type BrowserEvent, type
 export type BrowserDimensions = { width: number; height: number };
 export type BrowserProjectors = {
   timeline(event: BrowserEvent): string;
+  narrative(event: BrowserEvent): string;
   detail(event: BrowserEvent): string;
 };
 export type BrowserFrameContext = {
@@ -37,15 +38,31 @@ function selectedEvent(model: BrowserModel): BrowserEvent | undefined {
   return model.events.find((event) => event.id === model.selectedId);
 }
 
-function projectedListRows(model: BrowserModel, dependencies: BrowserDependencies, projectors: BrowserProjectors, height: number, width: number): string[] {
+function eventTime(timestamp: string | undefined): string | undefined {
+  if (!timestamp) return undefined;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function projectedListRows(model: BrowserModel, dependencies: BrowserDependencies, projectors: BrowserProjectors, height: number, width: number, compact = false): string[] {
   const visible = visibleBrowserEvents(model, dependencies);
   const selected = Math.max(0, visible.findIndex((event) => event.id === model.selectedId));
   const start = Math.max(0, Math.min(Math.max(0, visible.length - height), selected - Math.floor(height / 2)));
   return Array.from({ length: height }, (_, offset) => {
     const event = visible[start + offset];
     if (!event) return " ".repeat(width);
+    const marker = event.id === model.selectedId ? "▸" : " ";
     const projected = projectors.timeline(event) || `${event.sequence} ${event.id} ${event.type}`;
-    return fit(`${event.id === model.selectedId ? "▸" : " "} ${projected}`, width);
+    if (!compact) return fit(`${marker} ${projected}`, width);
+    const narrative = projectors.narrative(event) || event.type;
+    const timestamp = eventTime(event.timestamp);
+    const candidates = [
+      `${marker} ${projected}`,
+      timestamp ? `${marker} ${event.sequence} ${timestamp} ${narrative}` : undefined,
+      `${marker} ${event.sequence} ${narrative}`,
+    ].filter((candidate): candidate is string => candidate !== undefined);
+    return fit(candidates.find((candidate) => stringWidth(candidate) <= width) ?? candidates.at(-1)!, width);
   });
 }
 
@@ -101,6 +118,6 @@ export function renderBrowserFrame(
   const divider = "─".repeat(width);
   const body = model.narrowView === "detail"
     ? detailRows(model, projectors, bodyHeight, width)
-    : projectedListRows(model, dependencies, projectors, bodyHeight, width);
+    : projectedListRows(model, dependencies, projectors, bodyHeight, width, true);
   return [header, divider, ...body, status];
 }

@@ -61,6 +61,21 @@ test("search navigates matches with wraparound and clear resets projection", () 
   assert.equal(model.filter, "narrated");
 });
 
+test("search matches stay within the active activity view", () => {
+  let model = createBrowserModel(events, deps);
+  model = transitionBrowser(model, { type: "cycle-activity" }, deps).model;
+  assert.equal(model.filter, "shell");
+  model = transitionBrowser(model, { type: "set-search", query: "README" }, deps).model;
+  assert.deepEqual(model.searchMatchIds, []);
+  assert.ok(visibleBrowserEvents(model, deps).some((event) => event.id === model.selectedId));
+  model = transitionBrowser(model, { type: "set-search", query: "tool" }, deps).model;
+  assert.deepEqual(model.searchMatchIds, ["shell-a", "shell-b"]);
+  model = transitionBrowser(model, { type: "cycle-activity" }, deps).model;
+  assert.equal(model.filter, "file");
+  assert.deepEqual(model.searchMatchIds, ["file-a"]);
+  assert.equal(model.selectedId, "file-a");
+});
+
 test("detail focus, narrow detail, help, scrolling, reload, and quit are explicit", () => {
   let model = createBrowserModel(events, deps);
   model = transitionBrowser(model, { type: "enter" }, deps, { split: true }).model;

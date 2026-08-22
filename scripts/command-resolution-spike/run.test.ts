@@ -25,6 +25,7 @@ test("extensionOrderForScenario places BashGuard around mutation and before repl
 test("buildPiInvocation isolates Pi and preserves extension order and exact command prompt", () => {
   const target = scenario("bashguard-before-mutator");
   process.env.BASHGUARD_REVIEW_SECRET = "must-not-leak";
+  process.env.PI_CODING_AGENT_DIR = "/tmp/ambient-pi-config";
   const invocation = buildPiInvocation({
     scenario: target,
     repositoryRoot,
@@ -34,6 +35,7 @@ test("buildPiInvocation isolates Pi and preserves extension order and exact comm
     timeoutMs: 90_000,
   });
   delete process.env.BASHGUARD_REVIEW_SECRET;
+  delete process.env.PI_CODING_AGENT_DIR;
 
   assert.equal(invocation.command, "pi");
   assert.equal(invocation.cwd, fixtureRoot);
@@ -62,6 +64,7 @@ test("buildPiInvocation isolates Pi and preserves extension order and exact comm
   assert.equal(invocation.env.BASHGUARD_DATA_DIR, resolve(fixtureRoot, "artifacts/attempt-1/bashguard-data"));
   assert.equal(invocation.env.BASHGUARD_SPIKE_PROBE_FILE, resolve(fixtureRoot, "artifacts/attempt-1/probe.jsonl"));
   assert.equal(invocation.env.BASHGUARD_REVIEW_SECRET, undefined);
+  assert.equal(invocation.env.PI_CODING_AGENT_DIR, undefined);
 });
 
 test("createFreshTemporaryRoot refuses existing or non-temporary roots", async () => {

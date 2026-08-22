@@ -36,7 +36,7 @@ export type BuildInvocationInput = {
   timeoutMs: number;
 };
 
-const SAFE_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "XDG_CONFIG_HOME", "PI_CODING_AGENT_DIR"] as const;
+const SAFE_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "XDG_CONFIG_HOME"] as const;
 
 const EXTENSION_FILES: Record<string, string> = {
   early: "early-observer.ts",

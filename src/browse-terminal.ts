@@ -23,9 +23,17 @@ export type BrowserTerminalOutput = NodeJS.WritableStream & {
   off(event: "resize", listener: () => void): this;
 };
 
+export type BrowserTerminalSignalSource = {
+  on(event: "SIGTERM" | "SIGHUP", listener: () => void): unknown;
+  off(event: "SIGTERM" | "SIGHUP", listener: () => void): unknown;
+};
+
+export type BrowserTerminalResult = "quit" | "interrupt" | "terminate" | "hangup" | "epipe";
+
 export type BrowserTerminalOptions = {
   input: BrowserTerminalInput;
   output: BrowserTerminalOutput;
+  signalSource?: BrowserTerminalSignalSource;
   frame(dimensions: { columns: number; rows: number }): string[];
   onKey(key: BrowserTerminalKey): Promise<"quit" | "interrupt" | void> | "quit" | "interrupt" | void;
 };
@@ -84,13 +92,14 @@ function errorCode(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && "code" in error ? String(error.code) : undefined;
 }
 
-export async function runBrowserTerminal(options: BrowserTerminalOptions): Promise<"quit" | "interrupt" | "epipe"> {
+export async function runBrowserTerminal(options: BrowserTerminalOptions): Promise<BrowserTerminalResult> {
   const { input, output } = options;
+  const signalSource = options.signalSource ?? process;
   let rawEnabled = false;
   let stopped = false;
-  let resolveExit!: (result: "quit" | "interrupt") => void;
+  let resolveExit!: (result: Exclude<BrowserTerminalResult, "epipe">) => void;
   let rejectExit!: (error: unknown) => void;
-  const exit = new Promise<"quit" | "interrupt">((resolve, reject) => {
+  const exit = new Promise<Exclude<BrowserTerminalResult, "epipe">>((resolve, reject) => {
     resolveExit = resolve;
     rejectExit = reject;
   });
@@ -136,7 +145,19 @@ export async function runBrowserTerminal(options: BrowserTerminalOptions): Promi
       if (!stopped) await redraw();
     });
   };
+  const onTerminate = () => {
+    if (stopped) return;
+    stopped = true;
+    resolveExit("terminate");
+  };
+  const onHangup = () => {
+    if (stopped) return;
+    stopped = true;
+    resolveExit("hangup");
+  };
 
+  signalSource.on("SIGTERM", onTerminate);
+  signalSource.on("SIGHUP", onHangup);
   try {
     await writeTerminal(output, BROWSER_ENTER_SEQUENCE);
     input.setRawMode?.(true);
@@ -153,6 +174,9 @@ export async function runBrowserTerminal(options: BrowserTerminalOptions): Promi
     stopped = true;
     input.off("data", onData);
     output.off("resize", onResize);
+    signalSource.off("SIGTERM", onTerminate);
+    signalSource.off("SIGHUP", onHangup);
+    await work.catch(() => undefined);
     if (rawEnabled) input.setRawMode?.(false);
     input.pause();
     try {

@@ -1921,6 +1921,8 @@ async function runEventBrowser(session: SessionSummary): Promise<void> {
   });
   if (result === "epipe") return;
   if (result === "interrupt") process.exitCode = 130;
+  if (result === "hangup") process.exitCode = 129;
+  if (result === "terminate") process.exitCode = 143;
   const exact = shellQuoteArgument(`--session-id=${session.metadata.sessionId}`);
   const selected = model.events.find((event) => event.id === model.selectedId);
   process.stdout.write(selected

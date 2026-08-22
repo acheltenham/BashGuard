@@ -111,6 +111,33 @@ test("interrupt and thrown handlers restore raw mode and terminal ownership", as
   }
 });
 
+test("SIGTERM and SIGHUP restore terminal modes and remove scoped signal listeners", async () => {
+  for (const [signal, expected] of [["SIGTERM", "terminate"], ["SIGHUP", "hangup"]] as const) {
+    const input = new FakeInput();
+    const output = new FakeOutput();
+    const signals = new EventEmitter();
+    const running = runBrowserTerminal({
+      input,
+      output,
+      signalSource: signals,
+      frame: () => ["frame"],
+      onKey: async (key) => key.name === "character" && key.value === "q" ? "quit" : undefined,
+    });
+    await tick();
+    if (signals.listenerCount(signal) === 0) {
+      input.emit("data", Buffer.from("q"));
+      await running;
+    }
+    assert.equal(signals.listenerCount(signal), 1);
+    signals.emit(signal);
+    assert.equal(await running, expected);
+    assert.equal(signals.listenerCount("SIGTERM"), 0);
+    assert.equal(signals.listenerCount("SIGHUP"), 0);
+    assert.deepEqual(input.raw, [true, false]);
+    assert.match(output.writes.join(""), /\u001b\[\?25h\u001b\[\?1049l/);
+  }
+});
+
 test("EPIPE during a frame exits quietly after best-effort restoration", async () => {
   const input = new FakeInput();
   const output = new FakeOutput();

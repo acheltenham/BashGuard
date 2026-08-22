@@ -1,6 +1,6 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.5; Milestone 0 and Boundary Reporting Slice 1 complete; Command Resolution Spike 2 next
+**Status:** Draft v0.5; Command Resolution Spike 2 complete; split-pane event browser next
 **Last updated:** August 22, 2026
 
 ## Current execution sequence
@@ -8,8 +8,8 @@
 This section is the source of truth for near-term sequencing. The numbered product phases below still describe the long-term capability order; this queue records the intentional interruption and exact resumption point.
 
 1. **Complete — Boundary Reporting Slice 1:** `SandboxAdapter`, `NoSandboxAdapter`, and the current-environment `bashguard boundary` command shipped together.
-2. **Next — Command Resolution Spike 2:** establish what BashGuard can distinguish among requested, wrapped, and materially executed commands.
-3. **Resume Phase 1 — Split-pane event browser:** return to the existing `bashguard inspect --browse` design after the spike.
+2. **Complete — Command Resolution Spike 2:** BashGuard observes the mutable command present when its handler runs; extension order, replacement-tool internals, and shell runtime can still change execution. See the [results](../research/command-resolution-spike-results.md).
+3. **Next — Resume Phase 1 with the split-pane event browser:** implement the existing `bashguard inspect --browse` design.
 4. **Then — Phase 3 authorization:** begin narrow allow, notice, approve, and block behavior only after the spike and resumed Phase 1 slice.
 5. **Later — Backend integration:** implement the Anthropic sandbox runtime adapter and grounded session/debrief boundary evidence after the first authorization slice.
 
@@ -50,7 +50,7 @@ Implementation reference: [`Milestone 0 plan`](../plans/milestone-0-observe-a-re
 
 ## Phase 1: Live Terminal Companion
 
-**Status:** Intentionally paused after the live attach footer. Resume with the split-pane event browser immediately after Boundary Reporting Slice 1 and Command Resolution Spike 2, as recorded in the current execution sequence above.
+**Status:** Resumption point reached. The split-pane event browser is the next implementation slice, as recorded in the current execution sequence above.
 
 Deterministic evidence filtering and JSONL export shipped during Milestone 0. Bounded startup history, a grounded attach status snapshot, interactive selection for ambiguous selector-less session commands, and the active-TTY adaptive sticky footer are implemented Phase 1 slices.
 
@@ -143,7 +143,7 @@ Phase exit criteria:
 
 ## Phase 3: Resolved Command Guard
 
-**Scope note:** this phase is the *authorization* control — allow, notice, approve, or block a specific tool call, with an explanation. It is not containment. Pi's `tool_call` hook supports blocking and input mutation directly, and BashGuard already subscribes to that hook for capture. Spike 2 (Command Resolution) should complete first, because sandbox backends rewrite commands before execution.
+**Scope note:** this phase is the *authorization* control — allow, notice, approve, or block a specific tool call, with an explanation. It is not containment. Pi's `tool_call` hook supports blocking and input mutation directly, and BashGuard already subscribes to that hook for capture. Spike 2 is complete and shows that the approval surface must distinguish BashGuard-observed command input from later handler mutations, replacement-tool wrappers, and runtime shell behavior.
 
 Goal: make risky execution understandable before it happens.
 

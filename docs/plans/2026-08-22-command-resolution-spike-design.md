@@ -1,9 +1,10 @@
 # Command Resolution Spike Design
 
-**Status:** Approved — implementation in progress
+**Status:** Complete — full matrix passed August 22, 2026
 **Date:** August 22, 2026
 **Roadmap:** Command Resolution Spike 2
 **Tracking:** [Issue #83](https://github.com/acheltenham/BashGuard/issues/83)
+**Results:** [Command Resolution Spike 2 Results](../research/command-resolution-spike-results.md)
 
 ## Goal
 

@@ -1,7 +1,7 @@
 # Pi Capability Matrix
 
 **Status:** Working document  
-**Last updated:** August 3, 2026
+**Last updated:** August 22, 2026
 
 ## Purpose
 
@@ -29,7 +29,7 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 | Tool results | Observe completion, result, and error metadata | Complete the action story | Confirmed | `tool.completed` correlated deterministically by `toolCallId` |
 | User bash | Observe or wrap direct user shell execution | Avoid blind spots between agent and user commands | Confirmed | Interactive `!` commands produced `bash.user_requested` with `payload.command` and `payload.excludeFromContext`; distinct from agent `bash` tool events |
 | Command mutation | Block or modify a command before execution | Implement narrow safeguards and safer alternatives | Documented | Pi 0.84.0 `tool_call` is documented to block via `return { block: true, reason }`, and `event.input` is documented as mutable in place with no re-validation after mutation. Shipped examples: `permission-gate.ts`, `protected-paths.ts`, `confirm-destructive.ts`. BashGuard already subscribes to `tool_call` for capture and currently returns nothing. Needs a working spike before this becomes Confirmed |
-| Resolved command | Observe the materially executed command | Avoid approving one command while another runs | Partial | Raw agent `bash` input is visible; wrappers, expansion, aliases, and runtime mutation still need dedicated testing. Sandbox backends make this sharper: the first-party sandbox example rewrites commands through `SandboxManager.wrapWithSandbox()` before execution, so requested and executed commands differ whenever it is active. Spike 2 remains unrun |
+| Resolved command | Observe the materially executed command | Avoid approving one command while another runs | Partial | Spike 2 proved that BashGuard records the mutable command present when its `tool_call` handler runs. Earlier handlers can mutate it before capture; later handlers can mutate execution after capture; replacement tools can wrap internally after every `tool_call` observer; and shell runtime determines expansion, child argv/cwd/environment, pipelines, and effects. Use requested/observed-command wording plus explicit execution-may-differ limits; do not claim one complete resolved command. See [Spike 2 results](command-resolution-spike-results.md) |
 | Working directory | Capture effective command directory | Explain command scope and targeted repository | Confirmed | `ctx.cwd` recorded consistently in tested session |
 | Environment context | Observe relevant environment metadata | Explain hidden execution context without exposing secrets | Partial | Define which context is necessary and safe to persist |
 | File reads | Observe file-read tools | Narrate repository exploration | Confirmed | `read` observed as correlated tool request/result events |
@@ -99,7 +99,7 @@ Confirmed lifecycle, prompt, turn, message, tool, user-bash, edit-tool, and shut
 
 ### Spike 2: Command Resolution
 
-**Status: In progress.** See the [approved spike design](../plans/2026-08-22-command-resolution-spike-design.md).
+**Status: Complete.** See the [results](command-resolution-spike-results.md) and [approved spike design](../plans/2026-08-22-command-resolution-spike-design.md).
 
 Test commands involving:
 

@@ -1,4 +1,5 @@
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 export type ScenarioKind = "baseline" | "ordering" | "replacement";
 
@@ -23,9 +24,20 @@ function validateRoot(root: string): string {
   return resolve(root);
 }
 
+function canonicalPath(path: string): string {
+  const resolved = resolve(path);
+  try {
+    return realpathSync.native(resolved);
+  } catch {
+    const parent = dirname(resolved);
+    if (parent === resolved) return resolved;
+    return join(canonicalPath(parent), basename(resolved));
+  }
+}
+
 export function assertPathWithinRoot(root: string, candidate: string): void {
-  const resolvedRoot = resolve(root);
-  const resolvedCandidate = resolve(candidate);
+  const resolvedRoot = canonicalPath(root);
+  const resolvedCandidate = canonicalPath(candidate);
   const offset = relative(resolvedRoot, resolvedCandidate);
   if (offset === "" || (!offset.startsWith("..") && !isAbsolute(offset))) return;
   throw new Error(`path is outside temporary root: ${resolvedCandidate}`);

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { mkdtemp, realpath } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { assertPathWithinRoot, buildScenarioDefinitions } from "./model.ts";
@@ -33,6 +35,13 @@ test("buildScenarioDefinitions covers the required command and ordering matrix",
   assert.equal(scenarios.find((scenario) => scenario.name === "mutator-before-bashguard")?.expectedMutation, true);
   assert.equal(scenarios.find((scenario) => scenario.name === "replacement-spawn-hook")?.expectedSpawnWrap, true);
   assert.match(scenarios.find((scenario) => scenario.name === "harmless-rm")?.command ?? "", /delete-target/);
+});
+
+test("assertPathWithinRoot accepts filesystem aliases of the same temporary root", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bashguard-command-root-"));
+  const canonicalRoot = await realpath(root);
+
+  assert.doesNotThrow(() => assertPathWithinRoot(root, canonicalRoot));
 });
 
 test("scenario roots reject unsafe control characters and escaped paths", () => {

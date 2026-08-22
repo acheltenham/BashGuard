@@ -62,3 +62,39 @@ The BashGuard repository will be the source of truth for product and technical d
 ### Rationale
 
 Markdown in Git provides version history, reviewable changes, stable references, and a natural path for future contributors.
+
+## Decision 005: Own Authorization and Observability, Delegate Containment
+
+**Status:** Accepted  
+**Date:** August 22, 2026
+
+### Decision
+
+BashGuard will own the authorization and observability controls and will delegate containment and network policy to external sandbox backends. It will integrate with those backends through a narrow, two-method `SandboxAdapter` that describes and observes, and it will not execute or orchestrate through them.
+
+```text
+SandboxAdapter
+  describe()   → the boundary in force
+  observe()    → decisions, where the backend exposes them
+```
+
+### Rationale
+
+["Your agent can run code — what can that code reach?"](https://cheltenham.dev/research/your-agent-can-run-code-what-can-that-code-reach) separates agent security into independent controls — authorization, containment, network policy, downstream authorization, and observability — rather than one thing called "sandboxing". Its framing, **"authorization is not containment"**, distinguishes two questions BashGuard had been treating as one.
+
+BashGuard already ships the observability control and, through Pi's blocking `tool_call` hook, can own authorization. Containment requires operating-system enforcement that BashGuard must not reimplement; Pi's own security documentation states that real isolation has to come from the OS, a VM, or a container.
+
+An earlier draft of issue #79 proposed an `EnforcementAdapter` including `execute()` and `escalate()`. Those methods would put BashGuard on the execution path, making it a sandbox orchestrator that must track each backend's execution model, and implicitly claiming to be a single sufficient mechanism. Describing and observing keeps BashGuard in the role it is good at and leaves enforcement where it belongs.
+
+### Consequences
+
+- Pi executes, the backend enforces, BashGuard describes and reports.
+- BashGuard must distinguish a boundary **reported** from configuration from one **observed** in recorded events, and must never present the former as active.
+- BashGuard runs inside whatever boundary exists, so it cannot prove the absence of an outer container or VM. The no-backend case reports "no containment boundary detected", never "none exists".
+- Two adapter implementations ship initially — no backend, and the first-party Anthropic sandbox runtime path. Further backends require demonstrated demand rather than anticipated breadth.
+- BashGuard must remain explicit about which controls are enforced by a backend versus only observed or evaluated by BashGuard.
+- No policy language is introduced until an integration proves what a backend supports cleanly.
+
+### Supersedes
+
+Extends [Decision 002](#decision-002-observe-before-enforcing). Observation remains first, and enforcement — when it arrives — is authorization at the tool-call boundary, not containment.

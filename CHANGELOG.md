@@ -4,6 +4,12 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
+### Changed
+
+- Recorded a product direction for containment: BashGuard owns the authorization and observability controls and delegates containment and network policy to external sandbox backends, integrating through a narrow two-method `SandboxAdapter` (`describe()` and `observe()`) that never executes or orchestrates. This replaces the earlier `EnforcementAdapter` sketch, whose `execute()` and `escalate()` methods would have put BashGuard on the execution path. See [Decision 005](docs/adr/decision-log.md), the [design doc](docs/plans/2026-08-22-sandbox-adapter-and-boundary-reporting-design.md), and issue #79. Documentation only; no behavior change.
+- Corrected the Pi capability matrix from the 0.84.0 SDK: `tool_call` is documented to block via `return { block: true, reason }` with mutable `event.input`, `ctx.ui.select`/`confirm` and `ctx.hasUI` support in-session approval, Pi ships no built-in sandbox by design, and its first-party sandbox example mediates only `bash` and user `!` commands rather than the `read`, `write`, and `edit` tools. Added Spike 6 for containment backend integration.
+- Documented that BashGuard does not yet report the containment boundary in force, and that running inside a boundary means it can only ever report "none detected" rather than prove none exists.
+
 ### Added
 
 - Active `bashguard attach` in a supported TTY now replaces the startup status snapshot with an adaptive sticky footer after the ordinary header, bounded history, and guidance. Recorded changes redraw immediately, freshness refreshes about once a second, and `--no-live-footer` opts out.

@@ -1,7 +1,7 @@
 # BashGuard Architecture
 
-**Status:** Draft v0.3  
-**Last updated:** July 23, 2026
+**Status:** Draft v0.4  
+**Last updated:** August 22, 2026
 
 ## Architecture Decision
 
@@ -68,6 +68,32 @@ BashGuard owns:
 - event replay;
 - recovery guidance;
 - capture completeness.
+
+## Control Boundary
+
+Agent security is several independent controls, not one thing called "sandboxing". BashGuard owns two of them and delegates two, per [Decision 005](../adr/decision-log.md).
+
+| Control | Question | Owner |
+|---|---|---|
+| Authorization | Should this action run? | BashGuard, via Pi's blocking `tool_call` hook |
+| Containment | What can it affect if it runs? | Sandbox backend |
+| Network policy | Where can it communicate? | Sandbox backend |
+| Downstream authorization | What can it do when it gets there? | Not addressed today |
+| Observability | Can we reconstruct what happened? | BashGuard |
+
+Containment is delegated because real isolation requires operating-system enforcement, which BashGuard must not reimplement. Pi's own security documentation makes the same point: Pi ships no built-in sandbox by design, and isolation has to come from the OS, a VM, or a container.
+
+Integration with a backend goes through a narrow adapter that never executes anything:
+
+```text
+SandboxAdapter
+  describe()   → the boundary in force: isolation kind, filesystem scope,
+                 network policy, and which Pi tools the backend mediates
+  observe()    → decisions correlated to recorded events, where the
+                 backend exposes them
+```
+
+Pi executes, the backend enforces, BashGuard describes and reports. A boundary **reported** from configuration is never presented as one **observed** to be active, and BashGuard — running inside whatever boundary exists — never claims to characterize an outer container from within.
 
 ## Components
 

@@ -98,3 +98,13 @@ Do not add a daemon, database, browser dashboard, multi-harness abstraction, or 
 ## Security Boundary Clarity
 
 An in-process Pi extension and attached terminal companion are not an operating-system sandbox. Product language and UI must communicate that limitation plainly.
+
+Agent security is several independent controls, not one. BashGuard owns **authorization** — should this action run? — and **observability** — can we reconstruct what happened? It delegates **containment** and **network policy** to a sandbox backend and does not implement them. Authorization is not containment, and BashGuard must never let one stand in for the other in its output.
+
+Where a backend is present, BashGuard describes the boundary in force and states what that boundary does *not* cover. Three rules keep that honest:
+
+- a boundary **reported** from configuration is never presented as one **observed** to be active;
+- coverage gaps are stated rather than implied, because a backend that mediates shell commands but not file-write tools will otherwise be read as complete protection;
+- BashGuard runs inside whatever boundary exists, so it reports "no containment boundary detected" and never "none exists".
+
+See [Decision 005](../adr/decision-log.md).

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, eligibleSessionChoices, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, indexSessionChoices, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, resolveSessionChoice, selectAttachHistory, selectSessionForCommand, selectSessionForCommandResult, shouldUseLiveFooter, terminalColumns, type SessionChoice, type SessionSummary } from "./cli.ts";
+import { buildAttachStatus, buildDebrief, chooseSession, classifyCommandRisk, discoverSessions, eligibleSessionChoices, filterEvidenceEvents, findEvent, formatActivityList, formatAttachGuidance, formatAttachStatus, formatDebrief, formatDoctorReport, formatEventInspection, formatFilteredEvents, formatInspectableEvents, formatSessionList, formatTimelineEvent, indexSessionChoices, installLocalCliShim, normalizeEvent, parseCommandArgs, parseJsonlEvents, parsePiListPackages, renderEvent, resolveSessionChoice, selectAttachHistory, selectSessionForCommand, selectSessionForCommandResult, shouldUseEventBrowser, shouldUseLiveFooter, terminalColumns, type SessionChoice, type SessionSummary } from "./cli.ts";
 
 async function writeSession(root: string, sessionId: string, events: Array<Record<string, unknown>>, processId = 999_999): Promise<void> {
   const directory = join(root, sessionId);
@@ -649,6 +649,41 @@ test("parseCommandArgs rejects arguments to the session-independent boundary com
   for (const argv of [["boundary", "session-a"], ["boundary", "--session=1"], ["boundary", "--unknown"]]) {
     assert.throws(() => parseCommandArgs(argv), new Error("`bashguard boundary` does not accept arguments"));
   }
+});
+
+test("parseCommandArgs accepts opt-in browse only for unfiltered inspect", () => {
+  assert.deepEqual(parseCommandArgs(["inspect", "session-a", "--browse"]), {
+    command: "inspect",
+    sessionId: "session-a",
+    browse: true,
+  });
+  assert.deepEqual(parseCommandArgs(["inspect", "--session-id=session-a", "--browse"]), {
+    command: "inspect",
+    exactSessionId: "session-a",
+    browse: true,
+  });
+
+  for (const args of [
+    ["attach", "session-a", "--browse"],
+    ["debrief", "session-a", "--browse"],
+    ["inspect", "session-a", "--browse", "--event", "1"],
+    ["inspect", "session-a", "--browse", "--activity", "shell"],
+    ["inspect", "session-a", "--browse", "--type", "tool.requested"],
+    ["inspect", "session-a", "--browse", "--grep", "test"],
+    ["inspect", "session-a", "--browse", "--limit", "2"],
+    ["inspect", "session-a", "--browse", "--all"],
+    ["inspect", "session-a", "--browse", "--format", "jsonl"],
+  ]) assert.throws(() => parseCommandArgs(args), /--browse/);
+});
+
+test("event browser policy requires both TTYs, a capable TERM, and at least eight rows", () => {
+  const capable = { stdinIsTTY: true, stdoutIsTTY: true, term: "xterm-256color", rows: 8 };
+  assert.equal(shouldUseEventBrowser(capable), true);
+  assert.equal(shouldUseEventBrowser({ ...capable, stdinIsTTY: false }), false);
+  assert.equal(shouldUseEventBrowser({ ...capable, stdoutIsTTY: false }), false);
+  assert.equal(shouldUseEventBrowser({ ...capable, term: undefined }), false);
+  assert.equal(shouldUseEventBrowser({ ...capable, term: "dumb" }), false);
+  assert.equal(shouldUseEventBrowser({ ...capable, rows: 7 }), false);
 });
 
 test("parseCommandArgs accepts --no-live-footer for attach positional and selector forms", () => {

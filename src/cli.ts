@@ -9,6 +9,9 @@ import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 import { formatBoundaryReport, NoSandboxAdapter } from "./boundary.ts";
+import { createBrowserModel, replaceBrowserEvents, transitionBrowser, type BrowserDependencies, type BrowserInput, type BrowserModel } from "./browse-model.ts";
+import { runBrowserTerminal, type BrowserTerminalKey } from "./browse-terminal.ts";
+import { renderBrowserFrame } from "./browse-view.ts";
 import { buildLiveFooterModel, createLiveFooterController, FooterOperationError, LIVE_FOOTER_REFRESH_MS, type LiveFooterController, type StructuralWritable } from "./live-footer.ts";
 import { sessionChoiceDisplay, shellQuoteArgument, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
 import { promptForSessionChoice } from "./session-picker.ts";
@@ -128,6 +131,7 @@ export type ParsedCommandArgs = {
   attachHistory?: number;
   allHistory?: boolean;
   noLiveFooter?: boolean;
+  browse?: boolean;
   setupSubject?: string;
   setupScope?: "global" | "local";
 };
@@ -149,7 +153,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard boundary\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session=<session-selector> [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session-id=<exact-session-id> [--history <n>|--all-history] [--no-live-footer]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-selector> --event <event-id-or-sequence>\n  bashguard inspect --session-id=<exact-session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-selector>\n  bashguard debrief --session-id=<exact-session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard boundary\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session=<session-selector> [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session-id=<exact-session-id> [--history <n>|--all-history] [--no-live-footer]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --browse\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-selector> --event <event-id-or-sequence>\n  bashguard inspect --session-id=<exact-session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-selector>\n  bashguard debrief --session-id=<exact-session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -168,7 +172,11 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   let attachHistory: number | undefined;
   let allHistory = false;
   let noLiveFooter = false;
+  let browse = false;
 
+  if (command !== "inspect" && args.includes("--browse")) {
+    throw new Error("`--browse` can only be used with `bashguard inspect`");
+  }
   if (command !== "attach" && args.includes("--no-live-footer")) {
     throw new Error("`--no-live-footer` can only be used with `bashguard attach`");
   }
@@ -265,6 +273,10 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
       noLiveFooter = true;
       continue;
     }
+    if (arg === "--browse") {
+      browse = true;
+      continue;
+    }
     if (arg === "--format") {
       const rawFormat = args[++index];
       if (!rawFormat || rawFormat.startsWith("--")) throw new Error("`--format` requires a value");
@@ -292,8 +304,30 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
   if (attachHistory !== undefined) parsed.attachHistory = attachHistory;
   if (allHistory) parsed.allHistory = true;
   if (noLiveFooter) parsed.noLiveFooter = true;
+  if (browse) parsed.browse = true;
+  if (browse && (eventId !== undefined || activities.length > 0 || eventTypes.length > 0 || grep !== undefined || limit !== undefined || all || format !== undefined)) {
+    throw new Error("`--browse` cannot be combined with event, activity, type, search, limit, all, or format options");
+  }
   if (command !== "attach" && (attachHistory !== undefined || allHistory)) throw new Error("attach history options can only be used with `bashguard attach`");
   return parsed;
+}
+
+export type EventBrowserPolicyInput = {
+  stdinIsTTY: boolean;
+  stdoutIsTTY: boolean;
+  term: string | undefined;
+  rows: number | undefined;
+};
+
+export function shouldUseEventBrowser(input: EventBrowserPolicyInput): boolean {
+  const term = input.term?.trim();
+  return input.stdinIsTTY
+    && input.stdoutIsTTY
+    && term !== undefined
+    && term.length > 0
+    && term.toLocaleLowerCase() !== "dumb"
+    && Number.isFinite(input.rows)
+    && (input.rows ?? 0) >= 8;
 }
 
 export type LiveFooterPolicyInput = {
@@ -696,7 +730,7 @@ export function formatActivityList(): string {
   return `${Object.entries(ACTIVITY_DESCRIPTIONS).map(([name, description]) => `${name.padEnd(12)} ${description}`).join("\n")}\n`;
 }
 
-function eventMatchesActivity(event: BashGuardEvent, activity: ActivityKind): boolean {
+export function eventMatchesActivity(event: BashGuardEvent, activity: ActivityKind): boolean {
   const toolName = event.toolName ?? getString(event.payload?.toolName);
   if (activity === "shell") return event.type === "bash.user_requested" || ((event.type === "tool.requested" || event.type === "tool.completed") && toolName === "bash");
   if (activity === "file") return (event.type === "tool.requested" || event.type === "tool.completed") && ["read", "edit", "write"].includes(toolName ?? "");
@@ -1779,6 +1813,121 @@ export async function chooseSession(requestedId?: string, root = getDataRoot()):
   return sessions[0];
 }
 
+function eventBrowserCapabilityError(sessionId: string): string {
+  const exact = shellQuoteArgument(`--session-id=${sessionId}`);
+  return [
+    "`--browse` requires an interactive terminal (TTY input and output, a capable TERM, and at least 8 rows).",
+    "Run the plain evidence commands instead:",
+    `  bashguard inspect ${exact}`,
+    `  bashguard inspect ${exact} --event <sequence-or-event-id-prefix>`,
+  ].join("\n");
+}
+
+const BROWSER_ACTIVITIES = Object.keys(ACTIVITY_DESCRIPTIONS);
+
+function browserDependencies(): BrowserDependencies {
+  return {
+    activities: BROWSER_ACTIVITIES,
+    isNarrated: (event) => formatTimelineEvent(event as BashGuardEvent) !== undefined,
+    matchesActivity: (event, activity) => eventMatchesActivity(event as BashGuardEvent, activity as ActivityKind),
+    matchesSearch: (event, query) => JSON.stringify(event).toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+  };
+}
+
+function browserInputForKey(key: BrowserTerminalKey): BrowserInput | undefined {
+  if (key.name === "up") return { type: "up" };
+  if (key.name === "down") return { type: "down" };
+  if (key.name === "page-up") return { type: "page-up" };
+  if (key.name === "page-down") return { type: "page-down" };
+  if (key.name === "home") return { type: "home" };
+  if (key.name === "end") return { type: "end" };
+  if (key.name === "enter") return { type: "enter" };
+  if (key.name === "tab") return { type: "tab" };
+  if (key.name === "escape") return { type: "escape" };
+  if (key.name !== "character") return undefined;
+  if (key.value === "j") return { type: "down" };
+  if (key.value === "k") return { type: "up" };
+  if (key.value === "g") return { type: "home" };
+  if (key.value === "G") return { type: "end" };
+  if (key.value === "a") return { type: "cycle-activity" };
+  if (key.value === "n") return { type: "next-match" };
+  if (key.value === "N") return { type: "previous-match" };
+  if (key.value === "c") return { type: "clear" };
+  if (key.value === "r") return { type: "reload" };
+  if (key.value === "?") return { type: "help" };
+  if (key.value === "q") return { type: "quit" };
+  return undefined;
+}
+
+async function runEventBrowser(session: SessionSummary): Promise<void> {
+  if (!shouldUseEventBrowser({
+    stdinIsTTY: process.stdin.isTTY === true,
+    stdoutIsTTY: process.stdout.isTTY === true,
+    term: process.env.TERM,
+    rows: process.stdout.rows,
+  })) throw new Error(eventBrowserCapabilityError(session.metadata.sessionId));
+
+  const dependencies = browserDependencies();
+  let model: BrowserModel = createBrowserModel(await readExistingEvents(session.eventsFile), dependencies);
+  let snapshotTime = new Date().toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  let searchEditing = false;
+  const result = await runBrowserTerminal({
+    input: process.stdin,
+    output: process.stdout,
+    frame: ({ columns, rows }) => renderBrowserFrame(
+      model,
+      { width: columns, height: rows },
+      dependencies,
+      {
+        timeline: (event) => formatTimelineEvent(event as BashGuardEvent) ?? `${event.sequence} ${event.id} ${event.type}`,
+        detail: (event) => formatEventInspection(event as BashGuardEvent).trimEnd(),
+      },
+      { sessionId: session.metadata.sessionId, repository: session.metadata.repository, snapshotTime },
+    ),
+    onKey: async (key) => {
+      if (searchEditing) {
+        if (key.name === "enter" || key.name === "escape") {
+          searchEditing = false;
+          return;
+        }
+        if (key.name === "backspace") {
+          const query = [...model.search].slice(0, -1).join("");
+          model = transitionBrowser(model, { type: "set-search", query }, dependencies).model;
+          return;
+        }
+        if (key.name === "character") {
+          model = transitionBrowser(model, { type: "set-search", query: model.search + key.value }, dependencies).model;
+        }
+        return;
+      }
+      if (key.name === "character" && key.value === "/") {
+        searchEditing = true;
+        model = transitionBrowser(model, { type: "set-search", query: "" }, dependencies).model;
+        return;
+      }
+      const input = browserInputForKey(key);
+      if (!input) return;
+      const transition = transitionBrowser(model, input, dependencies, {
+        split: (process.stdout.columns ?? 80) >= 80,
+        pageSize: Math.max(1, (process.stdout.rows ?? 24) - 3),
+      });
+      model = transition.model;
+      if (transition.action === "reload") {
+        model = replaceBrowserEvents(model, await readExistingEvents(session.eventsFile), dependencies);
+        snapshotTime = new Date().toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }
+      return transition.action;
+    },
+  });
+  if (result === "epipe") return;
+  if (result === "interrupt") process.exitCode = 130;
+  const exact = shellQuoteArgument(`--session-id=${session.metadata.sessionId}`);
+  const selected = model.events.find((event) => event.id === model.selectedId);
+  process.stdout.write(selected
+    ? `Inspect selected event:\n  bashguard inspect ${exact} --event ${shellQuoteArgument(selected.id)}\n`
+    : `Inspect this session:\n  bashguard inspect ${exact}\n`);
+}
+
 async function inspect(options: ParsedCommandArgs): Promise<void> {
   const { sessionId: requestedId, eventId: eventIdOrSequence } = options;
 
@@ -1807,6 +1956,7 @@ async function inspect(options: ParsedCommandArgs): Promise<void> {
     output: process.stdout,
   });
   const { session, selector: effectiveSelector } = selection;
+  if (options.browse) return await runEventBrowser(session);
   const events = await readExistingEvents(session.eventsFile);
 
   if (hasFilters) {

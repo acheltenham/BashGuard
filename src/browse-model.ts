@@ -4,7 +4,6 @@ export type BrowserEvent = {
   type: string;
   toolName?: string;
   payload?: Record<string, unknown>;
-  [key: string]: unknown;
 };
 
 export type BrowserDependencies = {

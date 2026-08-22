@@ -99,6 +99,8 @@ Confirmed lifecycle, prompt, turn, message, tool, user-bash, edit-tool, and shut
 
 ### Spike 2: Command Resolution
 
+**Status: In progress.** See the [approved spike design](../plans/2026-08-22-command-resolution-spike-design.md).
+
 Test commands involving:
 
 - a simple executable;

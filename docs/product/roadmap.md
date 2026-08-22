@@ -1,6 +1,6 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.5; Milestone 0 and Boundary Reporting Slice 1 complete; Command Resolution Spike 2 next
+**Status:** Draft v0.5; Milestone 0 and Boundary Reporting Slice 1 complete; Command Resolution Spike 2 in progress
 **Last updated:** August 22, 2026
 
 ## Current execution sequence
@@ -8,7 +8,7 @@
 This section is the source of truth for near-term sequencing. The numbered product phases below still describe the long-term capability order; this queue records the intentional interruption and exact resumption point.
 
 1. **Complete — Boundary Reporting Slice 1:** `SandboxAdapter`, `NoSandboxAdapter`, and the current-environment `bashguard boundary` command shipped together.
-2. **Next — Command Resolution Spike 2:** establish what BashGuard can distinguish among requested, wrapped, and materially executed commands.
+2. **In progress — Command Resolution Spike 2:** establish what BashGuard can distinguish among requested, wrapped, and materially executed commands. See the [approved spike design](../plans/2026-08-22-command-resolution-spike-design.md).
 3. **Resume Phase 1 — Split-pane event browser:** return to the existing `bashguard inspect --browse` design after the spike.
 4. **Then — Phase 3 authorization:** begin narrow allow, notice, approve, and block behavior only after the spike and resumed Phase 1 slice.
 5. **Later — Backend integration:** implement the Anthropic sandbox runtime adapter and grounded session/debrief boundary evidence after the first authorization slice.

@@ -28,8 +28,8 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 | Tool interception | Observe tool calls before execution | Preview and evaluate shell actions | Confirmed | `tool.requested` captured name, input, and `toolCallId` |
 | Tool results | Observe completion, result, and error metadata | Complete the action story | Confirmed | `tool.completed` correlated deterministically by `toolCallId` |
 | User bash | Observe or wrap direct user shell execution | Avoid blind spots between agent and user commands | Confirmed | Interactive `!` commands produced `bash.user_requested` with `payload.command` and `payload.excludeFromContext`; distinct from agent `bash` tool events |
-| Command mutation | Block or modify a command before execution | Implement narrow safeguards and safer alternatives | Documented | Verify mutation semantics and approval UI later |
-| Resolved command | Observe the materially executed command | Avoid approving one command while another runs | Partial | Raw agent `bash` input is visible; wrappers, expansion, aliases, and runtime mutation still need dedicated testing |
+| Command mutation | Block or modify a command before execution | Implement narrow safeguards and safer alternatives | Documented | Pi 0.84.0 `tool_call` is documented to block via `return { block: true, reason }`, and `event.input` is documented as mutable in place with no re-validation after mutation. Shipped examples: `permission-gate.ts`, `protected-paths.ts`, `confirm-destructive.ts`. BashGuard already subscribes to `tool_call` for capture and currently returns nothing. Needs a working spike before this becomes Confirmed |
+| Resolved command | Observe the materially executed command | Avoid approving one command while another runs | Partial | Raw agent `bash` input is visible; wrappers, expansion, aliases, and runtime mutation still need dedicated testing. Sandbox backends make this sharper: the first-party sandbox example rewrites commands through `SandboxManager.wrapWithSandbox()` before execution, so requested and executed commands differ whenever it is active. Spike 2 remains unrun |
 | Working directory | Capture effective command directory | Explain command scope and targeted repository | Confirmed | `ctx.cwd` recorded consistently in tested session |
 | Environment context | Observe relevant environment metadata | Explain hidden execution context without exposing secrets | Partial | Define which context is necessary and safe to persist |
 | File reads | Observe file-read tools | Narrate repository exploration | Confirmed | `read` observed as correlated tool request/result events |
@@ -39,7 +39,9 @@ The goal is not to document every Pi feature. The goal is to identify the exact 
 | Extension state | Persist BashGuard metadata in Pi sessions | Keep event correlation close to Pi data | Documented | Current spike uses independent JSONL; extension-entry semantics still need evaluation |
 | Local event transport | Tail new events from a second process | Power the live companion without a daemon | Confirmed | PR #5 tailed append-only JSONL live from a second process and replayed completed sessions; no daemon required |
 | Session storage path | Locate Pi session files locally | Support active and completed session browsing | Documented | Validate platform paths and project-specific directories during attach spike |
-| Custom UI | Render approval and explanation views inside Pi | Keep decisions in the active Pi terminal | Documented | Build minimal interaction after capture/attach foundation |
+| Custom UI | Render approval and explanation views inside Pi | Keep decisions in the active Pi terminal | Documented | Pi 0.84.0 documents `ctx.ui.select()` and `ctx.ui.confirm()` for in-session prompts and `ctx.hasUI` to detect non-interactive mode. The shipped `permission-gate.ts` example blocks by default when `ctx.hasUI` is false. Build minimal interaction after capture/attach foundation |
+| Containment backend | Detect and describe an active sandbox boundary | Report what is enforced versus only observed | Partial | Pi ships no built-in sandbox by design. A first-party example extension wraps `@anthropic-ai/sandbox-runtime` (`sandbox-exec` on macOS, `bubblewrap` on Linux) and mediates `bash` and user `!` commands only — not `read`, `write`, or `edit`. Gondolin mediates `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`. Config is readable from `.pi/sandbox.json` and the global equivalent, but configuration presence does not prove the backend was active |
+| Sandbox decisions | Observe allow, deny, and violation decisions | Correlate enforcement with recorded evidence | Unknown | Reading the first-party example suggests violations surface as command output and nonzero exit rather than structured events. No decision hook is documented. Whether `carderne/pi-sandbox` exposes more is unexamined. Determines whether `observe()` can be more than thin |
 | TUI components | Build a rich companion terminal | Provide timeline and event inspection | External capability | Select/prove Node terminal UI approach |
 | Status/footer | Show quiet recording state | Communicate capture health without noise | Confirmed | Spike successfully displays BashGuard recording status in interactive mode |
 | Performance | Add capture with low overhead | Avoid making Pi feel slower | Unknown | Measure event latency, write overhead, and memory use |
@@ -152,6 +154,27 @@ Run controlled commands that:
 - operate outside a Git repository.
 
 Determine which correlations can be observed directly and which require time-window inference.
+
+### Spike 6: Containment Backend Integration
+
+Tracked under [issue #79](https://github.com/acheltenham/BashGuard/issues/79) and designed in [`docs/plans/2026-08-22-sandbox-adapter-and-boundary-reporting-design.md`](../plans/2026-08-22-sandbox-adapter-and-boundary-reporting-design.md).
+
+Candidate backends, corrected from the original issue text:
+
+- `@anthropic-ai/sandbox-runtime` via Pi's first-party `examples/extensions/sandbox/` (local, macOS and Linux);
+- `carderne/pi-sandbox` (third-party, npm 0.6.5, advertises interactive permission prompts);
+- Gondolin micro-VM, plain Docker, and NVIDIA OpenShell as documented containerization patterns.
+
+Prove or disprove:
+
+- which Pi tools each backend actually mediates;
+- whether allow, deny, and violation decisions are observable as structured evidence or only as command output and exit codes;
+- whether decisions expose identifiers correlatable with BashGuard `toolCallId`;
+- whether replacing the built-in `bash` tool preserves BashGuard's `tool.requested` / `tool.completed` capture, `toolName` labelling, and event ordering;
+- how much of the boundary is readable from configuration versus only from recorded events;
+- platform limitations, especially macOS versus Linux.
+
+Do not implement a policy language. Record gaps as findings rather than working around them with inference.
 
 ## Decision Rules
 

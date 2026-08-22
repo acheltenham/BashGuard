@@ -33,7 +33,10 @@ All narrative output is grounded in recorded local events. BashGuard does not li
 - Capture can be partial because Pi hooks, event fields, output, or storage writes may be unavailable.
 - If BashGuard is loaded from more than one package source, only the first instance records. Other instances warn and remain inactive; remove the redundant source and start a new Pi session. `bashguard doctor` can flag multiple sources visible in `pi list`, but it does not claim configured sources are active runtime instances.
 - Git and file correlations are session-level or path-overlap evidence, not proof of causality.
-- Risk notices are non-blocking review notes. BashGuard does not currently approve, block, interrupt, or sandbox commands.
+- Risk notices are non-blocking review notes. BashGuard does not currently approve, block, or interrupt commands.
+- BashGuard does not and will not implement containment. It does not sandbox commands, restrict the filesystem, or restrict the network; that is the job of a sandbox backend such as Pi's first-party sandbox example, and BashGuard's planned role is to describe and report that boundary rather than enforce it. See [Decision 005](adr/decision-log.md).
+- BashGuard does not yet report what containment boundary is in force. Today it says nothing about whether a session is sandboxed, which means an unsandboxed session — Pi tools running with your full user permissions — currently looks the same as a sandboxed one. Boundary reporting is designed but not implemented.
+- BashGuard runs inside whatever boundary exists and cannot characterize an outer container or VM from within, so it will never be able to prove that no containment exists — only that none was detected.
 - There is no pre-execution resolved-command preview yet.
 - There is no recovery/restore workflow, event replay, browser UI, cloud service, or multi-harness support.
 - The session picker and current CLI are structured text, not a full-screen split-pane TUI. The active footer does not use an alternate screen, hide the cursor, or create a split view; the richer split-pane experience remains planned separately.

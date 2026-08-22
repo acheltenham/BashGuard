@@ -99,6 +99,8 @@ The planned MVP direction includes:
 
 The MVP direction does not require a cloud service, account, hosted dashboard, support for other coding harnesses, or an operating-system sandbox; these are product constraints, not claims that every planned MVP capability is already implemented.
 
+BashGuard also does not *implement* containment. Filesystem, network, and process isolation belong to a sandbox backend; BashGuard's planned role is to describe the boundary in force, report what it does not cover, and keep enforcement decisions explainable. See [Decision 005](docs/adr/decision-log.md) and [issue #79](https://github.com/acheltenham/BashGuard/issues/79).
+
 ## Design Principles
 
 - Pi is where developers act; BashGuard is where they understand.

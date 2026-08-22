@@ -1,7 +1,7 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.4; Milestone 0 complete, Phase 1 live-companion work in progress
-**Last updated:** August 14, 2026
+**Status:** Draft v0.5; Milestone 0 complete, Phase 1 live-companion work in progress
+**Last updated:** August 22, 2026
 
 ## Milestone 0: Observe a Real Pi Session
 
@@ -93,7 +93,31 @@ Exit criteria:
 - the debrief provides useful evidence without an unexplained trust score;
 - risky-command summaries are clearly observation-only until the pre-execution guard exists.
 
+## Phase 2.5: Boundary Reporting
+
+**Direction set by** [Decision 005](../adr/decision-log.md) and [issue #79](https://github.com/acheltenham/BashGuard/issues/79). **Designed in** [`docs/plans/2026-08-22-sandbox-adapter-and-boundary-reporting-design.md`](../plans/2026-08-22-sandbox-adapter-and-boundary-reporting-design.md).
+
+Goal: tell the developer what containment boundary is actually in force, and what it does not cover, before BashGuard adds any control of its own.
+
+BashGuard owns the authorization and observability controls and delegates containment and network policy to external sandbox backends. Integration happens through a narrow two-method `SandboxAdapter` — `describe()` and `observe()` — that never executes or orchestrates.
+
+- define the `SandboxAdapter` shape;
+- ship `NoSandboxAdapter`, reporting "no containment boundary detected" for the common unsandboxed case;
+- ship the Anthropic sandbox runtime adapter for Pi's first-party sandbox example;
+- report which Pi tools a backend mediates and, critically, which it does not;
+- distinguish a boundary reported from configuration from one observed in recorded events;
+- add `bashguard boundary` and a grounded debrief boundary section.
+
+Exit criteria:
+
+- a developer can see the composite boundary around a session rather than assuming one;
+- coverage gaps, such as a backend mediating `bash` but not `write`, are stated rather than implied;
+- a configuration-only detection is never presented as a proven active boundary;
+- BashGuard never claims to characterize an outer container or VM it runs inside.
+
 ## Phase 3: Resolved Command Guard
+
+**Scope note:** this phase is the *authorization* control — allow, notice, approve, or block a specific tool call, with an explanation. It is not containment. Pi's `tool_call` hook supports blocking and input mutation directly, and BashGuard already subscribes to that hook for capture. Spike 2 (Command Resolution) should complete first, because sandbox backends rewrite commands before execution.
 
 Goal: make risky execution understandable before it happens.
 
@@ -187,14 +211,19 @@ Only after the core terminal workflow proves useful:
 
 ## Phase 8: Optional Stronger Boundaries
 
-Evaluate only when the in-process extension is demonstrably insufficient:
+Per [Decision 005](../adr/decision-log.md), BashGuard does not implement containment. Filesystem, network, and process isolation are delegated to sandbox backends through the `SandboxAdapter` defined in Phase 2.5. This phase covers only what remains after that delegation.
 
-- optional local execution broker or daemon;
-- filesystem and network restrictions;
+Evaluate only when the in-process extension plus a containment backend are demonstrably insufficient:
+
+- additional `SandboxAdapter` implementations, driven by demonstrated demand rather than anticipated breadth;
+- upstream contributions where a backend cannot expose decisions as structured evidence;
+- downstream authorization — the one control neither BashGuard nor current backends address;
 - stronger tamper resistance;
 - process observation beyond Pi hooks;
 - additional coding-harness adapters;
 - team sharing and centralized governance.
+
+Explicitly not planned: BashGuard implementing its own filesystem, network, or process sandbox, or placing itself on the execution path as a broker or daemon.
 
 ## Explicitly Not Planned for the MVP
 

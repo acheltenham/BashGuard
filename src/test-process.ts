@@ -28,6 +28,7 @@ export async function runPortablePty(input: {
   scenario: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  sendAfterOutput?: string;
   send?: { afterMs: number; text: string }[];
 }): Promise<PortablePtyResult> {
   const unavailable = portablePtyUnavailableReason();
@@ -52,6 +53,7 @@ export async function runPortablePty(input: {
       `set timeout ${Math.max(1, Math.ceil((input.timeoutMs ?? 10_000) / 1_000))}`,
       "log_user 1",
       `spawn -noecho ${spawnArguments}`,
+      ...(input.sendAfterOutput ? [`expect -exact ${tclBrace(input.sendAfterOutput)}`] : []),
       ...scheduledSends,
       "expect { timeout { exit 124 } eof {} }",
       "set result [wait]",
@@ -70,15 +72,27 @@ export async function runPortablePty(input: {
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
   const outputChunks: PortablePtyResult["outputChunks"] = [];
+  const sends: NodeJS.Timeout[] = [];
+  let sendsArmed = process.platform === "darwin";
+  const armSends = () => {
+    if (sendsArmed) return;
+    if (input.sendAfterOutput && !Buffer.concat([...stdout, ...stderr]).toString().includes(input.sendAfterOutput)) return;
+    sendsArmed = true;
+    for (const { afterMs, text } of input.send ?? []) {
+      sends.push(setTimeout(() => child.stdin.write(text), Math.max(0, afterMs)));
+    }
+  };
   child.stdout.on("data", (chunk: Buffer) => {
     stdout.push(chunk);
     outputChunks.push({ afterMs: Date.now() - startedAt, stream: "stdout", text: chunk.toString() });
+    armSends();
   });
   child.stderr.on("data", (chunk: Buffer) => {
     stderr.push(chunk);
     outputChunks.push({ afterMs: Date.now() - startedAt, stream: "stderr", text: chunk.toString() });
+    armSends();
   });
-  const sends = process.platform === "darwin" ? [] : (input.send ?? []).map(({ afterMs, text }) => setTimeout(() => child.stdin.write(text), afterMs));
+  if (!input.sendAfterOutput) armSends();
   const diagnostics = () => ({
     stdout: Buffer.concat(stdout).toString(),
     stderr: Buffer.concat(stderr).toString(),

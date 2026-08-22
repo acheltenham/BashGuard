@@ -51,12 +51,13 @@ test("real PTY browser navigates, searches, filters, reloads, and restores the t
       `BASHGUARD_DATA_DIR=${JSON.stringify(root)} TERM=xterm-256color ${JSON.stringify(process.execPath)} --experimental-strip-types src/cli.ts inspect --session-id=session-a --browse`,
     ].join("\n"),
     timeoutMs: 8_000,
+    sendAfterOutput: "BashGuard · browse",
     send: [
-      { afterMs: 350, text: "\u001b[B" },
-      { afterMs: 450, text: "/npm\r" },
-      { afterMs: 550, text: "na??" },
-      { afterMs: 800, text: "rG" },
-      { afterMs: 1_000, text: "q" },
+      { afterMs: 200, text: "\u001b[B" },
+      { afterMs: 300, text: "/npm\r" },
+      { afterMs: 400, text: "na??" },
+      { afterMs: 650, text: "rG" },
+      { afterMs: 850, text: "q" },
     ],
   });
   await new Promise<void>((resolve) => setTimeout(resolve, 650));
@@ -88,11 +89,12 @@ test("real PTY browser redraws from split to single pane after resize", async (t
   const result = await runPortablePty({
     scenario: [
       "stty cols 100 rows 14",
-      "(sleep 0.45; stty cols 79 rows 10 < /dev/tty) &",
+      "(while ! stty -a < /dev/tty | grep -q -- '-icanon'; do sleep 0.05; done; sleep 0.2; stty cols 79 rows 10 < /dev/tty) &",
       `BASHGUARD_DATA_DIR=${JSON.stringify(root)} TERM=xterm-256color ${JSON.stringify(process.execPath)} --experimental-strip-types src/cli.ts inspect --session-id=session-a --browse`,
     ].join("\n"),
     timeoutMs: 8_000,
-    send: [{ afterMs: 850, text: "q" }],
+    sendAfterOutput: "BashGuard · browse",
+    send: [{ afterMs: 700, text: "q" }],
   });
   assert.equal(result.exitCode, 0);
   const frames = result.transcript.split("\u001b[H\u001b[2J").slice(1);
@@ -111,9 +113,10 @@ test("real PTY narrow browser replaces list with detail and Ctrl+C restores term
       `BASHGUARD_DATA_DIR=${JSON.stringify(root)} TERM=xterm-256color ${JSON.stringify(process.execPath)} --experimental-strip-types src/cli.ts inspect --session-id=session-a --browse`,
     ].join("\n"),
     timeoutMs: 8_000,
+    sendAfterOutput: "BashGuard · browse",
     send: [
-      { afterMs: 350, text: "\r" },
-      { afterMs: 500, text: "\u0003" },
+      { afterMs: 200, text: "\r" },
+      { afterMs: 400, text: "\u0003" },
     ],
   });
   assert.equal(result.exitCode, 130);

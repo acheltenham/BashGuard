@@ -29,8 +29,9 @@
   "scripts": {
     "baseline:milestone-0": "node --experimental-strip-types scripts/milestone-0-baseline.ts",
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts",
-    "sessions": "node --experimental-strip-types src/cli.ts sessions"
+    "test": "node --experimental-strip-types --test src/**/*.test.ts scripts/**/*.test.ts",
+    "sessions": "node --experimental-strip-types src/cli.ts sessions",
+    "spike:command-resolution": "node --experimental-strip-types scripts/command-resolution-spike/run.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.84.0",

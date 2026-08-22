@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+
+import { portablePtyUnavailableReason, runPortablePty } from "./test-process.ts";
 
 async function fixture(t: test.TestContext): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "bashguard-browser-"));
@@ -37,6 +39,87 @@ test("explicit browse on redirected streams fails visibly without ANSI and offer
   assert.match(result.stderr, /`--browse` requires an interactive terminal/);
   assert.match(result.stderr, /bashguard inspect --session-id=session-a/);
   assert.match(result.stderr, /bashguard inspect --session-id=session-a --event <sequence-or-event-id-prefix>/);
+});
+
+test("real PTY browser navigates, searches, filters, reloads, and restores the terminal", async (t) => {
+  const unavailable = portablePtyUnavailableReason();
+  if (unavailable) return t.skip(unavailable);
+  const root = await fixture(t);
+  const running = runPortablePty({
+    scenario: [
+      "stty cols 100 rows 14",
+      `BASHGUARD_DATA_DIR=${JSON.stringify(root)} TERM=xterm-256color ${JSON.stringify(process.execPath)} --experimental-strip-types src/cli.ts inspect --session-id=session-a --browse`,
+    ].join("\n"),
+    timeoutMs: 8_000,
+    send: [
+      { afterMs: 350, text: "\u001b[B" },
+      { afterMs: 450, text: "/npm\r" },
+      { afterMs: 550, text: "na??" },
+      { afterMs: 800, text: "rG" },
+      { afterMs: 1_000, text: "q" },
+    ],
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, 650));
+  await appendFile(join(root, "session-a", "events.jsonl"), `${JSON.stringify({
+    schemaVersion: 1,
+    id: "reload-event",
+    sequence: 3,
+    timestamp: "2026-08-22T12:00:02.000Z",
+    type: "tool.completed",
+    sessionId: "session-a",
+    toolName: "bash",
+    payload: { content: "tests passed" },
+    capture: { missing: [], redacted: [], truncated: [] },
+  })}\n`);
+  const result = await running;
+  assert.equal(result.exitCode, 0);
+  assert.match(result.transcript, /\u001b\[\?1049h\u001b\[\?25l/);
+  assert.match(result.transcript, / │ /);
+  assert.match(result.transcript, /\/npm\//);
+  assert.match(result.transcript, /reload-event/);
+  assert.match(result.transcript, /\u001b\[\?25h\u001b\[\?1049l/);
+  assert.match(result.transcript, /Inspect selected event:\r?\n  bashguard inspect --session-id=session-a --event reload-event/);
+});
+
+test("real PTY browser redraws from split to single pane after resize", async (t) => {
+  const unavailable = portablePtyUnavailableReason();
+  if (unavailable) return t.skip(unavailable);
+  const root = await fixture(t);
+  const result = await runPortablePty({
+    scenario: [
+      "stty cols 100 rows 14",
+      "(sleep 0.45; stty cols 79 rows 10 < /dev/tty) &",
+      `BASHGUARD_DATA_DIR=${JSON.stringify(root)} TERM=xterm-256color ${JSON.stringify(process.execPath)} --experimental-strip-types src/cli.ts inspect --session-id=session-a --browse`,
+    ].join("\n"),
+    timeoutMs: 8_000,
+    send: [{ afterMs: 850, text: "q" }],
+  });
+  assert.equal(result.exitCode, 0);
+  const frames = result.transcript.split("\u001b[H\u001b[2J").slice(1);
+  assert.ok(frames.some((frame) => frame.includes(" │ ")), "expected an initial split-pane frame");
+  assert.ok(frames.some((frame) => !frame.includes(" │ ") && frame.includes("▸")), "expected a resized single-pane frame");
+  assert.match(result.transcript, /\u001b\[\?25h\u001b\[\?1049l/);
+});
+
+test("real PTY narrow browser replaces list with detail and Ctrl+C restores terminal state", async (t) => {
+  const unavailable = portablePtyUnavailableReason();
+  if (unavailable) return t.skip(unavailable);
+  const root = await fixture(t);
+  const result = await runPortablePty({
+    scenario: [
+      "stty cols 79 rows 10",
+      `BASHGUARD_DATA_DIR=${JSON.stringify(root)} TERM=xterm-256color ${JSON.stringify(process.execPath)} --experimental-strip-types src/cli.ts inspect --session-id=session-a --browse`,
+    ].join("\n"),
+    timeoutMs: 8_000,
+    send: [
+      { afterMs: 350, text: "\r" },
+      { afterMs: 500, text: "\u0003" },
+    ],
+  });
+  assert.equal(result.exitCode, 130);
+  assert.match(result.transcript, /Event ID/);
+  assert.match(result.transcript, /\u001b\[\?25h\u001b\[\?1049l/);
+  assert.match(result.transcript, /Inspect selected event:/);
 });
 
 test("plain inspect output remains ANSI-free and unchanged when browse is not requested", async (t) => {

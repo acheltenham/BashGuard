@@ -1,13 +1,25 @@
 # Sandbox Adapter and Boundary Reporting Design
 
-**Status:** Draft — pending approval  
+**Status:** Approved — Slice 1 is the current implementation focus
 **Date:** August 22, 2026  
-**Phase:** Precedes Phase 3 — Resolved Command Guard  
+**Phase:** Intentional interruption of Phase 1; precedes Command Resolution Spike 2
 **Related:** [Issue #79](https://github.com/acheltenham/BashGuard/issues/79), [Decision 005](../adr/decision-log.md)
 
 ## Goal
 
-Let BashGuard report the containment boundary actually in force around a Pi session — and say plainly what that boundary does *not* cover — without BashGuard implementing, orchestrating, or executing through any sandbox.
+Let BashGuard report the containment boundary it can detect — and say plainly what that boundary does *not* cover — without BashGuard implementing, orchestrating, or executing through any sandbox.
+
+## Delivery sequence
+
+This design is delivered in bounded slices rather than as one backend-integration feature:
+
+1. **In progress — Slice 1:** define `SandboxAdapter`, implement `NoSandboxAdapter`, and add `bashguard boundary` for the current environment.
+2. **Next:** run Command Resolution Spike 2.
+3. **Resume Phase 1:** implement the paused split-pane event browser.
+4. **Then:** begin the Phase 3 authorization slice.
+5. **Later:** implement `AnthropicSandboxRuntimeAdapter`, session-time boundary evidence, and grounded debrief integration.
+
+Slice 1 must not infer a historical session boundary from configuration read at debrief time. Current configuration can describe only the current environment; a future debrief section requires boundary evidence recorded during the session.
 
 ## Why this comes before enforcement
 
@@ -112,24 +124,28 @@ Narrow terminals drop the aligned columns before dropping any "not covered" line
 
 ## CLI surface
 
+### Slice 1
+
 ```text
 bashguard boundary
 ```
 
-Reports the boundary for the current environment. This needs no session, because `describe()` reads configuration and environment rather than recorded events.
+Reports detectable boundary evidence for the current environment. This needs no session. The first implementation uses `NoSandboxAdapter` and reports that no supported containment boundary was detected without claiming that no outer boundary exists.
 
-`bashguard debrief` gains a short boundary section when a backend is detected or observed, so a session report states what was and was not contained while it ran. `bashguard doctor` gains a single pointer line rather than a duplicate report; doctor covers BashGuard's own installation health, not the session's containment.
+Existing commands keep their current output in Slice 1. In particular, `bashguard debrief` does not gain a boundary section based on configuration read after the recorded session.
 
-Both existing commands keep their current output otherwise, and the new section is omitted entirely rather than printed as "unknown" noise when there is nothing grounded to say.
+### Later integration
+
+After BashGuard records boundary evidence during a session, `bashguard debrief` may gain a short grounded boundary section stating what was and was not detectably contained while it ran. `bashguard doctor` may gain a pointer rather than duplicating the report; doctor covers BashGuard's installation health, not containment.
 
 ## Implementations
 
-Two, and deliberately no more:
+Two are planned, but they do not ship in the same slice:
 
-1. **`NoSandboxAdapter`** — ships first. Today every BashGuard user runs with no containment and BashGuard says nothing about it. Reporting that plainly is true right now, requires no integration, and is the highest-signal slice available. It is also the honest default the project's documentation voice already demands.
-2. **`AnthropicSandboxRuntimeAdapter`** — the first-party `pi-extension-sandbox` / ASRT path. Local, first-party, macOS and Linux, and the backend whose coverage gap can be demonstrated concretely.
+1. **`NoSandboxAdapter` — Slice 1.** Reports that no supported containment backend was detected. This closes today's silent-boundary gap without claiming the environment is definitely unsandboxed.
+2. **`AnthropicSandboxRuntimeAdapter` — later.** Covers the first-party `pi-extension-sandbox` / ASRT path after the integration spike. It is local, first-party, supports macOS and Linux, and has a concretely demonstrable tool-coverage gap.
 
-Docker Sandboxes, GKE Agent Sandbox, E2B, Gondolin, and OpenShell are explicitly deferred until someone asks for them. The adapter *shape* is the durable contribution; breadth is a maintenance treadmill of thin adapters, each needing a test environment this project does not have, in exchange for weak differentiation.
+Docker Sandboxes, GKE Agent Sandbox, E2B, Gondolin, OpenShell, and third-party `pi-sandbox` adapters are explicitly deferred until someone asks for them. The adapter *shape* is the durable contribution; breadth is a maintenance treadmill of thin adapters, each needing a test environment this project does not have, in exchange for weak differentiation.
 
 ## Open question for the ASRT adapter
 
@@ -137,15 +153,26 @@ From reading the example implementation, sandbox violations appear to surface as
 
 ## Test strategy
 
+### Slice 1
+
+Write tests first for:
+
+- the `SandboxAdapter` contract and `NoSandboxAdapter.describe()` result;
+- the no-backend report using detected-not-absent wording;
+- the explicit outer-container/VM limitation;
+- boundary formatting at representative widths, with "not covered" lines surviving width pressure;
+- `bashguard boundary` plain and interactive output;
+- the absence of regressions or premature boundary sections in existing debrief and doctor output.
+
+### Later adapter and session integration
+
 Write tests first for:
 
 - `describe()` against representative configurations: absent, global only, project only, both merged, malformed, and explicitly disabled;
 - the reported/observed/unknown labelling rules, including the rule that configuration alone never yields an observed boundary;
 - coverage-gap derivation — that a backend mediating only `bash` reports `read`, `write`, and `edit` as not mediated;
 - `observe()` correlating recorded evidence by `toolCallId`, and returning nothing when no structured decisions exist;
-- the no-backend report using detected-not-absent wording;
-- boundary formatting at representative widths, with "not covered" lines surviving width pressure;
-- `bashguard boundary` output, the debrief section appearing only when grounded, and the absence of any regression to existing debrief and doctor output.
+- session-time boundary recording and a debrief section that appears only when grounded in that recorded evidence.
 
 ## Documentation scope
 

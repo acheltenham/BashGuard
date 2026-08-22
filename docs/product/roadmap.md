@@ -1,7 +1,19 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.5; Milestone 0 complete, Phase 1 live-companion work in progress
+**Status:** Draft v0.5; Milestone 0 complete, boundary-reporting slice in progress
 **Last updated:** August 22, 2026
+
+## Current execution sequence
+
+This section is the source of truth for near-term sequencing. The numbered product phases below still describe the long-term capability order; this queue records the intentional interruption and exact resumption point.
+
+1. **In progress — Boundary Reporting Slice 1:** define `SandboxAdapter`, implement `NoSandboxAdapter`, and add `bashguard boundary` for the current environment.
+2. **Next — Command Resolution Spike 2:** establish what BashGuard can distinguish among requested, wrapped, and materially executed commands.
+3. **Resume Phase 1 — Split-pane event browser:** return to the existing `bashguard inspect --browse` design after the spike.
+4. **Then — Phase 3 authorization:** begin narrow allow, notice, approve, and block behavior only after the spike and resumed Phase 1 slice.
+5. **Later — Backend integration:** implement the Anthropic sandbox runtime adapter and grounded session/debrief boundary evidence after the first authorization slice.
+
+When work pauses mid-slice, update the status here and the corresponding plan before starting a different slice. Completed items should remain visible until the next item has started, so the restart point is unambiguous.
 
 ## Milestone 0: Observe a Real Pi Session
 
@@ -38,7 +50,9 @@ Implementation reference: [`Milestone 0 plan`](../plans/milestone-0-observe-a-re
 
 ## Phase 1: Live Terminal Companion
 
-**Current focus:** improve live-session usability and terminal presentation before adding enforcement or provider-specific interpretation. Deterministic evidence filtering and JSONL export shipped during Milestone 0. Bounded startup history, a grounded attach status snapshot, interactive selection for ambiguous selector-less session commands, and the active-TTY adaptive sticky footer are implemented Phase 1 slices.
+**Status:** Intentionally paused after the live attach footer. Resume with the split-pane event browser immediately after Boundary Reporting Slice 1 and Command Resolution Spike 2, as recorded in the current execution sequence above.
+
+Deterministic evidence filtering and JSONL export shipped during Milestone 0. Bounded startup history, a grounded attach status snapshot, interactive selection for ambiguous selector-less session commands, and the active-TTY adaptive sticky footer are implemented Phase 1 slices.
 
 Goal: make a running Pi session understandable at a glance.
 
@@ -95,22 +109,34 @@ Exit criteria:
 
 ## Phase 2.5: Boundary Reporting
 
+**Status:** Slice 1 is the current implementation focus. Later backend and historical-session slices remain deferred.
+
 **Direction set by** [Decision 005](../adr/decision-log.md) and [issue #79](https://github.com/acheltenham/BashGuard/issues/79). **Designed in** [`docs/plans/2026-08-22-sandbox-adapter-and-boundary-reporting-design.md`](../plans/2026-08-22-sandbox-adapter-and-boundary-reporting-design.md).
 
-Goal: tell the developer what containment boundary is actually in force, and what it does not cover, before BashGuard adds any control of its own.
+Goal: tell the developer what containment boundary is detectable, and what it does not cover, before BashGuard adds any control of its own.
 
 BashGuard owns the authorization and observability controls and delegates containment and network policy to external sandbox backends. Integration happens through a narrow two-method `SandboxAdapter` — `describe()` and `observe()` — that never executes or orchestrates.
 
+### Slice 1 — Current-environment reporting
+
 - define the `SandboxAdapter` shape;
-- ship `NoSandboxAdapter`, reporting "no containment boundary detected" for the common unsandboxed case;
+- ship `NoSandboxAdapter`, reporting "no containment boundary detected" for the common undetected case;
+- add `bashguard boundary` for current-environment evidence;
+- preserve the limit that BashGuard cannot prove an outer container or VM is absent;
+- do not add a historical debrief claim from current configuration.
+
+Slice 1 is complete when `bashguard boundary` honestly reports that no supported containment backend was detected, explains the resulting full-user-permission exposure, and preserves the outer-boundary limitation in interactive and plain output.
+
+### Later slices — Deferred
+
 - ship the Anthropic sandbox runtime adapter for Pi's first-party sandbox example;
-- report which Pi tools a backend mediates and, critically, which it does not;
+- report which Pi tools the backend mediates and, critically, which it does not;
 - distinguish a boundary reported from configuration from one observed in recorded events;
-- add `bashguard boundary` and a grounded debrief boundary section.
+- record session-time boundary evidence before adding a grounded debrief boundary section.
 
-Exit criteria:
+Phase exit criteria:
 
-- a developer can see the composite boundary around a session rather than assuming one;
+- a developer can see the composite detectable boundary around a session rather than assuming one;
 - coverage gaps, such as a backend mediating `bash` but not `write`, are stated rather than implied;
 - a configuration-only detection is never presented as a proven active boundary;
 - BashGuard never claims to characterize an outer container or VM it runs inside.

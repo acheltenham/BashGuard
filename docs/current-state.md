@@ -4,6 +4,8 @@
 
 BashGuard is an early-stage, local-first Pi companion. It is useful for observing and investigating recorded Pi sessions, but it is not yet a complete command guard, approval system, sandbox, recovery system, or security control.
 
+**Current development focus:** the narrow first boundary-reporting slice is in progress, followed by Command Resolution Spike 2 and then a return to the paused Phase 1 split-pane event browser. None of that planned behavior is listed as available below. See the [roadmap's current execution sequence](product/roadmap.md#current-execution-sequence) for the authoritative restart point.
+
 ## Available today
 
 When the BashGuard Pi extension is loaded before a session starts:

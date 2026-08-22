@@ -1,8 +1,12 @@
 # Split-Pane Event Browser Design
 
-**Status:** Draft — pending approval  
+**Status:** Draft — pending approval; intentionally paused, not abandoned
 **Date:** August 17, 2026  
 **Phase:** Phase 1 — Live Terminal Companion
+
+## Sequencing note
+
+This is the Phase 1 resumption point. Implementation begins after Boundary Reporting Slice 1 and Command Resolution Spike 2. No later terminal-companion slice should displace it without updating the roadmap's current execution sequence and this status.
 
 ## Goal
 

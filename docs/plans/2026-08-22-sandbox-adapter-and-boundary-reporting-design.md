@@ -1,6 +1,6 @@
 # Sandbox Adapter and Boundary Reporting Design
 
-**Status:** Approved — Slice 1 is the current implementation focus
+**Status:** Approved — Slice 1 implemented August 22, 2026
 **Date:** August 22, 2026  
 **Phase:** Intentional interruption of Phase 1; precedes Command Resolution Spike 2
 **Related:** [Issue #79](https://github.com/acheltenham/BashGuard/issues/79), [Decision 005](../adr/decision-log.md)
@@ -13,7 +13,7 @@ Let BashGuard report the containment boundary it can detect — and say plainly 
 
 This design is delivered in bounded slices rather than as one backend-integration feature:
 
-1. **In progress — Slice 1:** define `SandboxAdapter`, implement `NoSandboxAdapter`, and add `bashguard boundary` for the current environment.
+1. **Complete — Slice 1:** `SandboxAdapter`, `NoSandboxAdapter`, and `bashguard boundary` report the no-supported-backend-detected case for the current environment.
 2. **Next:** run Command Resolution Spike 2.
 3. **Resume Phase 1:** implement the paused split-pane event browser.
 4. **Then:** begin the Phase 3 authorization slice.

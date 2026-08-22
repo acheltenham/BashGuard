@@ -4,7 +4,7 @@
 
 BashGuard is an early-stage, local-first Pi companion. It is useful for observing and investigating recorded Pi sessions, but it is not yet a complete command guard, approval system, sandbox, recovery system, or security control.
 
-**Current development focus:** the narrow first boundary-reporting slice is in progress, followed by Command Resolution Spike 2 and then a return to the paused Phase 1 split-pane event browser. None of that planned behavior is listed as available below. See the [roadmap's current execution sequence](product/roadmap.md#current-execution-sequence) for the authoritative restart point.
+**Current development focus:** Boundary Reporting Slice 1 is implemented. Command Resolution Spike 2 is next, followed by a return to the paused Phase 1 split-pane event browser. See the [roadmap's current execution sequence](product/roadmap.md#current-execution-sequence) for the authoritative restart point.
 
 ## Available today
 
@@ -21,6 +21,7 @@ When the BashGuard Pi extension is loaded before a session starts:
 - reports missing, redacted, truncated, and capture-gap evidence;
 - produces active or completed-session debriefs;
 - provides a complementary Pi skill so users can ask Pi to list, inspect, and debrief the recorded evidence from inside a Pi session;
+- reports through `bashguard boundary` when no supported containment backend was detected in the current environment, with `unknown` evidence and an explicit outer-boundary limitation;
 - shows observation-only risky-command notices;
 - reports observed file-tool activity without inferring create, overwrite, or delete impact;
 - compares session-start and shutdown Git snapshots;
@@ -36,9 +37,9 @@ All narrative output is grounded in recorded local events. BashGuard does not li
 - If BashGuard is loaded from more than one package source, only the first instance records. Other instances warn and remain inactive; remove the redundant source and start a new Pi session. `bashguard doctor` can flag multiple sources visible in `pi list`, but it does not claim configured sources are active runtime instances.
 - Git and file correlations are session-level or path-overlap evidence, not proof of causality.
 - Risk notices are non-blocking review notes. BashGuard does not currently approve, block, or interrupt commands.
-- BashGuard does not and will not implement containment. It does not sandbox commands, restrict the filesystem, or restrict the network; that is the job of a sandbox backend such as Pi's first-party sandbox example, and BashGuard's planned role is to describe and report that boundary rather than enforce it. See [Decision 005](adr/decision-log.md).
-- BashGuard does not yet report what containment boundary is in force. Today it says nothing about whether a session is sandboxed, which means an unsandboxed session — Pi tools running with your full user permissions — currently looks the same as a sandboxed one. Boundary reporting is designed but not implemented.
-- BashGuard runs inside whatever boundary exists and cannot characterize an outer container or VM from within, so it will never be able to prove that no containment exists — only that none was detected.
+- BashGuard does not and will not implement containment. It does not sandbox commands, restrict the filesystem, or restrict the network; that is the job of a sandbox backend such as Pi's first-party sandbox example. BashGuard describes and reports detectable boundaries rather than enforcing them. See [Decision 005](adr/decision-log.md).
+- The first `bashguard boundary` slice recognizes only the no-supported-backend-detected case. It does not yet inspect Anthropic sandbox runtime configuration, observe backend decisions, record session-time boundary evidence, or add boundary claims to debriefs.
+- `bashguard boundary` describes the current environment, not a historical session. BashGuard runs inside whatever boundary exists and cannot characterize an outer container or VM from within, so it reports `none detected · unknown` rather than claiming no containment exists. Its full-user-permission warning is explicitly conditional on there being no outer boundary.
 - There is no pre-execution resolved-command preview yet.
 - There is no recovery/restore workflow, event replay, browser UI, cloud service, or multi-harness support.
 - The session picker and current CLI are structured text, not a full-screen split-pane TUI. The active footer does not use an alternate screen, hide the cursor, or create a split view; the richer split-pane experience remains planned separately.

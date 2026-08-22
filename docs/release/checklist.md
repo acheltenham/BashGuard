@@ -40,6 +40,7 @@ From the repository root:
 
 ```bash
 ./bin/bashguard doctor
+./bin/bashguard boundary
 ./bin/bashguard sessions
 ./bin/bashguard session list
 ./bin/bashguard sessions list
@@ -62,6 +63,7 @@ If there is at least one recorded session:
 Confirm:
 
 - `doctor` reports CLI path, package root, data dir, Pi package status, and next steps;
+- `boundary` exits successfully without a session, reports `none detected · unknown`, conditions full-user-permission exposure on the absence of an outer boundary, retains the outer-container/VM limitation, and emits no ANSI when redirected; an unexpected argument exits nonzero;
 - `sessions` output includes `#`, `SESSION`, `NAME`, `REPOSITORY`, and `UPDATED`;
 - with two simultaneous active sessions in an actual TTY, selector-less attach shows an active-only structured-text picker and accepts a non-first displayed global number; selector-less inspect/debrief show all discovered recorded sessions;
 - selector-less commands auto-select a sole eligible session, while explicit selectors bypass the picker; positional/`--session` values resolve exact ID, canonical positive decimal row, then unique prefix against the current snapshot;

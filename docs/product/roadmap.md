@@ -1,6 +1,6 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.5; Command Resolution Spike 2 complete; split-pane event browser next
+**Status:** Draft v0.5; Command Resolution Spike 2 complete; split-pane event browser in progress
 **Last updated:** August 22, 2026
 
 ## Current execution sequence
@@ -9,7 +9,7 @@ This section is the source of truth for near-term sequencing. The numbered produ
 
 1. **Complete — Boundary Reporting Slice 1:** `SandboxAdapter`, `NoSandboxAdapter`, and the current-environment `bashguard boundary` command shipped together.
 2. **Complete — Command Resolution Spike 2:** BashGuard observes the mutable command present when its handler runs; extension order, replacement-tool internals, and shell runtime can still change execution. See the [results](../research/command-resolution-spike-results.md).
-3. **Next — Resume Phase 1 with the split-pane event browser:** implement the existing `bashguard inspect --browse` design.
+3. **In progress — Resume Phase 1 with the split-pane event browser:** implement the approved `bashguard inspect --browse` design under [issue #85](https://github.com/acheltenham/BashGuard/issues/85).
 4. **Then — Phase 3 authorization:** begin narrow allow, notice, approve, and block behavior only after the spike and resumed Phase 1 slice.
 5. **Later — Backend integration:** implement the Anthropic sandbox runtime adapter and grounded session/debrief boundary evidence after the first authorization slice.
 

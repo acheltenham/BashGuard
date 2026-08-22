@@ -42,7 +42,10 @@ bashguard inspect <session-selector>
 bashguard inspect <session-selector> list events
 bashguard inspect --session <snapshot-selector>
 bashguard inspect --session-id=<full-session-id>
+bashguard inspect <session-selector> --browse
 ```
+
+`--browse` is an opt-in snapshot terminal browser. It uses split timeline/detail panes at 80+ columns and list/detail replacement below 80. Use `r` to reload recorded events; it does not live-follow, so use `attach` for live observation. `/` searches recorded evidence, `n`/`N` navigate matches, `a` cycles activity views, `?` shows help, and `q` exits. After terminal restoration it prints an exact selected-event inspect command. Do not use `--browse` for agent capture, pipes, redirects, or machine-readable work; plain inspect and JSONL remain the stable evidence paths.
 
 Inspect one event by event ID, event ID prefix, or sequence:
 

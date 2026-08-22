@@ -2,7 +2,20 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
 
-import { waitForExit } from "./test-process.ts";
+import { portablePtyUnavailableReason, runPortablePty, waitForExit } from "./test-process.ts";
+
+test("portable PTY can schedule input after an observed startup marker", async (t) => {
+  const unavailable = portablePtyUnavailableReason();
+  if (unavailable) return t.skip(unavailable);
+  const result = await runPortablePty({
+    scenario: "sleep 0.3\nprintf 'READY\\n'\nIFS= read -r answer\nprintf 'GOT:%s\\n' \"$answer\"",
+    sendAfterOutput: "READY",
+    send: [{ afterMs: 0, text: "q\n" }],
+  });
+  assert.equal(result.exitCode, 0);
+  assert.ok(result.transcript.indexOf("READY") < result.transcript.indexOf("q"));
+  assert.match(result.transcript, /GOT:q/);
+});
 
 test("waitForExit handles an already-exited child", async () => {
   const child = spawn(process.execPath, ["-e", "process.exit(7)"], { stdio: "ignore" });

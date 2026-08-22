@@ -56,6 +56,7 @@ If there is at least one recorded session:
 ./bin/bashguard attach 1 --no-live-footer
 ./bin/bashguard inspect
 ./bin/bashguard inspect 1
+./bin/bashguard inspect 1 --browse
 ./bin/bashguard debrief
 ./bin/bashguard debrief 1
 ```
@@ -79,6 +80,8 @@ Confirm:
 - completed/plain `attach 1` shows an evidence-grounded state/activity/capture/freshness snapshot;
 - default `attach 1` bounds narrated startup history, `--history 0` skips it, and `--all-history` restores it;
 - `inspect 1` lists events with sequence and event ID prefix examples;
+- in a real TTY, `inspect 1 --browse` exercises wide split, narrow replacement, navigation, search/activity controls, explicit reload, resize, help, quit, and `Ctrl+C`; terminal modes restore before the exact selected-event command appears;
+- redirected or unsupported explicit browse exits nonzero with plain alternatives and no browser ANSI, while plain inspect/filter/JSONL output is unchanged;
 - `debrief 1` renders evidence completeness and next inspect commands when applicable.
 
 ## 4. Run Pi package smoke checks

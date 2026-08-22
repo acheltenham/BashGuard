@@ -13,6 +13,8 @@ All notable project changes will be recorded here.
 
 ### Added
 
+- Added the opt-in `bashguard inspect [session] --browse` snapshot browser. Capable interactive terminals get keyboard navigation, recorded-evidence search and activity cycling, explicit reload, an 80-column split-pane threshold, narrow list/detail replacement, and an exact selected-event inspect command after terminal restoration. Plain inspect, filtered text, and JSONL output remain unchanged.
+- Added real-PTY coverage for wide and narrow layouts, resize across the split threshold, reload, search/filter navigation, normal quit, and `Ctrl+C`, plus scoped `SIGTERM`/`SIGHUP` restoration tests.
 - Added the read-only, session-independent `bashguard boundary` command and the `SandboxAdapter` contract. The first `NoSandboxAdapter` report labels no-supported-backend detection as `unknown`, conditions full-user-permission exposure on there being no outer boundary, and explicitly states that BashGuard cannot characterize an outer container or VM from inside.
 - Active `bashguard attach` in a supported TTY now replaces the startup status snapshot with an adaptive sticky footer after the ordinary header, bounded history, and guidance. Recorded changes redraw immediately, freshness refreshes about once a second, and `--no-live-footer` opts out.
 - Footer layout uses measured terminal display cells and grapheme-aware truncation: 72+ columns shows three content lines, 40–71 shows up to four, and narrower terminals show one compact line. The implementation adds `string-width` as a runtime dependency.

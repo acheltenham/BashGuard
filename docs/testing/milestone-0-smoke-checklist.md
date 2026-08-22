@@ -234,6 +234,18 @@ Confirm:
 - the footer says `Inspect by sequence or event ID prefix`;
 - both a sequence example and event ID prefix example are shown.
 
+### `bashguard inspect 1 --browse`
+
+In a real TTY, confirm:
+
+- 80+ columns shows split timeline/detail panes and 79 columns shows a single pane;
+- navigation, Enter/Escape, help, activity cycling, recorded-evidence search, and match navigation update the snapshot view;
+- appending an event is not shown until `r` explicitly reloads it;
+- `q`, `Ctrl+C`, `SIGTERM`, `SIGHUP`, errors, and stream failure restore raw mode, cursor visibility, alternate screen, and scoped listeners as applicable;
+- normal exit prints the exact full-session selected-event inspect command after restoration;
+- non-TTY, redirected, missing/dumb-TERM, and terminals below eight rows fail visibly without browser ANSI and suggest plain commands;
+- plain inspect, filtered text, and JSONL remain byte-identical without `--browse`.
+
 ### `bashguard inspect 1 --activity <kind>`
 
 Confirm:

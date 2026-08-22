@@ -8,6 +8,7 @@ import { basename, dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
+import { formatBoundaryReport, NoSandboxAdapter } from "./boundary.ts";
 import { buildLiveFooterModel, createLiveFooterController, FooterOperationError, LIVE_FOOTER_REFRESH_MS, type LiveFooterController, type StructuralWritable } from "./live-footer.ts";
 import { sessionChoiceDisplay, shellQuoteArgument, singleLineDisplay, uniqueSessionIdPrefixes } from "./session-format.ts";
 import { promptForSessionChoice } from "./session-picker.ts";
@@ -148,7 +149,7 @@ function getDataRoot(): string {
 }
 
 function usage(): never {
-  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session=<session-selector> [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session-id=<exact-session-id> [--history <n>|--all-history] [--no-live-footer]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-selector> --event <event-id-or-sequence>\n  bashguard inspect --session-id=<exact-session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-selector>\n  bashguard debrief --session-id=<exact-session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
+  process.stderr.write(`BashGuard\n\nUsage:\n  bashguard sessions\n  bashguard session list\n  bashguard sessions list\n  bashguard doctor\n  bashguard boundary\n  bashguard setup cli --global\n  bashguard setup cli --local\n  bashguard attach [session-id] [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session=<session-selector> [--history <n>|--all-history] [--no-live-footer]\n  bashguard attach --session-id=<exact-session-id> [--history <n>|--all-history] [--no-live-footer]\n  bashguard inspect [session-id]\n  bashguard inspect [session-id] --event <event-id-or-sequence>\n  bashguard inspect [session-id] --activity <kind> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect [session-id] --type <event-type> [--grep <text>] [--limit <n>|--all] [--format text|jsonl]\n  bashguard inspect --activity list\n  bashguard inspect --session=<session-selector> --event <event-id-or-sequence>\n  bashguard inspect --session-id=<exact-session-id> --event <event-id-or-sequence>\n  bashguard debrief [session-id]\n  bashguard debrief --session=<session-selector>\n  bashguard debrief --session-id=<exact-session-id>\n\nEnvironment:\n  BASHGUARD_DATA_DIR  Override session storage directory\n`);
   process.exit(1);
 }
 
@@ -170,6 +171,9 @@ export function parseCommandArgs(argv: string[]): ParsedCommandArgs {
 
   if (command !== "attach" && args.includes("--no-live-footer")) {
     throw new Error("`--no-live-footer` can only be used with `bashguard attach`");
+  }
+  if (command === "boundary" && args.length > 0) {
+    throw new Error("`bashguard boundary` does not accept arguments");
   }
 
   for (let index = 0; index < args.length; index++) {
@@ -2329,12 +2333,18 @@ export async function runAttach(options: ParsedCommandArgs, runtime: AttachRunne
 
 const cliOutputAbort = new AbortController();
 
+async function boundary(): Promise<void> {
+  const description = await new NoSandboxAdapter().describe();
+  process.stdout.write(`${formatBoundaryReport(description, terminalColumns(process.stdout))}\n`);
+}
+
 async function main(): Promise<void> {
   try {
     const options = parseCommandArgs(process.argv.slice(2));
     const { command, setupSubject, setupScope } = options;
     if (command === "sessions") return await listSessions();
     if (command === "doctor") return await doctor();
+    if (command === "boundary") return await boundary();
     if (command === "setup" && setupSubject === "cli") return await setupCli(setupScope);
     if (command === "attach") return void await runAttach(options, {
       input: process.stdin,

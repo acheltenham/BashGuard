@@ -95,6 +95,8 @@ SandboxAdapter
 
 Pi executes, the backend enforces, BashGuard describes and reports. A boundary **reported** from configuration is never presented as one **observed** to be active, and BashGuard — running inside whatever boundary exists — never claims to characterize an outer container from within.
 
+The implemented first slice defines this two-method contract and provides `NoSandboxAdapter`. `bashguard boundary` currently reports only that no supported backend was detected in the current environment, labels that absence-of-detection evidence `unknown`, and conditions its full-user-permission warning on there being no outer boundary. Configuration detection, backend decision observation, session-time evidence, and historical debrief reporting remain deferred.
+
 ## Components
 
 ### Pi Extension

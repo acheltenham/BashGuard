@@ -1,13 +1,13 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.5; Milestone 0 complete, boundary-reporting slice in progress
+**Status:** Draft v0.5; Milestone 0 and Boundary Reporting Slice 1 complete; Command Resolution Spike 2 next
 **Last updated:** August 22, 2026
 
 ## Current execution sequence
 
 This section is the source of truth for near-term sequencing. The numbered product phases below still describe the long-term capability order; this queue records the intentional interruption and exact resumption point.
 
-1. **In progress — Boundary Reporting Slice 1:** define `SandboxAdapter`, implement `NoSandboxAdapter`, and add `bashguard boundary` for the current environment.
+1. **Complete — Boundary Reporting Slice 1:** `SandboxAdapter`, `NoSandboxAdapter`, and the current-environment `bashguard boundary` command shipped together.
 2. **Next — Command Resolution Spike 2:** establish what BashGuard can distinguish among requested, wrapped, and materially executed commands.
 3. **Resume Phase 1 — Split-pane event browser:** return to the existing `bashguard inspect --browse` design after the spike.
 4. **Then — Phase 3 authorization:** begin narrow allow, notice, approve, and block behavior only after the spike and resumed Phase 1 slice.
@@ -109,7 +109,7 @@ Exit criteria:
 
 ## Phase 2.5: Boundary Reporting
 
-**Status:** Slice 1 is the current implementation focus. Later backend and historical-session slices remain deferred.
+**Status:** Slice 1 is implemented. Later backend and historical-session slices remain deferred.
 
 **Direction set by** [Decision 005](../adr/decision-log.md) and [issue #79](https://github.com/acheltenham/BashGuard/issues/79). **Designed in** [`docs/plans/2026-08-22-sandbox-adapter-and-boundary-reporting-design.md`](../plans/2026-08-22-sandbox-adapter-and-boundary-reporting-design.md).
 
@@ -117,13 +117,13 @@ Goal: tell the developer what containment boundary is detectable, and what it do
 
 BashGuard owns the authorization and observability controls and delegates containment and network policy to external sandbox backends. Integration happens through a narrow two-method `SandboxAdapter` — `describe()` and `observe()` — that never executes or orchestrates.
 
-### Slice 1 — Current-environment reporting
+### Slice 1 — Current-environment reporting — Implemented August 22, 2026
 
-- define the `SandboxAdapter` shape;
-- ship `NoSandboxAdapter`, reporting "no containment boundary detected" for the common undetected case;
-- add `bashguard boundary` for current-environment evidence;
-- preserve the limit that BashGuard cannot prove an outer container or VM is absent;
-- do not add a historical debrief claim from current configuration.
+- define the `SandboxAdapter` shape; **implemented**
+- ship `NoSandboxAdapter`, reporting "no containment boundary detected" for the common undetected case; **implemented**
+- add `bashguard boundary` for current-environment evidence; **implemented**
+- preserve the limit that BashGuard cannot prove an outer container or VM is absent; **implemented**
+- do not add a historical debrief claim from current configuration; **implemented**
 
 Slice 1 is complete when `bashguard boundary` honestly reports that no supported containment backend was detected, explains the resulting full-user-permission exposure, and preserves the outer-boundary limitation in interactive and plain output.
 

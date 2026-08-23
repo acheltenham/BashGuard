@@ -150,7 +150,7 @@ Phase exit criteria:
 
 Goal: make risky execution understandable before it happens.
 
-- requested and resolved command preview;
+- requested and BashGuard-observed command preview, with additional resolved layers only where evidence proves them;
 - working-directory and project-root context;
 - prefix and wrapper visibility;
 - target-path extraction;

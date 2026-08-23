@@ -851,7 +851,7 @@ export function buildAttachStatus(events: BashGuardEvent[], active: boolean, now
     const toolCallId = toolCallIdFor(event);
     if (!toolCallId) continue;
     if (event.type === "tool.requested") outstanding.set(toolCallId, event);
-    if (event.type === "tool.completed") outstanding.delete(toolCallId);
+    if (event.type === "tool.completed" || event.type === "command.declined" || event.type === "command.blocked") outstanding.delete(toolCallId);
   }
 
   const currentRequest = active ? Array.from(outstanding.values()).at(-1) : undefined;

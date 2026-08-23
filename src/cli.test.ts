@@ -1195,6 +1195,32 @@ test("buildAttachStatus reports only correlated unmatched tool requests as curre
   });
 });
 
+test("buildAttachStatus closes blocked requests but keeps approved calls pending completion", () => {
+  const request = event(2, "tool.requested", {
+    toolName: "bash",
+    toolCallId: "call-approval",
+    payload: { toolCallId: "call-approval", input: { command: "rm -rf build" } },
+  });
+  const approved = buildAttachStatus([
+    request,
+    event(3, "command.approved", { toolName: "bash", toolCallId: "call-approval", payload: { toolCallId: "call-approval", observedCommand: "rm -rf build" } }),
+  ], true);
+  assert.equal(approved.activityLabel, "Current activity");
+  assert.equal(approved.evidence, "request recorded; completion not recorded yet");
+
+  const blocked = buildAttachStatus([
+    request,
+    event(3, "command.blocked", {
+      toolName: "bash",
+      toolCallId: "call-approval",
+      payload: { toolCallId: "call-approval", observedCommand: "rm -rf build", reason: "Approval was declined." },
+    }),
+  ], true);
+  assert.equal(blocked.activityLabel, "Last activity");
+  assert.equal(blocked.activity, "Blocked by BashGuard authorization · rm -rf build · Approval was declined.");
+  assert.equal(blocked.evidence, "recorded event");
+});
+
 test("buildAttachStatus uses append-order completion correlation and falls back to last activity", () => {
   const now = Date.parse("2026-08-13T12:00:10.000Z");
   const status = buildAttachStatus([

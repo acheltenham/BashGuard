@@ -56,7 +56,7 @@ Success statement:
 
 - Provide a live narrated view of a running Pi session in a separate terminal.
 - Attach to active or completed sessions using Pi's session identity.
-- Show the exact resolved command before risky execution.
+- Show the strongest available command identity before risky execution and state which later execution layers remain unobserved.
 - Correlate prompts, tools, commands, results, files, and Git state.
 - Explain every warning, approval request, and block in plain language.
 - Support investigation and event replay without rerunning commands.
@@ -134,12 +134,13 @@ Requirements:
 - ground every narrative statement in recorded events;
 - avoid claiming task success solely from an exit code.
 
-### 3. Resolved Command Preview
+### 3. Command Preview and Identity
 
 Before risky shell execution, BashGuard should show:
 
-- requested command;
-- resolved command;
+- requested command where available;
+- the command input observed at BashGuard's handler;
+- any materially executed command layer that later integrations can actually prove;
 - command segments in pipelines or chains;
 - working directory and project root;
 - shell prefixes or wrappers;
@@ -149,7 +150,7 @@ Before risky shell execution, BashGuard should show:
 - triggering prompt or turn where available;
 - safer alternative where useful.
 
-The developer must never approve a simplified label while a materially different command executes.
+The approval surface must never imply that BashGuard-observed text is the universal resolved command when later handlers, replacement-tool wrappers, shell expansion, or child processes remain unknown. If a later integration can prove that a materially different command will execute, it must require a new decision rather than reusing approval for a simplified label.
 
 Approval remains in the active Pi interaction. The companion terminal mirrors and enriches the context.
 

@@ -1,6 +1,6 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.5; split-pane event browser complete; Phase 3 authorization next
+**Status:** Draft v0.5; Phase 3 recursive forced-deletion approval slice in progress
 **Last updated:** August 22, 2026
 
 ## Current execution sequence
@@ -10,7 +10,7 @@ This section is the source of truth for near-term sequencing. The numbered produ
 1. **Complete — Boundary Reporting Slice 1:** `SandboxAdapter`, `NoSandboxAdapter`, and the current-environment `bashguard boundary` command shipped together.
 2. **Complete — Command Resolution Spike 2:** BashGuard observes the mutable command present when its handler runs; extension order, replacement-tool internals, and shell runtime can still change execution. See the [results](../research/command-resolution-spike-results.md).
 3. **Complete — Resume Phase 1 with the split-pane event browser:** the approved opt-in snapshot `bashguard inspect --browse` design shipped under [issue #85](https://github.com/acheltenham/BashGuard/issues/85).
-4. **Next — Phase 3 authorization:** begin narrow allow, notice, approve, and block behavior now that the spike and resumed Phase 1 slice are complete.
+4. **In progress — Phase 3 authorization:** implement one-time approval for BashGuard-observed recursive forced-deletion Bash tool calls under [issue #87](https://github.com/acheltenham/BashGuard/issues/87) and the [approved design](../plans/2026-08-22-recursive-delete-approval-design.md).
 5. **Later — Backend integration:** implement the Anthropic sandbox runtime adapter and grounded session/debrief boundary evidence after the first authorization slice.
 
 When work pauses mid-slice, update the status here and the corresponding plan before starting a different slice. Completed items should remain visible until the next item has started, so the restart point is unambiguous.
@@ -142,6 +142,8 @@ Phase exit criteria:
 - BashGuard never claims to characterize an outer container or VM it runs inside.
 
 ## Phase 3: Resolved Command Guard
+
+**Current slice:** One-time approval for recursive forced-deletion Bash tool calls is in progress. The [Slice 1 design](../plans/2026-08-22-recursive-delete-approval-design.md#explicitly-deferred-work) records additional rules, policy lifecycle, command-identity work, recovery, and stronger controls that remain explicitly deferred.
 
 **Scope note:** this phase is the *authorization* control — allow, notice, approve, or block a specific tool call, with an explanation. It is not containment. Pi's `tool_call` hook supports blocking and input mutation directly, and BashGuard already subscribes to that hook for capture. Spike 2 is complete and shows that the approval surface must distinguish BashGuard-observed command input from later handler mutations, replacement-tool wrappers, and runtime shell behavior.
 

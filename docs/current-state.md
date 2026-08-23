@@ -4,7 +4,7 @@
 
 BashGuard is an early-stage, local-first Pi companion. It is useful for observing and investigating recorded Pi sessions, but it is not yet a complete command guard, approval system, sandbox, recovery system, or security control.
 
-**Current development focus:** Boundary Reporting Slice 1, Command Resolution Spike 2, and the resumed Phase 1 split-pane event browser are complete. The next implementation slice is narrow Phase 3 authorization. See the [roadmap's current execution sequence](product/roadmap.md#current-execution-sequence) for the authoritative restart point.
+**Current development focus:** Boundary Reporting Slice 1, Command Resolution Spike 2, and the resumed Phase 1 split-pane event browser are complete. A narrow Phase 3 one-time approval slice for BashGuard-observed recursive forced-deletion Bash tool calls is in progress under [issue #87](https://github.com/acheltenham/BashGuard/issues/87). Its [design](plans/2026-08-22-recursive-delete-approval-design.md#explicitly-deferred-work) explicitly tracks authorization, command-identity, recovery, and stronger-control work not included in this slice. See the [roadmap's current execution sequence](product/roadmap.md#current-execution-sequence) for the authoritative restart point.
 
 ## Available today
 

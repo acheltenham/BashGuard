@@ -13,6 +13,9 @@ All notable project changes will be recorded here.
 
 ### Added
 
+- Added Phase 3 Slice 1 authorization for agent-initiated Pi `bash` tool calls matching BashGuard's existing recursive forced-deletion check. The active recorder owner shows the BashGuard-observed command, cwd, impact, and command-identity limitations in Pi; Run once permits that call, while decline, unavailable UI, or confirmation failure returns Pi's block result.
+- Recorded `command.evaluated`, `command.approval_requested`, `command.approved`, `command.declined`, and `command.blocked` evidence. Timeline, inspect/browser, risk/tool filters, and debrief now explain available decisions and distinguish a recorded block from missing completion evidence.
+- Added unit, extension, writer/reader integration, non-interactive real-Pi, and interactive real-PTY Run once/Decline validation using disposable temporary targets.
 - Added the opt-in `bashguard inspect [session] --browse` snapshot browser. Capable interactive terminals get keyboard navigation, recorded-evidence search and activity cycling, explicit reload, an 80-column split-pane threshold, narrow list/detail replacement, and an exact selected-event inspect command after terminal restoration. Plain inspect, filtered text, and JSONL output remain unchanged.
 - Added real-PTY coverage for wide and narrow layouts, resize across the split threshold, reload, search/filter navigation, normal quit, and `Ctrl+C`, plus scoped `SIGTERM`/`SIGHUP` restoration tests.
 - Added the read-only, session-independent `bashguard boundary` command and the `SandboxAdapter` contract. The first `NoSandboxAdapter` report labels no-supported-backend detection as `unknown`, conditions full-user-permission exposure on there being no outer boundary, and explicitly states that BashGuard cannot characterize an outer container or VM from inside.

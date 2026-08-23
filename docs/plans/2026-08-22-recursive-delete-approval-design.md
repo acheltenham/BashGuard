@@ -1,6 +1,6 @@
 # Recursive Forced-Deletion Approval Design
 
-**Status:** Approved — implementation pending
+**Status:** Implemented and validated
 **Phase:** Phase 3 — Resolved Command Guard, Slice 1
 **Issue:** [#87](https://github.com/acheltenham/BashGuard/issues/87)
 
@@ -196,6 +196,10 @@ The following are intentionally not lost; they remain future roadmap work rather
 - complete secret-aware display/persistence beyond current recorder sanitization.
 
 These items must remain visible in the roadmap/current-state documentation when Slice 1 is marked complete. The next slice should be selected explicitly rather than inferred from this list.
+
+## Validation result
+
+Unit, extension, writer/reader integration, non-interactive real-Pi, and interactive real-PTY validation passed. Run once removed only a disposable temporary target; decline and unavailable UI preserved their disposable targets. See [the validation record](../testing/recursive-delete-approval-validation.md).
 
 ## Success criteria
 

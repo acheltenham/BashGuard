@@ -178,17 +178,29 @@ Large output may be stored separately and referenced to keep the event stream us
 
 ## Decision Payload
 
+Phase 3 Slice 1 records:
+
 ```text
-outcome: allow | notice | approval | block
+toolCallId
+toolName
+observedCommand
+workingDirectory
+outcome: approval | allow | block
 reason
-matched_check
-risk_factors
-affected_resources
-safer_alternative
-override_available
+matchedCheck: recursive-forced-deletion
+riskFactors
+potentialImpact
+overrideAvailable: true
+authorization: run_once              # approved only
+cause: declined | approval_unavailable | approval_error  # blocked/declined
+decisionSource: bashguard_authorization
+evidence: bashguard_tool_call_input
+limitations
 ```
 
-Every interruption must be explainable from this payload.
+Append order is `tool.requested`, `command.evaluated`, optional `command.approval_requested`, then the final approved or declined/blocked evidence. A declined call records both the human response and Pi block instruction. Blocked calls do not fabricate `tool.completed`.
+
+Future decision payloads may add affected resources and safer alternatives after target extraction exists. Every interruption must remain explainable from recorded payloads.
 
 ## File Correlation
 

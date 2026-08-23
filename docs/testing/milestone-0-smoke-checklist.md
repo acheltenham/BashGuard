@@ -82,7 +82,7 @@ Optional controlled risk-notice check:
 Run: echo "risk smoke" && git status
 ```
 
-Avoid destructive commands in a real project. Risk notices are currently observation-only and non-blocking.
+Avoid destructive commands in a real project. Recursive forced deletion is now approval-gated for agent-initiated Pi Bash tool calls; the other current risk patterns remain observation-only. Test approval only in a fresh disposable temporary project, following [the validation procedure](recursive-delete-approval-validation.md).
 
 ## 5. Inspect from another terminal
 
@@ -224,7 +224,7 @@ In a real PTY attached to an active recorded session, confirm:
 - sequence numbers and event ID prefixes are visible;
 - shell commands are shown with cwd/session context in the header;
 - complete raw events remain available through inspect/JSONL;
-- non-blocking risk notices are labelled `Non-blocking risk notice` when applicable.
+- recursive forced-deletion requests are neutrally labelled `Risk detected` until correlated decision evidence appears; other applicable risk notices remain labelled `Non-blocking risk notice`.
 
 ### `bashguard inspect 1`
 

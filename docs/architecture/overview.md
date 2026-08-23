@@ -260,7 +260,9 @@ Automated checkpoints must be conservative and should not silently alter normal 
 
 Approvals remain inside Pi because that is where the developer is acting.
 
-The approval surface should show the materially relevant command, working directory, potential impact, explanation, and available choices. The attached companion mirrors the full context for visibility but should not require terminal switching to continue execution.
+Phase 3 Slice 1 implements one-time approval for agent-initiated Bash tool calls matching recursive forced deletion. The active recorder owner shows the complete BashGuard-observed command, working directory, impact, transparent check, and execution-may-differ limitations. Run once allows only that call; decline, missing UI, or confirmation failure returns Pi's blocking result. Duplicate recorder instances remain inert.
+
+The attached companion mirrors recorded evaluated/requested/approved/declined/blocked evidence but is not an approval surface. This control is authorization through Pi's hook, not containment. Additional rules, persistent policy, other tools, target extraction, safer alternatives, and resolved-command layers remain deferred.
 
 ## Storage
 

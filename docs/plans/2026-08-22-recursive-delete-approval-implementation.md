@@ -1,5 +1,7 @@
 # Recursive Forced-Deletion Approval Implementation Plan
 
+**Status:** Complete — implementation and real-Pi validation finished August 22, 2026
+
 > **REQUIRED SUB-SKILL:** Use the executing-plans skill to implement this plan task-by-task.
 
 **Goal:** Require one-time in-Pi approval for agent-initiated Bash tool calls whose BashGuard-observed command matches the existing recursive forced-deletion check, while preserving safe workflows and grounded decision evidence.

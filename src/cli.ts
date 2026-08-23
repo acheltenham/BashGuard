@@ -9,7 +9,7 @@ import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 import { formatBoundaryReport, NoSandboxAdapter } from "./boundary.ts";
-import { classifyCommandRisk, explainCommandRisk as explainRisk } from "./command-risk.ts";
+import { DESTRUCTIVE_FILESYSTEM_REMOVAL, classifyCommandRisk, explainCommandRisk as explainRisk } from "./command-risk.ts";
 export { classifyCommandRisk } from "./command-risk.ts";
 import { createBrowserModel, replaceBrowserEvents, transitionBrowser, type BrowserDependencies, type BrowserInput, type BrowserModel } from "./browse-model.ts";
 import { runBrowserTerminal, type BrowserTerminalKey } from "./browse-terminal.ts";
@@ -94,6 +94,11 @@ export type DebriefSummary = {
   fileToolActions: number;
   failedCommands: number;
   riskyCommands: number;
+  approvalRequests: number;
+  approvedCommands: number;
+  declinedCommands: number;
+  blockedCommands: number;
+  authorizationActivity: string[];
   gitStatus?: string;
   gitBranch?: string;
   gitWorktree?: string;
@@ -596,7 +601,10 @@ function formatRiskWithExplanation(risk: string): string {
 
 function formatRiskNotice(command: string): string | undefined {
   const risks = classifyCommandRisk(command);
-  return risks.length > 0 ? `Non-blocking risk notice: ${risks.join(", ")}` : undefined;
+  if (risks.length === 0) return undefined;
+  return risks.includes(DESTRUCTIVE_FILESYSTEM_REMOVAL)
+    ? `Risk detected: ${risks.join(", ")}`
+    : `Non-blocking risk notice: ${risks.join(", ")}`;
 }
 
 export function renderEvent(event: BashGuardEvent): string | undefined {
@@ -650,6 +658,27 @@ export function renderEvent(event: BashGuardEvent): string | undefined {
       if (command && riskNotice) return `You ran · ${command} · ${riskNotice}`;
       return command ? `You ran · ${command}` : "You ran a shell command";
     }
+    case "command.evaluated": {
+      const command = getString(payload.observedCommand);
+      return command ? `Approval required · BashGuard-observed command · ${command}` : "Approval required for BashGuard-observed command";
+    }
+    case "command.approval_requested": {
+      const command = getString(payload.observedCommand);
+      return command ? `Approval requested · ${command}` : "Approval requested";
+    }
+    case "command.approved": {
+      const command = getString(payload.observedCommand);
+      return command ? `Approved once · ${command}` : "Approved once";
+    }
+    case "command.declined": {
+      const command = getString(payload.observedCommand);
+      return command ? `Approval declined · ${command}` : "Approval declined";
+    }
+    case "command.blocked": {
+      const command = getString(payload.observedCommand);
+      const reason = getString(payload.reason);
+      return ["Blocked by BashGuard authorization", command, reason].filter(Boolean).join(" · ");
+    }
     case "capture.gap": {
       const reason = getString(payload.reason);
       const tool = getString(payload.failedToolName);
@@ -690,7 +719,7 @@ const ACTIVITY_DESCRIPTIONS: Record<ActivityKind, string> = {
   shell: "Pi Bash commands, user Bash commands, and command results",
   file: "Read, edit, and write-tool requests and results",
   git: "Recorded Git status snapshots",
-  risk: "Shell requests matching non-blocking risk rules",
+  risk: "Shell requests matching risk rules and recorded authorization decisions",
   capture: "Capture gaps or events with missing, redacted, or truncated evidence",
   prompt: "Recorded prompt and agent-start context",
   tool: "All recorded tool requests and results",
@@ -706,10 +735,10 @@ export function eventMatchesActivity(event: BashGuardEvent, activity: ActivityKi
   if (activity === "shell") return event.type === "bash.user_requested" || ((event.type === "tool.requested" || event.type === "tool.completed") && toolName === "bash");
   if (activity === "file") return (event.type === "tool.requested" || event.type === "tool.completed") && ["read", "edit", "write"].includes(toolName ?? "");
   if (activity === "git") return event.type === "git.status.snapshot";
-  if (activity === "risk") return event.type === "tool.requested" && toolName === "bash" && classifyCommandRisk(commandFor(event) ?? "").length > 0;
+  if (activity === "risk") return event.type.startsWith("command.") || (event.type === "tool.requested" && toolName === "bash" && classifyCommandRisk(commandFor(event) ?? "").length > 0);
   if (activity === "capture") return event.type === "capture.gap" || (event.capture?.missing.length ?? 0) > 0 || (event.capture?.redacted.length ?? 0) > 0 || (event.capture?.truncated.length ?? 0) > 0;
   if (activity === "prompt") return event.type === "agent.before_start";
-  if (activity === "tool") return event.type === "tool.requested" || event.type === "tool.completed";
+  if (activity === "tool") return event.type === "tool.requested" || event.type === "tool.completed" || event.type.startsWith("command.");
   return event.type.startsWith("session.") || event.type === "agent.started" || event.type === "agent.ended" || event.type.startsWith("turn.");
 }
 
@@ -1079,7 +1108,7 @@ export function formatEventInspection(event: BashGuardEvent): string {
   const input = payload.input as Record<string, unknown> | undefined;
   const details = payload.details as Record<string, unknown> | undefined;
   const tool = normalized.toolName ?? getString(payload.toolName);
-  const command = getString(payload.command) ?? getString(input?.command);
+  const command = getString(payload.command) ?? getString(payload.observedCommand) ?? getString(input?.command);
   const path = getString(payload.path) ?? getString(input?.path);
   const exitCode = getNumber(details?.exitCode);
   const riskFactors = command ? classifyCommandRisk(command) : [];
@@ -1108,6 +1137,13 @@ export function formatEventInspection(event: BashGuardEvent): string {
     formatField("Tool", tool),
     formatField("Tool call", normalized.toolCallId ?? getString(payload.toolCallId)),
     formatField("Command", command),
+    formatField("Working directory", getString(payload.workingDirectory)),
+    formatField("Matched check", getString(payload.matchedCheck)),
+    formatField("Potential impact", getString(payload.potentialImpact)),
+    formatField("Decision source", getString(payload.decisionSource)),
+    formatField("Authorization", getString(payload.authorization)),
+    formatField("Block cause", getString(payload.cause)),
+    formatField("Limitations", getStringArray(payload.limitations).join("; ")),
     formatField("Risk factors", riskFactors.join(", ")),
     formatField("Risk why", riskWhy.join("; ")),
     formatField("Path", path),
@@ -1146,7 +1182,7 @@ function pathFor(event: BashGuardEvent): string | undefined {
 
 function commandFor(event: BashGuardEvent): string | undefined {
   const payload = event.payload ?? {};
-  return getString(payload.command) ?? getString(inputFor(event)?.command);
+  return getString(payload.command) ?? getString(payload.observedCommand) ?? getString(inputFor(event)?.command);
 }
 
 function toolCallIdFor(event: BashGuardEvent): string | undefined {
@@ -1405,6 +1441,18 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const durationMs = timestamps.length > 1 ? Math.max(...timestamps) - Math.min(...timestamps) : 0;
   const toolRequests = normalizedEvents.filter((event) => event.type === "tool.requested");
   const shellRequests = toolRequests.filter((event) => toolNameFor(event) === "bash");
+  const approvalRequestEvents = normalizedEvents.filter((event) => event.type === "command.approval_requested");
+  const approvedEvents = normalizedEvents.filter((event) => event.type === "command.approved");
+  const declinedEvents = normalizedEvents.filter((event) => event.type === "command.declined");
+  const blockedEvents = normalizedEvents.filter((event) => event.type === "command.blocked");
+  const authorizationActivity = [...approvedEvents, ...blockedEvents]
+    .sort((left, right) => normalizedEvents.indexOf(left) - normalizedEvents.indexOf(right))
+    .map((event) => {
+      const command = commandFor(event) ?? "unknown command";
+      if (event.type === "command.approved") return `event ${event.sequence} · approved once · BashGuard-observed \`${command}\``;
+      const reason = getString(event.payload?.reason);
+      return `event ${event.sequence} · blocked · \`${command}\`${reason ? ` · ${reason}` : ""} · Pi was instructed to block this tool call`;
+    });
   const commandByToolCallId = new Map(
     shellRequests
       .map((event) => {
@@ -1456,8 +1504,10 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
       })
       .filter((entry): entry is readonly [string, BashGuardEvent] => entry !== undefined),
   );
+  const blockedToolCallIds = new Set(blockedEvents.map(toolCallIdFor).filter((id): id is string => id !== undefined));
   const resultEvidenceFor = (event: BashGuardEvent): string => {
     const toolCallId = toolCallIdFor(event);
+    if (toolCallId && blockedToolCallIds.has(toolCallId)) return "blocked before execution by recorded authorization decision";
     const completion = toolCallId ? completionByToolCallId.get(toolCallId) : undefined;
     if (!completion) return "missing command completion evidence";
     const exitCode = bashExitCodeFor(completion);
@@ -1556,6 +1606,8 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   ].filter((item): item is string => item !== undefined);
   const nextInspectCommands: string[] = [];
   for (const event of riskyCommandEvents) addInspectCommand(nextInspectCommands, event.sequence, "risky shell command");
+  for (const event of blockedEvents) addInspectCommand(nextInspectCommands, event.sequence, "blocked authorization decision");
+  for (const event of approvedEvents) addInspectCommand(nextInspectCommands, event.sequence, "approved authorization decision");
   if (gitReviewItem && gitEndSnapshot) addInspectCommand(nextInspectCommands, gitEndSnapshot.sequence, "shutdown Git snapshot");
   for (const detail of Array.isArray(gitEndSnapshot?.payload?.changedFileDetails) ? gitEndSnapshot.payload.changedFileDetails : []) {
     const path = typeof detail === "object" && detail !== null ? getString((detail as Record<string, unknown>).path) : undefined;
@@ -1596,6 +1648,11 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
     fileToolActions: fileActivity.length,
     failedCommands,
     riskyCommands,
+    approvalRequests: approvalRequestEvents.length,
+    approvedCommands: approvedEvents.length,
+    declinedCommands: declinedEvents.length,
+    blockedCommands: blockedEvents.length,
+    authorizationActivity,
     gitStatus,
     gitBranch,
     gitWorktree,
@@ -1639,6 +1696,10 @@ export function formatDebrief(summary: DebriefSummary, options: DebriefFormatOpt
     formatField("File tool actions", summary.fileToolActions),
     formatField("Failed commands", summary.failedCommands),
     formatField("Risk notices", summary.riskyCommands),
+    formatField("Approval requests", summary.approvalRequests > 0 ? summary.approvalRequests : undefined),
+    formatField("Approved commands", summary.approvedCommands > 0 ? summary.approvedCommands : undefined),
+    formatField("Declined commands", summary.declinedCommands > 0 ? summary.declinedCommands : undefined),
+    formatField("Blocked commands", summary.blockedCommands > 0 ? summary.blockedCommands : undefined),
     formatField("Git status", summary.gitStatus),
     formatField("Git branch", summary.gitBranch),
     formatField("Git worktree", summary.gitWorktree),
@@ -1648,6 +1709,10 @@ export function formatDebrief(summary: DebriefSummary, options: DebriefFormatOpt
 
   if (summary.worthReviewing.length > 0) {
     lines.push("", "Worth reviewing", ...summary.worthReviewing.map((item) => `- ${item}`));
+  }
+
+  if ((summary.authorizationActivity?.length ?? 0) > 0) {
+    lines.push("", "Authorization decisions", ...summary.authorizationActivity.map((item) => `- ${item}`));
   }
 
   if (summary.githubActivity.length > 0) {

@@ -21,11 +21,13 @@ test("an unwritable event stream notifies Pi without rejecting the tool event", 
       },
       registerCommand() {},
     };
+    const approvals = [true, false];
     const ctx = {
       cwd: project,
       hasUI: true,
       sessionManager: { sessionId: "failure-session", getLeafId: () => undefined },
       ui: {
+        async confirm() { return approvals.shift() ?? false; },
         notify(message: string, level: string) {
           notifications.push({ message, level });
         },
@@ -42,11 +44,22 @@ test("an unwritable event stream notifies Pi without rejecting the tool event", 
     await rename(eventsFile, join(sessionDirectory, "events.before-failure.jsonl"));
     await mkdir(eventsFile);
 
-    await assert.doesNotReject(() => handlers.get("tool_call")?.({
-      toolCallId: "call-1",
-      toolName: "read",
-      input: { path: "README.md" },
-    }, ctx));
+    const approved = await handlers.get("tool_call")?.({
+      toolCallId: "call-approved",
+      toolName: "bash",
+      input: { command: "rm -rf disposable-approved-target" },
+    }, ctx);
+    assert.equal(approved, undefined, "capture failure must not reverse Run once");
+
+    const declined = await handlers.get("tool_call")?.({
+      toolCallId: "call-declined",
+      toolName: "bash",
+      input: { command: "rm -rf disposable-declined-target" },
+    }, ctx);
+    assert.deepEqual(declined, {
+      block: true,
+      reason: "BashGuard blocked recursive forced deletion because approval was declined.",
+    });
     assert.ok(notifications.some(({ message, level }) => level === "error" && message.startsWith("BashGuard capture failed:")));
   } finally {
     await rm(dataRoot, { recursive: true, force: true });

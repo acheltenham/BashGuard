@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { authorizeToolCall } from "../../src/command-authorization.ts";
 import { acquireRecorderLock, releaseRecorderLock, type RecorderLockOwner } from "./recorder-lock.ts";
 
 type EvidenceKind = "observed" | "reported" | "inferred" | "redacted" | "missing";
@@ -495,6 +496,17 @@ export default function bashGuard(pi: ExtensionAPI): void {
       toolCallId: event.toolCallId,
       toolName: event.toolName,
       input: event.input,
+    });
+    if (recordingDisabled || !state) return undefined;
+    return authorizeToolCall({
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      input: event.input,
+      cwd: ctx.cwd,
+      hasUI: ctx.hasUI,
+    }, {
+      record: (type, payload) => record(type, ctx, payload),
+      confirm: (title, body) => ctx.ui.confirm(title, body),
     });
   });
 

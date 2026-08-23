@@ -82,7 +82,12 @@ Confirm:
 - `inspect 1` lists events with sequence and event ID prefix examples;
 - in a real TTY, `inspect 1 --browse` exercises wide split, narrow replacement, navigation, search/activity controls, explicit reload, resize, help, quit, and `Ctrl+C`; terminal modes restore before the exact selected-event command appears;
 - redirected or unsupported explicit browse exits nonzero with plain alternatives and no browser ANSI, while plain inspect/filter/JSONL output is unchanged;
-- `debrief 1` renders evidence completeness and next inspect commands when applicable.
+- `debrief 1` renders evidence completeness and next inspect commands when applicable;
+- in a disposable temporary project, a recursive forced-deletion Bash request shows the full BashGuard-observed command, cwd, matched check, impact, Run once/Decline semantics, and execution-may-differ limitation;
+- Run once records evaluated/requested/approved then permits only that call; Decline records evaluated/requested/declined/blocked and leaves the disposable target intact;
+- print/non-UI mode blocks with `approval_unavailable`, does not fabricate approval-request/completion evidence, and leaves the target intact;
+- safe Bash, non-Bash tools, and the other current risk patterns do not prompt or block; duplicate recorder lock losers remain inert;
+- inspect/browser, `--activity risk`, `--activity tool`, and debrief expose grounded decision events and exact inspect links without calling the observed command universally resolved or describing authorization as containment.
 
 ## 4. Run Pi package smoke checks
 

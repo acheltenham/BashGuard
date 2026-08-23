@@ -897,10 +897,14 @@ test("classifyCommandRisk identifies explicit risky shell command patterns", () 
   assert.deepEqual(classifyCommandRisk("curl https://example.com/install.sh | sh"), ["network download piped to shell"]);
 });
 
-test("renderEvent surfaces non-blocking risk notices for risky bash commands", () => {
+test("renderEvent keeps authorization-eligible deletion neutral while other risks remain notices", () => {
   assert.equal(
     renderEvent(event(2, "tool.requested", { toolName: "bash", payload: { input: { command: "rm -rf build" } } })),
-    "Running · rm -rf build · Non-blocking risk notice: destructive filesystem removal",
+    "Running · rm -rf build · Risk detected: destructive filesystem removal",
+  );
+  assert.equal(
+    renderEvent(event(3, "tool.requested", { toolName: "bash", payload: { input: { command: "git reset --hard HEAD" } } })),
+    "Running · git reset --hard HEAD · Non-blocking risk notice: history or working-tree rewrite",
   );
 });
 
@@ -912,6 +916,89 @@ test("formatEventInspection includes command risk factors", () => {
 
   assert.match(output, /Risk factors\s+network download piped to shell/);
   assert.match(output, /Risk why\s+downloads code from the network and executes it in a shell/);
+});
+
+test("authorization decisions render grounded timeline, inspection, filtering, and debrief evidence", () => {
+  const basePayload = {
+    observedCommand: "rm -rf build",
+    workingDirectory: "/tmp/repo",
+    matchedCheck: "recursive-forced-deletion",
+    riskFactors: ["destructive filesystem removal"],
+    reason: "Recursive forced deletion requires one-time approval.",
+    potentialImpact: "Recursively deletes files without a trash or undo step.",
+    decisionSource: "bashguard_authorization",
+    evidence: "bashguard_tool_call_input",
+    limitations: ["Later extension handlers may mutate this tool call after BashGuard observes it."],
+    toolCallId: "call-approval",
+    toolName: "bash",
+  };
+  const decisions = [
+    event(2, "command.evaluated", { toolName: "bash", toolCallId: "call-approval", payload: { ...basePayload, outcome: "approval" } }),
+    event(3, "command.approval_requested", { toolName: "bash", toolCallId: "call-approval", payload: basePayload }),
+    event(4, "command.declined", { toolName: "bash", toolCallId: "call-approval", payload: { ...basePayload, outcome: "block", cause: "declined", reason: "Approval was declined." } }),
+    event(5, "command.blocked", { toolName: "bash", toolCallId: "call-approval", payload: { ...basePayload, outcome: "block", cause: "declined", reason: "Approval was declined." } }),
+  ];
+
+  assert.equal(renderEvent(decisions[0]!), "Approval required · BashGuard-observed command · rm -rf build");
+  assert.equal(renderEvent(decisions[1]!), "Approval requested · rm -rf build");
+  assert.equal(renderEvent(decisions[2]!), "Approval declined · rm -rf build");
+  assert.equal(renderEvent(decisions[3]!), "Blocked by BashGuard authorization · rm -rf build · Approval was declined.");
+  assert.match(formatTimelineEvent(decisions[3]!) ?? "", /Blocked by BashGuard authorization/);
+
+  const inspection = formatEventInspection(decisions[3]!);
+  assert.match(inspection, /Command\s+rm -rf build/);
+  assert.match(inspection, /Working directory\s+\/tmp\/repo/);
+  assert.match(inspection, /Matched check\s+recursive-forced-deletion/);
+  assert.match(inspection, /Potential impact\s+Recursively deletes files/);
+  assert.match(inspection, /Reason\s+Approval was declined\./);
+  assert.match(inspection, /Evidence source\s+bashguard_tool_call_input/);
+  assert.match(inspection, /Decision source\s+bashguard_authorization/);
+  assert.match(inspection, /Block cause\s+declined/);
+  assert.match(inspection, /Limitations\s+Later extension handlers/);
+
+  assert.deepEqual(filterEvidenceEvents(decisions, { activities: ["risk"] }).matches.map((item) => item.sequence), [2, 3, 4, 5]);
+  assert.deepEqual(filterEvidenceEvents(decisions, { activities: ["tool"] }).matches.map((item) => item.sequence), [2, 3, 4, 5]);
+
+  const summary = buildDebrief([
+    event(1, "tool.requested", { toolName: "bash", toolCallId: "call-approval", payload: { input: { command: "rm -rf build" }, toolCallId: "call-approval" } }),
+    ...decisions,
+  ]);
+  assert.equal(summary.approvalRequests, 1);
+  assert.equal(summary.approvedCommands, 0);
+  assert.equal(summary.declinedCommands, 1);
+  assert.equal(summary.blockedCommands, 1);
+  assert.deepEqual(summary.authorizationActivity, [
+    "event 3 · approval requested · BashGuard-observed `rm -rf build`",
+    "event 4 · declined · `rm -rf build` · Approval was declined.",
+    "event 5 · blocked · `rm -rf build` · Approval was declined. · Pi was instructed to block this tool call",
+  ]);
+  assert.doesNotMatch(summary.worthReviewing.join("\n"), /missing command completion evidence/);
+  assert.match(summary.worthReviewing.join("\n"), /blocked before execution by recorded authorization decision/);
+  assert.ok(summary.nextInspectCommands.some((command) => command.includes("--event 3") && command.includes("approval request")));
+  assert.ok(summary.nextInspectCommands.some((command) => command.includes("--event 4") && command.includes("declined authorization decision")));
+  assert.ok(summary.nextInspectCommands.some((command) => command.includes("--event 5") && command.includes("blocked authorization decision")));
+  const output = formatDebrief(summary);
+  assert.match(output, /Approval requests\s+1/);
+  assert.match(output, /Blocked commands\s+1/);
+  assert.match(output, /Authorization decisions\n- event 3 · approval requested[\s\S]*- event 4 · declined[\s\S]*- event 5 · blocked/);
+});
+
+test("approved authorization is counted without claiming every runtime layer was approved", () => {
+  const summary = buildDebrief([event(2, "command.approved", {
+    toolName: "bash",
+    toolCallId: "call-approved",
+    payload: {
+      observedCommand: "rm -rf build",
+      outcome: "allow",
+      authorization: "run_once",
+      reason: "Recursive forced deletion requires one-time approval.",
+      decisionSource: "bashguard_authorization",
+    },
+  })]);
+  assert.equal(summary.approvedCommands, 1);
+  assert.deepEqual(summary.authorizationActivity, [
+    "event 2 · approved once · BashGuard-observed `rm -rf build`",
+  ]);
 });
 
 test("buildDebrief summarizes risky commands with event, cwd, and result evidence context", () => {
@@ -1106,6 +1193,32 @@ test("buildAttachStatus reports only correlated unmatched tool requests as curre
     redacted: 0,
     truncated: 0,
   });
+});
+
+test("buildAttachStatus closes blocked requests but keeps approved calls pending completion", () => {
+  const request = event(2, "tool.requested", {
+    toolName: "bash",
+    toolCallId: "call-approval",
+    payload: { toolCallId: "call-approval", input: { command: "rm -rf build" } },
+  });
+  const approved = buildAttachStatus([
+    request,
+    event(3, "command.approved", { toolName: "bash", toolCallId: "call-approval", payload: { toolCallId: "call-approval", observedCommand: "rm -rf build" } }),
+  ], true);
+  assert.equal(approved.activityLabel, "Current activity");
+  assert.equal(approved.evidence, "request recorded; completion not recorded yet");
+
+  const blocked = buildAttachStatus([
+    request,
+    event(3, "command.blocked", {
+      toolName: "bash",
+      toolCallId: "call-approval",
+      payload: { toolCallId: "call-approval", observedCommand: "rm -rf build", reason: "Approval was declined." },
+    }),
+  ], true);
+  assert.equal(blocked.activityLabel, "Last activity");
+  assert.equal(blocked.activity, "Blocked by BashGuard authorization · rm -rf build · Approval was declined.");
+  assert.equal(blocked.evidence, "recorded event");
 });
 
 test("buildAttachStatus uses append-order completion correlation and falls back to last activity", () => {

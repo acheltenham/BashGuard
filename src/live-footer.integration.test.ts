@@ -1168,7 +1168,7 @@ test("real PTY live footer updates, resizes, stays bounded, and finalizes ordina
       "stty columns 80 rows 24",
       `${shellQuote(bin)} attach --session-id=${shellQuote(selection.selector)} &`,
       "attach_pid=$!",
-      "sleep 2.2",
+      "IFS= read -r _bashguard_ready",
       `cat ${shellQuote(requestPath)} >> ${shellQuote(eventsFile)}`,
       "sleep 0.7",
       "stty columns 50 < /dev/tty",
@@ -1182,6 +1182,8 @@ test("real PTY live footer updates, resizes, stays bounded, and finalizes ordina
       `cat ${shellQuote(shutdownPath)} >> ${shellQuote(eventsFile)}`,
       "wait \"$attach_pid\"",
     ].join("\n"),
+    sendAfterOutput: "ACTIVE ·",
+    send: [{ afterMs: 1_200, text: "\n" }],
   });
   assert.equal(result.exitCode, 0, `raw=${JSON.stringify(result.raw)}\ntranscript=${JSON.stringify(result.transcript)}`);
   assert.ok(result.transcript.length > 0, "system script must capture a PTY transcript");
@@ -1266,7 +1268,8 @@ test("real PTY Ctrl+C clears the footer without terminal-mode leakage or a dangl
       "stty columns 80 rows 24",
       `exec ${shellQuote(bin)} attach --session-id=${shellQuote(selection.selector)}`,
     ].join("\n"),
-    send: [{ afterMs: 1_200, text: "\u0003" }],
+    sendAfterOutput: "ACTIVE ·",
+    send: [{ afterMs: 100, text: "\u0003" }],
   });
   const footerRenders = parseSeparatedPtyFooters(result.raw, 80);
   const finalRender = footerRenders.at(-1);
@@ -1296,17 +1299,28 @@ test("real PTY --no-live-footer and redirected stdout remain static and footer-A
     const shutdownPath = `${eventsFile}.plain-shutdown`;
     const outputPath = `${eventsFile}.redirected-output`;
     await writePtyEvent(shutdownPath, event(3, `pty-plain-shutdown-${redirected}`, "session.shutdown"));
-    const redirect = redirected ? ` > ${shellQuote(outputPath)}` : "";
-    const optOut = redirected ? "" : " --no-live-footer";
     const result = await runPortablePty({
       timeoutMs: 7_000,
       env: { BASHGUARD_DATA_DIR: join(selection.session.directory, ".."), TERM: "xterm" },
-      scenario: [
-        "stty columns 80 rows 24",
-        `(sleep 0.8; cat ${shellQuote(shutdownPath)} >> ${shellQuote(eventsFile)}) &`,
-        `${shellQuote(bin)} attach --session-id=${shellQuote(selection.selector)}${optOut}${redirect}`,
-        ...(redirected ? [`cat ${shellQuote(outputPath)}`] : []),
-      ].join("\n"),
+      scenario: redirected
+        ? [
+            "stty columns 80 rows 24",
+            `${shellQuote(bin)} attach --session-id=${shellQuote(selection.selector)} > ${shellQuote(outputPath)} &`,
+            "attach_pid=$!",
+            `until grep -q 'Live status' ${shellQuote(outputPath)}; do sleep 0.05; done`,
+            `cat ${shellQuote(shutdownPath)} >> ${shellQuote(eventsFile)}`,
+            "wait \"$attach_pid\"",
+            `cat ${shellQuote(outputPath)}`,
+          ].join("\n")
+        : [
+            "stty columns 80 rows 24",
+            `${shellQuote(bin)} attach --session-id=${shellQuote(selection.selector)} --no-live-footer &`,
+            "attach_pid=$!",
+            "IFS= read -r _bashguard_ready",
+            `cat ${shellQuote(shutdownPath)} >> ${shellQuote(eventsFile)}`,
+            "wait \"$attach_pid\"",
+          ].join("\n"),
+      ...(redirected ? {} : { sendAfterOutput: "Live status", send: [{ afterMs: 0, text: "\n" }] }),
     });
     assert.equal(result.exitCode, 0, JSON.stringify(result.raw));
     const plain = stripTerminalControls(result.raw);

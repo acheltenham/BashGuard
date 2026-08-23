@@ -37,13 +37,13 @@ bashguard inspect 1 --activity list
 | `shell` | Pi Bash requests/results and user Bash requests |
 | `file` | Read, edit, and write-tool requests/results |
 | `git` | Git status snapshots recorded by BashGuard |
-| `risk` | Bash requests matching BashGuard's explicit non-blocking risk rules |
+| `risk` | Bash requests matching explicit risk rules plus recorded authorization decisions |
 | `capture` | Capture gaps or events marked missing, redacted, or truncated |
 | `prompt` | Recorded prompt and pre-agent-start context |
-| `tool` | All tool requests and results |
+| `tool` | All tool requests/results plus their recorded authorization decisions |
 | `lifecycle` | Session, agent, and turn lifecycle events |
 
-Activities are navigation categories, not claims about effects or causality. For example, `risk` means a recorded command matched a review rule; it does not mean BashGuard blocked or approved the command.
+Activities are navigation categories, not claims about effects or causality. A risk-matching request alone does not prove a decision; inspect the correlated `command.approved`, `command.declined`, or `command.blocked` event. Only recursive forced deletion is currently approval-gated; other risk patterns remain observation-only.
 
 ## Exact event types
 
@@ -55,7 +55,7 @@ bashguard inspect 1 --type tool.requested --type tool.completed
 bashguard inspect 1 --type capture.gap --all
 ```
 
-Event-type names come from recorded JSONL evidence. Common current types include `session.started`, `session.shutdown`, `agent.before_start`, `tool.requested`, `tool.completed`, `bash.user_requested`, `git.status.snapshot`, and `capture.gap`.
+Event-type names come from recorded JSONL evidence. Common current types include `session.started`, `session.shutdown`, `agent.before_start`, `tool.requested`, `tool.completed`, `command.evaluated`, `command.approval_requested`, `command.approved`, `command.declined`, `command.blocked`, `bash.user_requested`, `git.status.snapshot`, and `capture.gap`.
 
 ## Combining filters
 

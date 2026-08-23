@@ -1140,6 +1140,8 @@ export function formatEventInspection(event: BashGuardEvent): string {
     formatField("Working directory", getString(payload.workingDirectory)),
     formatField("Matched check", getString(payload.matchedCheck)),
     formatField("Potential impact", getString(payload.potentialImpact)),
+    formatField("Reason", getString(payload.reason)),
+    formatField("Evidence source", getString(payload.evidence)),
     formatField("Decision source", getString(payload.decisionSource)),
     formatField("Authorization", getString(payload.authorization)),
     formatField("Block cause", getString(payload.cause)),
@@ -1445,12 +1447,14 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const approvedEvents = normalizedEvents.filter((event) => event.type === "command.approved");
   const declinedEvents = normalizedEvents.filter((event) => event.type === "command.declined");
   const blockedEvents = normalizedEvents.filter((event) => event.type === "command.blocked");
-  const authorizationActivity = [...approvedEvents, ...blockedEvents]
+  const authorizationActivity = [...approvalRequestEvents, ...approvedEvents, ...declinedEvents, ...blockedEvents]
     .sort((left, right) => normalizedEvents.indexOf(left) - normalizedEvents.indexOf(right))
     .map((event) => {
       const command = commandFor(event) ?? "unknown command";
+      if (event.type === "command.approval_requested") return `event ${event.sequence} · approval requested · BashGuard-observed \`${command}\``;
       if (event.type === "command.approved") return `event ${event.sequence} · approved once · BashGuard-observed \`${command}\``;
       const reason = getString(event.payload?.reason);
+      if (event.type === "command.declined") return `event ${event.sequence} · declined · \`${command}\`${reason ? ` · ${reason}` : ""}`;
       return `event ${event.sequence} · blocked · \`${command}\`${reason ? ` · ${reason}` : ""} · Pi was instructed to block this tool call`;
     });
   const commandByToolCallId = new Map(
@@ -1606,8 +1610,10 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   ].filter((item): item is string => item !== undefined);
   const nextInspectCommands: string[] = [];
   for (const event of riskyCommandEvents) addInspectCommand(nextInspectCommands, event.sequence, "risky shell command");
-  for (const event of blockedEvents) addInspectCommand(nextInspectCommands, event.sequence, "blocked authorization decision");
+  for (const event of approvalRequestEvents) addInspectCommand(nextInspectCommands, event.sequence, "approval request");
   for (const event of approvedEvents) addInspectCommand(nextInspectCommands, event.sequence, "approved authorization decision");
+  for (const event of declinedEvents) addInspectCommand(nextInspectCommands, event.sequence, "declined authorization decision");
+  for (const event of blockedEvents) addInspectCommand(nextInspectCommands, event.sequence, "blocked authorization decision");
   if (gitReviewItem && gitEndSnapshot) addInspectCommand(nextInspectCommands, gitEndSnapshot.sequence, "shutdown Git snapshot");
   for (const detail of Array.isArray(gitEndSnapshot?.payload?.changedFileDetails) ? gitEndSnapshot.payload.changedFileDetails : []) {
     const path = typeof detail === "object" && detail !== null ? getString((detail as Record<string, unknown>).path) : undefined;

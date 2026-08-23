@@ -950,6 +950,8 @@ test("authorization decisions render grounded timeline, inspection, filtering, a
   assert.match(inspection, /Working directory\s+\/tmp\/repo/);
   assert.match(inspection, /Matched check\s+recursive-forced-deletion/);
   assert.match(inspection, /Potential impact\s+Recursively deletes files/);
+  assert.match(inspection, /Reason\s+Approval was declined\./);
+  assert.match(inspection, /Evidence source\s+bashguard_tool_call_input/);
   assert.match(inspection, /Decision source\s+bashguard_authorization/);
   assert.match(inspection, /Block cause\s+declined/);
   assert.match(inspection, /Limitations\s+Later extension handlers/);
@@ -966,15 +968,19 @@ test("authorization decisions render grounded timeline, inspection, filtering, a
   assert.equal(summary.declinedCommands, 1);
   assert.equal(summary.blockedCommands, 1);
   assert.deepEqual(summary.authorizationActivity, [
+    "event 3 · approval requested · BashGuard-observed `rm -rf build`",
+    "event 4 · declined · `rm -rf build` · Approval was declined.",
     "event 5 · blocked · `rm -rf build` · Approval was declined. · Pi was instructed to block this tool call",
   ]);
   assert.doesNotMatch(summary.worthReviewing.join("\n"), /missing command completion evidence/);
   assert.match(summary.worthReviewing.join("\n"), /blocked before execution by recorded authorization decision/);
+  assert.ok(summary.nextInspectCommands.some((command) => command.includes("--event 3") && command.includes("approval request")));
+  assert.ok(summary.nextInspectCommands.some((command) => command.includes("--event 4") && command.includes("declined authorization decision")));
   assert.ok(summary.nextInspectCommands.some((command) => command.includes("--event 5") && command.includes("blocked authorization decision")));
   const output = formatDebrief(summary);
   assert.match(output, /Approval requests\s+1/);
   assert.match(output, /Blocked commands\s+1/);
-  assert.match(output, /Authorization decisions\n- event 5 · blocked/);
+  assert.match(output, /Authorization decisions\n- event 3 · approval requested[\s\S]*- event 4 · declined[\s\S]*- event 5 · blocked/);
 });
 
 test("approved authorization is counted without claiming every runtime layer was approved", () => {

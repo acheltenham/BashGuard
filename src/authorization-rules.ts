@@ -11,19 +11,21 @@ export type AuthorizationRuleContext = {
   workingDirectory: string;
 };
 
-export type AuthorizationRuleMatch = {
+export type AuthorizationRuleLiteralEvidence = Readonly<{
+  kind: "git_target_option";
+  option: string;
+  value: string;
+}>;
+
+export type AuthorizationRuleMatch = Readonly<{
   id: string;
   version: number;
   provider: string;
   riskFactor: string;
   reason: string;
   potentialImpact: string;
-  literalEvidence: Array<{
-    kind: "git_target_option";
-    option: string;
-    value: string;
-  }>;
-};
+  literalEvidence: ReadonlyArray<AuthorizationRuleLiteralEvidence>;
+}>;
 
 export type AuthorizationRule = {
   readonly id: string;
@@ -44,8 +46,8 @@ const BUILTIN_PROVIDER = "bashguard_builtin";
 const HISTORY_OR_WORKING_TREE_REWRITE = "history or working-tree rewrite";
 
 function freezeLiteralEvidence(
-  literalEvidence: AuthorizationRuleMatch["literalEvidence"],
-): AuthorizationRuleMatch["literalEvidence"] {
+  literalEvidence: ReadonlyArray<AuthorizationRuleLiteralEvidence>,
+): ReadonlyArray<AuthorizationRuleLiteralEvidence> {
   return Object.freeze(literalEvidence.map((item) => Object.freeze({ ...item })));
 }
 
@@ -53,27 +55,33 @@ function freezeMatch(match: AuthorizationRuleMatch): AuthorizationRuleMatch {
   return Object.freeze({ ...match, literalEvidence: freezeLiteralEvidence(match.literalEvidence) });
 }
 
-function createRule(matchRule: {
-  id: string;
-  riskFactor: string;
-  reason: string;
-  potentialImpact: string;
-  match(context: AuthorizationRuleContext): AuthorizationRuleMatch | undefined;
+function createRule(rule: {
+  readonly id: string;
+  readonly riskFactor: string;
+  readonly reason: string;
+  readonly potentialImpact: string;
+  match(context: AuthorizationRuleContext): ReadonlyArray<AuthorizationRuleLiteralEvidence> | undefined;
 }): AuthorizationRule {
-  return Object.freeze({
-    id: matchRule.id,
+  const metadata = Object.freeze({
+    id: rule.id,
     version: RULE_VERSION,
     provider: BUILTIN_PROVIDER,
-    riskFactor: matchRule.riskFactor,
-    reason: matchRule.reason,
-    potentialImpact: matchRule.potentialImpact,
+    riskFactor: rule.riskFactor,
+    reason: rule.reason,
+    potentialImpact: rule.potentialImpact,
+  });
+
+  return Object.freeze({
+    ...metadata,
     match(context: AuthorizationRuleContext) {
-      return matchRule.match(context);
+      const literalEvidence = rule.match(context);
+      if (!literalEvidence) return undefined;
+      return freezeMatch({ ...metadata, literalEvidence });
     },
   });
 }
 
-function literalGitEvidence(command: string): AuthorizationRuleMatch["literalEvidence"] {
+function literalGitEvidence(command: string): ReadonlyArray<AuthorizationRuleLiteralEvidence> {
   return extractLiteralGitTargetOptions(command).map((option) => ({
     kind: "git_target_option" as const,
     option: option.option,
@@ -88,15 +96,7 @@ const RECURSIVE_FORCED_DELETION_RULE = createRule({
   potentialImpact: "Recursively deletes files without a trash or undo step.",
   match(context: AuthorizationRuleContext) {
     if (!matchesRecursiveForcedDeletion(context.observedCommand)) return undefined;
-    return freezeMatch({
-      id: "recursive-forced-deletion",
-      version: RULE_VERSION,
-      provider: BUILTIN_PROVIDER,
-      riskFactor: DESTRUCTIVE_FILESYSTEM_REMOVAL,
-      reason: "Recursive forced deletion requires one-time approval.",
-      potentialImpact: "Recursively deletes files without a trash or undo step.",
-      literalEvidence: [],
-    });
+    return [];
   },
 });
 
@@ -107,15 +107,7 @@ const GIT_RESET_HARD_RULE = createRule({
   potentialImpact: "may discard tracked working-tree and index changes.",
   match(context: AuthorizationRuleContext) {
     if (!matchesGitResetHard(context.observedCommand)) return undefined;
-    return freezeMatch({
-      id: "git-reset-hard",
-      version: RULE_VERSION,
-      provider: BUILTIN_PROVIDER,
-      riskFactor: HISTORY_OR_WORKING_TREE_REWRITE,
-      reason: "git reset --hard can rewrite repository state.",
-      potentialImpact: "may discard tracked working-tree and index changes.",
-      literalEvidence: literalGitEvidence(context.observedCommand),
-    });
+    return literalGitEvidence(context.observedCommand);
   },
 });
 
@@ -126,15 +118,7 @@ const GIT_CLEAN_FORCED_RULE = createRule({
   potentialImpact: "may permanently delete untracked files and, when requested, directories.",
   match(context: AuthorizationRuleContext) {
     if (!matchesForcedGitClean(context.observedCommand)) return undefined;
-    return freezeMatch({
-      id: "git-clean-forced",
-      version: RULE_VERSION,
-      provider: BUILTIN_PROVIDER,
-      riskFactor: HISTORY_OR_WORKING_TREE_REWRITE,
-      reason: "forced git clean can rewrite repository state.",
-      potentialImpact: "may permanently delete untracked files and, when requested, directories.",
-      literalEvidence: literalGitEvidence(context.observedCommand),
-    });
+    return literalGitEvidence(context.observedCommand);
   },
 });
 

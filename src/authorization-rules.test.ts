@@ -103,6 +103,24 @@ test("built-in rules and returned registry are immutable", () => {
     (rules[0] as { id: string }).id = "mutated";
   });
 
+  const match = rules[1]!.match({ observedCommand: "git -C ../repo reset HEAD~1 --hard", workingDirectory: "/tmp/project" });
+  assert.ok(match);
+  assert.ok(Object.isFrozen(match));
+  assert.ok(Object.isFrozen(match.literalEvidence));
+  assert.throws(() => {
+    (match as { id: string }).id = "mutated";
+  });
+  assert.throws(() => {
+    (match.literalEvidence as Array<(typeof match.literalEvidence)[number]>).push({
+      kind: "git_target_option",
+      option: "-C",
+      value: "mutated",
+    });
+  });
+  assert.throws(() => {
+    (match.literalEvidence[0] as { option: string }).option = "mutated";
+  });
+
   assert.equal(STATIC_AUTHORIZATION_RULE_PROVIDER.rules().map((rule) => rule.id).join(","), EXPECTED_RULE_IDS.join(","));
 });
 
@@ -131,13 +149,17 @@ function assertRuleMetadata(
 }
 
 type ExpectedMatch = {
-  id: string;
-  version: number;
-  provider: string;
-  riskFactor: string;
-  reason: string;
-  potentialImpact: string;
-  literalEvidence: Array<{ kind: "git_target_option"; option: string; value: string }>;
+  readonly id: string;
+  readonly version: number;
+  readonly provider: string;
+  readonly riskFactor: string;
+  readonly reason: string;
+  readonly potentialImpact: string;
+  readonly literalEvidence: ReadonlyArray<{
+    readonly kind: "git_target_option";
+    readonly option: string;
+    readonly value: string;
+  }>;
 };
 
 function assertMatch(match: ExpectedMatch | undefined, expected: ExpectedMatch) {

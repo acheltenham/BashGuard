@@ -50,20 +50,65 @@ async function safelyRecord(runtime: AuthorizationRuntime, type: string, payload
   }
 }
 
+function isApproval(evaluation: AuthorizationEvaluation): evaluation is Extract<AuthorizationEvaluation, { outcome: "approval" }> {
+  return evaluation.outcome === "approval";
+}
+
+function isRecursiveOnly(matches: readonly AuthorizationRuleMatch[]): boolean {
+  return matches.length === 1 && matches[0]?.id === "recursive-forced-deletion";
+}
+
+function authorizationSubject(matches: readonly AuthorizationRuleMatch[]): string {
+  if (isRecursiveOnly(matches)) return "recursive forced deletion";
+  if (matches.length > 0 && matches.every((match) => match.id.startsWith("git-"))) return "destructive Git operation";
+  return "risky command/tool call";
+}
+
+function blockReason(matches: readonly AuthorizationRuleMatch[], cause: "approval_unavailable" | "approval_error" | "declined"): string {
+  if (isRecursiveOnly(matches)) {
+    if (cause === "approval_unavailable") return "BashGuard blocked recursive forced deletion because approval UI is unavailable.";
+    if (cause === "approval_error") return "BashGuard blocked recursive forced deletion because approval UI failed.";
+    return "BashGuard blocked recursive forced deletion because approval was declined.";
+  }
+
+  const subject = authorizationSubject(matches);
+  if (cause === "approval_unavailable") return `BashGuard blocked this ${subject} because approval UI is unavailable.`;
+  if (cause === "approval_error") return `BashGuard blocked this ${subject} because approval UI failed.`;
+  return `BashGuard blocked this ${subject} because approval was declined.`;
+}
+
+function evaluationFailureReason(): string {
+  return "BashGuard blocked this risky command/tool call because authorization rule evaluation failed.";
+}
+
 function approvalPrompt(evaluation: Extract<AuthorizationEvaluation, { outcome: "approval" }>): { title: string; body: string } {
+  const literalGitTargetOptions = uniqueLiteralGitTargetOptions(evaluation.matchedChecks);
   return {
     title: "BashGuard approval required",
     body: [
-      "BashGuard observed this command input:",
+      "BashGuard observed this command:",
       "",
       evaluation.observedCommand,
       "",
       `Working directory: ${evaluation.workingDirectory}`,
-      `Matched check: ${evaluation.matchedCheck}`,
-      `Potential impact: ${evaluation.potentialImpact}`,
       "",
-      "Run once permits only this tool call. Decline blocks it.",
-      "Later extensions, replacement tools, and shell runtime behavior may change what executes.",
+      "One decision covers this entire BashGuard-observed tool call.",
+      "",
+      "Matched checks:",
+      ...evaluation.matchedChecks.flatMap((match) => [
+        `- ${match.id}`,
+        `  Reason: ${match.reason}`,
+        `  Impact: ${match.potentialImpact}`,
+      ]),
+      "",
+      "Literal Git target options:",
+      ...(literalGitTargetOptions.length > 0 ? literalGitTargetOptions.map((option) => `- ${option}`) : ["- none observed"]),
+      "",
+      "Run once means BashGuard will approve only this one BashGuard-observed tool call.",
+      "Decline blocks it.",
+      "Later extension handlers may mutate this tool call after BashGuard observes it.",
+      "Replacement tools may add internal wrappers that BashGuard does not observe here.",
+      "Shell runtime expansion and child-process behavior may differ from this command text.",
     ].join("\n"),
   };
 }
@@ -102,13 +147,30 @@ function combineMatchText(matches: readonly AuthorizationRuleMatch[], key: "reas
   return matches.map((match) => `- ${match[key]}`).join("\n");
 }
 
+function uniqueLiteralGitTargetOptions(matches: readonly AuthorizationRuleMatch[]): string[] {
+  const seen = new Set<string>();
+  const options: string[] = [];
+
+  for (const match of matches) {
+    for (const evidence of match.literalEvidence) {
+      if (evidence.kind !== "git_target_option") continue;
+      const rendered = `${evidence.option} ${evidence.value}`;
+      if (seen.has(rendered)) continue;
+      seen.add(rendered);
+      options.push(rendered);
+    }
+  }
+
+  return options;
+}
+
 function evaluationFailure(observedCommand: string, workingDirectory: string, error: unknown): AuthorizationEvaluation {
   const limitation = error instanceof Error ? error.message : String(error);
   return Object.freeze({
     outcome: "evaluation_failure",
     observedCommand,
     workingDirectory,
-    reason: "BashGuard authorization rule evaluation failed.",
+    reason: evaluationFailureReason(),
     limitations: Object.freeze([limitation]),
   });
 }
@@ -172,25 +234,53 @@ export function evaluateToolCallAuthorization(
   });
 }
 
+async function recordBlock(
+  runtime: AuthorizationRuntime,
+  evidence: Record<string, unknown>,
+  reason: string,
+  cause: "approval_unavailable" | "approval_error" | "declined" | "authorization_evaluation_error",
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  await safelyRecord(runtime, "command.blocked", {
+    ...evidence,
+    ...extra,
+    outcome: "block",
+    cause,
+    reason,
+  });
+}
+
 export async function authorizeToolCall(
   input: AuthorizationInput,
   runtime: AuthorizationRuntime,
   provider: AuthorizationRuleProvider = STATIC_AUTHORIZATION_RULE_PROVIDER,
 ): Promise<AuthorizationBlock | undefined> {
   const evaluation = evaluateToolCallAuthorization(input, provider);
-  if (evaluation.outcome !== "approval") return undefined;
+  if (evaluation.outcome === "allow") return undefined;
 
   const evidence = {
-    ...evaluation,
+    ...(isApproval(evaluation)
+      ? evaluation
+      : {
+          observedCommand: evaluation.observedCommand,
+          workingDirectory: evaluation.workingDirectory,
+          limitations: evaluation.limitations,
+        }),
     toolCallId: input.toolCallId,
     toolName: input.toolName,
     decisionSource: "bashguard_authorization",
   };
+
+  if (evaluation.outcome === "evaluation_failure") {
+    await recordBlock(runtime, evidence, evaluation.reason, "authorization_evaluation_error");
+    return { block: true, reason: evaluation.reason };
+  }
+
   await safelyRecord(runtime, "command.evaluated", evidence);
 
   if (!input.hasUI) {
-    const reason = "BashGuard blocked recursive forced deletion because approval UI is unavailable.";
-    await safelyRecord(runtime, "command.blocked", { ...evidence, outcome: "block", cause: "approval_unavailable", reason });
+    const reason = blockReason(evaluation.matchedChecks, "approval_unavailable");
+    await recordBlock(runtime, evidence, reason, "approval_unavailable");
     return { block: true, reason };
   }
 
@@ -200,12 +290,8 @@ export async function authorizeToolCall(
   try {
     approved = await runtime.confirm(prompt.title, prompt.body);
   } catch (error) {
-    const reason = "BashGuard blocked recursive forced deletion because approval UI failed.";
-    await safelyRecord(runtime, "command.blocked", {
-      ...evidence,
-      outcome: "block",
-      cause: "approval_error",
-      reason,
+    const reason = blockReason(evaluation.matchedChecks, "approval_error");
+    await recordBlock(runtime, evidence, reason, "approval_error", {
       approvalError: error instanceof Error ? error.message : String(error),
     });
     return { block: true, reason };
@@ -216,8 +302,8 @@ export async function authorizeToolCall(
     return undefined;
   }
 
-  const reason = "BashGuard blocked recursive forced deletion because approval was declined.";
+  const reason = blockReason(evaluation.matchedChecks, "declined");
   await safelyRecord(runtime, "command.declined", { ...evidence, outcome: "block", cause: "declined", reason });
-  await safelyRecord(runtime, "command.blocked", { ...evidence, outcome: "block", cause: "declined", reason });
+  await recordBlock(runtime, evidence, reason, "declined");
   return { block: true, reason };
 }

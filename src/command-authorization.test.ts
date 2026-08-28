@@ -233,6 +233,24 @@ test("evaluation failure blocks before UI and records authorization_evaluation_e
   assert.equal(fixture.prompts.length, 0);
 });
 
+test("malformed provider registry blocks before UI and records authorization_evaluation_error without confirmation", async () => {
+  const provider = {
+    rules() {
+      return null;
+    },
+  } as AuthorizationRuleProvider;
+
+  const fixture = authorizationFixture({ command: gitOnlyCommand });
+  assert.deepEqual(await authorizeToolCall(fixture.input, fixture.runtime, provider), {
+    block: true,
+    reason: "BashGuard blocked this risky command/tool call because authorization rule evaluation failed.",
+  });
+  assert.deepEqual(fixture.events.map(({ type }) => type), ["command.blocked"]);
+  assert.equal(fixture.events[0]?.payload.cause, "authorization_evaluation_error");
+  assert.match(String(fixture.events[0]?.payload.limitations?.[0]), /malformed registry/i);
+  assert.equal(fixture.prompts.length, 0);
+});
+
 test("safe calls do not record decisions or request confirmation", async () => {
   const fixture = authorizationFixture({ command: "npm test" });
   const result = await authorizeToolCall({ ...fixture.input, input: { command: "npm test" } }, fixture.runtime);

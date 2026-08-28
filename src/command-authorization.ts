@@ -182,7 +182,11 @@ function collectRuleMatches(
 ): AuthorizationRuleMatch[] | AuthorizationEvaluation {
   let rules: readonly { match(context: { observedCommand: string; workingDirectory: string }): AuthorizationRuleMatch | undefined }[];
   try {
-    rules = provider.rules();
+    const candidateRules = provider.rules();
+    if (!Array.isArray(candidateRules)) {
+      throw new Error("Authorization rule provider returned a malformed registry.");
+    }
+    rules = candidateRules;
   } catch (error) {
     return evaluationFailure(observedCommand, workingDirectory, error);
   }

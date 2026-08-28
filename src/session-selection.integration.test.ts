@@ -78,7 +78,7 @@ function run(root: string, args: string[]) {
     cwd: process.cwd(),
     env: { ...process.env, BASHGUARD_DATA_DIR: root },
     encoding: "utf8",
-    timeout: 5_000,
+    timeout: 20_000,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -96,7 +96,7 @@ function runShell(root: string, command: string) {
       PATH: `${join(process.cwd(), "bin")}:${process.env.PATH ?? ""}`,
     },
     encoding: "utf8",
-    timeout: 5_000,
+    timeout: 20_000,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }

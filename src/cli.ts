@@ -669,11 +669,25 @@ function projectAuthorizationMatch(entry: unknown): AuthorizationMatchProjection
   return projection;
 }
 
+function projectScalarAuthorizationMatch(payload: Record<string, unknown>): AuthorizationMatchesProjection | undefined {
+  const scalar = getString(payload.matchedCheck);
+  if (!scalar) return undefined;
+  return {
+    source: "scalar",
+    matches: [{
+      id: scalar,
+      literalTargetOptions: [],
+      literalTargetOptionStatus: "missing",
+      literalTargetOptionsIncomplete: false,
+    }],
+  };
+}
+
 function projectAuthorizationMatches(payload: Record<string, unknown>): AuthorizationMatchesProjection {
   if (Object.prototype.hasOwnProperty.call(payload, "matchedChecks")) {
     const matchedChecks = payload.matchedChecks;
     if (!Array.isArray(matchedChecks) || matchedChecks.length === 0) {
-      return { source: "structured", matches: [projectAuthorizationMatch(undefined)] };
+      return projectScalarAuthorizationMatch(payload) ?? { source: "structured", matches: [projectAuthorizationMatch(undefined)] };
     }
     return {
       source: "structured",
@@ -691,20 +705,7 @@ function projectAuthorizationMatches(payload: Record<string, unknown>): Authoriz
     };
   }
 
-  const scalar = getString(payload.matchedCheck);
-  if (scalar) {
-    return {
-      source: "scalar",
-      matches: [{
-        id: scalar,
-        literalTargetOptions: [],
-        literalTargetOptionStatus: "missing",
-        literalTargetOptionsIncomplete: false,
-      }],
-    };
-  }
-
-  return { source: "missing", matches: [] };
+  return projectScalarAuthorizationMatch(payload) ?? { source: "missing", matches: [] };
 }
 
 function formatNestedField(label: string, value: unknown): string {

@@ -1123,6 +1123,13 @@ test("structured authorization inspection renders rule metadata and malformed ma
   assert.match(malformedInspection, /Risk\s+history or working-tree rewrite/);
   assert.match(malformedInspection, /Literal target option:\s+missing/);
   assert.doesNotThrow(() => formatEventInspection(malformed));
+
+  const invalidStructuredWithScalar = event(6, "command.blocked", {
+    payload: { matchedCheck: "git-reset-hard", matchedChecks: "invalid" },
+  });
+  const fallbackInspection = formatEventInspection(invalidStructuredWithScalar);
+  assert.match(fallbackInspection, /Matched check\s+git-reset-hard/);
+  assert.doesNotMatch(fallbackInspection, /Matched checks\n/);
 });
 
 test("structured Git decisions stay visible in risk and tool filters and blocked calls never look like missing completion", () => {

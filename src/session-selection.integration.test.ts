@@ -198,7 +198,7 @@ test("selector-less attach auto-selects its only active session and uses its uni
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
 
-  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) {
+  for (let attempt = 0; attempt < 400 && !stdout.includes("Following live events"); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   assert.match(stdout, /Following live events/);

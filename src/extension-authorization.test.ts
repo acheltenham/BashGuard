@@ -188,4 +188,15 @@ test("duplicate recorder lock loser neither prompts nor blocks a destructive Git
   await duplicateHandlers.get("session_start")?.({ type: "session_start" }, duplicateCtx);
   assert.equal(await duplicateHandlers.get("tool_call")?.(destructiveGitCall("duplicate-git-call", gitResetCommand(owner.project)), duplicateCtx), undefined);
   assert.deepEqual(duplicateConfirmations, []);
+  assert.deepEqual((await owner.events()).filter((event) => event.toolCallId === "duplicate-git-call").map((event) => event.type), []);
+
+  assert.equal(await owner.handlers.get("tool_call")?.(destructiveGitCall("owner-git-call", gitResetCommand(owner.project)), owner.ctx), undefined);
+  assert.equal(owner.confirmations.length, 1);
+  assert.match(owner.confirmations[0]!.body, /git -C .* reset --hard/);
+  assert.deepEqual(eventTypes(await owner.events(), "owner-git-call"), [
+    "tool.requested",
+    "command.evaluated",
+    "command.approval_requested",
+    "command.approved",
+  ]);
 });

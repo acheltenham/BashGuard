@@ -43,7 +43,7 @@ bashguard inspect 1 --activity list
 | `tool` | All tool requests/results plus their recorded authorization decisions |
 | `lifecycle` | Session, agent, and turn lifecycle events |
 
-Activities are navigation categories, not claims about effects or causality. A risk-matching request alone does not prove a decision; inspect the correlated `command.approved`, `command.declined`, or `command.blocked` event. Only recursive forced deletion is currently approval-gated; other risk patterns remain observation-only.
+Activities are navigation categories, not claims about effects or causality. A risk-matching request alone does not prove a decision; inspect the correlated `command.approved`, `command.declined`, or `command.blocked` event. Recursive forced deletion, `git-reset-hard`, and `git-clean-forced` are approval-gated; other risk patterns remain observation-only.
 
 ## Exact event types
 

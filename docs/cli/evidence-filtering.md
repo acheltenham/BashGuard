@@ -37,7 +37,7 @@ bashguard inspect 1 --activity list
 | `shell` | Pi Bash requests/results and user Bash requests |
 | `file` | Read, edit, and write-tool requests/results |
 | `git` | Git status snapshots recorded by BashGuard |
-| `risk` | Bash requests matching explicit risk rules plus recorded authorization decisions |
+| `risk` | Bash requests matching explicit risk rules plus recorded authorization decisions (`matchedCheck`/`matchedChecks`) |
 | `capture` | Capture gaps or events marked missing, redacted, or truncated |
 | `prompt` | Recorded prompt and pre-agent-start context |
 | `tool` | All tool requests/results plus their recorded authorization decisions |
@@ -79,7 +79,7 @@ bashguard inspect 1 \
   --grep deploy
 ```
 
-`--grep` performs a case-insensitive substring search over the complete recorded event envelope, including available command, output, path, and capture metadata. It searches recorded evidence only; redacted values remain unavailable and truncated values remain partial.
+`--grep` performs a case-insensitive substring search over the complete recorded event envelope, including available command, output, path, authorization, and capture metadata. It searches recorded evidence only; redacted values remain unavailable and truncated values remain partial, and literal Git targeting text is evidence rather than verified repository identity.
 
 Filters are applied before output limits.
 

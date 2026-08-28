@@ -150,7 +150,7 @@ Before risky shell execution, BashGuard should show:
 - triggering prompt or turn where available;
 - safer alternative where useful.
 
-The approval surface must never imply that BashGuard-observed text is the universal resolved command when later handlers, replacement-tool wrappers, shell expansion, or child processes remain unknown. If a later integration can prove that a materially different command will execute, it must require a new decision rather than reusing approval for a simplified label.
+The approval surface must never imply that BashGuard-observed text is the universal resolved command when later handlers, replacement-tool wrappers, shell expansion, or child processes remain unknown. One decision covers the whole BashGuard-observed tool call and every matched check; if a later integration can prove that a materially different command will execute, it must require a new decision rather than reusing approval for a simplified label. Literal Git options can be surfaced as evidence, but they do not by themselves prove canonical repository identity.
 
 Approval remains in the active Pi interaction. The companion terminal mirrors and enriches the context.
 

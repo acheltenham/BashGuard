@@ -1,6 +1,6 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.5; Phase 3 Slice 2 destructive Git approval designed and selected for implementation
+**Status:** Draft v0.5; Phase 3 Slice 2 destructive Git approval implemented on this branch
 **Last updated:** August 22, 2026
 
 ## Current execution sequence
@@ -11,7 +11,7 @@ This section is the source of truth for near-term sequencing. The numbered produ
 2. **Complete — Command Resolution Spike 2:** BashGuard observes the mutable command present when its handler runs; extension order, replacement-tool internals, and shell runtime can still change execution. See the [results](../research/command-resolution-spike-results.md).
 3. **Complete — Resume Phase 1 with the split-pane event browser:** the approved opt-in snapshot `bashguard inspect --browse` design shipped under [issue #85](https://github.com/acheltenham/BashGuard/issues/85).
 4. **Complete — Phase 3 authorization Slice 1:** one-time approval for BashGuard-observed recursive forced-deletion Bash tool calls shipped under [issue #87](https://github.com/acheltenham/BashGuard/issues/87), with [real-Pi validation](../testing/recursive-delete-approval-validation.md).
-5. **In progress — Phase 3 authorization Slice 2:** implement the approved [destructive Git approval design](../plans/2026-08-22-destructive-git-approval-design.md) under [issue #89](https://github.com/acheltenham/BashGuard/issues/89). The narrow checks are `git-reset-hard` and `git-clean-forced`, backed by a typed static registry that also migrates the Slice 1 rule.
+5. **Complete — Phase 3 authorization Slice 2:** the approved [destructive Git approval design](../plans/2026-08-22-destructive-git-approval-design.md) shipped on this branch under [issue #89](https://github.com/acheltenham/BashGuard/issues/89). The narrow checks are `git-reset-hard` and `git-clean-forced`, backed by a typed static registry that also migrates the Slice 1 rule and records all matches from one BashGuard-observed tool call.
 6. **Required follow-up research:** strengthen conservative matching and verified Git targeting under [issue #90](https://github.com/acheltenham/BashGuard/issues/90), and investigate a human-reviewed rule-provider/plugin model under [issue #91](https://github.com/acheltenham/BashGuard/issues/91). These limitations must not disappear when Slice 2 ships.
 7. **Later — Backend integration:** implement the Anthropic sandbox runtime adapter and grounded session/debrief boundary evidence after reassessing the next explicit roadmap slice.
 
@@ -147,9 +147,9 @@ Phase exit criteria:
 
 **Implemented Slice 1:** One-time approval for recursive forced-deletion Bash tool calls is complete and validated in non-interactive and interactive real Pi sessions. The [Slice 1 design](../plans/2026-08-22-recursive-delete-approval-design.md#explicitly-deferred-work) records additional rules, policy lifecycle, command-identity work, recovery, and stronger controls that remain explicitly deferred.
 
-**Selected Slice 2:** The approved [destructive Git approval design](../plans/2026-08-22-destructive-git-approval-design.md) adds narrow `git-reset-hard` and `git-clean-forced` checks and migrates built-in approval checks to a typed static registry. Conservative shell matching and literal-only Git targeting are temporary limitations tracked by [#90](https://github.com/acheltenham/BashGuard/issues/90); provider/plugin and human-reviewed AI policy research is tracked by [#91](https://github.com/acheltenham/BashGuard/issues/91).
+**Complete on this branch:** The approved [destructive Git approval design](../plans/2026-08-22-destructive-git-approval-design.md) adds narrow `git-reset-hard` and `git-clean-forced` checks and migrates built-in approval checks to a typed static registry. One decision covers the whole BashGuard-observed tool call and every matched check. Conservative shell matching and literal-only Git targeting are temporary limitations tracked by [#90](https://github.com/acheltenham/BashGuard/issues/90); provider/plugin and human-reviewed AI policy research is tracked by [#91](https://github.com/acheltenham/BashGuard/issues/91).
 
-**Scope note:** this phase is the *authorization* control — allow, notice, approve, or block a specific tool call, with an explanation. It is not containment. Pi's `tool_call` hook supports blocking and input mutation directly, and BashGuard already subscribes to that hook for capture. Spike 2 is complete and shows that the approval surface must distinguish BashGuard-observed command input from later handler mutations, replacement-tool wrappers, and runtime shell behavior.
+**Scope note:** this phase is the *authorization* control — allow, notice, approve, or block a specific tool call, with an explanation. It is not containment or recovery. Pi's `tool_call` hook supports blocking and input mutation directly, and BashGuard already subscribes to that hook for capture. Spike 2 is complete and shows that the approval surface must distinguish BashGuard-observed command input from later handler mutations, replacement-tool wrappers, and runtime shell behavior.
 
 Goal: make risky execution understandable before it happens.
 

@@ -12,6 +12,8 @@ The registry makes built-in authorization checks straightforward to add and test
 
 Authorization remains distinct from containment. BashGuard asks Pi to block the supported tool call; it does not provide an operating-system boundary or claim that the observed command is the universal resolved command.
 
+Implementation on this branch is complete; the validation record documents the real no-UI block, combined decline, reset Run once success, safe Git pass, the dogfood matcher false negative fix, the `run_once` redaction fix, and the incomplete post-fix interactive forced-clean Run once caused by environmental PTY/model stalls.
+
 ## Goals
 
 - require one-time approval for `git reset --hard` and forced `git clean` variants;

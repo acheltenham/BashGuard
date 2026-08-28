@@ -61,6 +61,7 @@ test("pure git destructive matchers are conservative and table-driven", () => {
     ["git clean -xdf", true],
     ["git --no-pager clean -fd", true],
     ["git -C ../repo clean --force -d", true],
+    ["git -C /tmp/bashguard-git-clean-approve2.eny50I/repo clean -fd", true],
     ["git clean -n", false],
     ["git clean --dry-run", false],
     ["git clean -nf", false],

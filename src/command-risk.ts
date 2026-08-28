@@ -7,6 +7,36 @@ export type LiteralGitTargetOption = {
 };
 
 const COMMAND_BOUNDARY = /[\n;&|]+/;
+const GIT_OPTIONS_WITH_SEPARATE_VALUES = new Set(["-c", "-C", "--config-env", "--exec-path", "--git-dir", "--namespace", "--work-tree"]);
+
+function normalizedShellToken(token: string): string {
+  return token.replace(/^["'`]+|["'`]+$/g, "");
+}
+
+function gitOperationArguments(segment: string, operation: "reset" | "clean"): string[] | undefined {
+  const tokens = segment.trim().split(/\s+/).filter(Boolean);
+  for (let gitIndex = 0; gitIndex < tokens.length; gitIndex += 1) {
+    if (normalizedShellToken(tokens[gitIndex]!).toLowerCase() !== "git") continue;
+
+    for (let index = gitIndex + 1; index < tokens.length; index += 1) {
+      const token = normalizedShellToken(tokens[index]!);
+      const normalized = token.toLowerCase();
+      if (GIT_OPTIONS_WITH_SEPARATE_VALUES.has(token)) {
+        index += 1;
+        continue;
+      }
+      if (["--config-env=", "--exec-path=", "--git-dir=", "--namespace=", "--work-tree="].some((prefix) => normalized.startsWith(prefix))) continue;
+      if (token.startsWith("-")) continue;
+      if (normalized === operation) return tokens.slice(index + 1).map(normalizedShellToken);
+      break;
+    }
+  }
+  return undefined;
+}
+
+function isShortOptionWith(token: string, flag: string): boolean {
+  return /^-[^-][a-z]*$/i.test(token) && token.slice(1).toLowerCase().includes(flag);
+}
 
 export function extractLiteralGitTargetOptions(command: string): LiteralGitTargetOption[] {
   const options: LiteralGitTargetOption[] = [];
@@ -28,18 +58,18 @@ export function matchesRecursiveForcedDeletion(command: string): boolean {
 // Temporary conservative text matcher: this intentionally also matches echoed text
 // such as echo 'git reset --hard'. Issue #90 tracks shell-aware parsing.
 export function matchesGitResetHard(command: string): boolean {
-  const normalized = command.toLowerCase();
-  return normalized.split(COMMAND_BOUNDARY).some((segment) => /\bgit\b[\s\S]*?\breset\b[\s\S]*?--hard\b/.test(segment));
+  return command.split(COMMAND_BOUNDARY).some((segment) => {
+    const args = gitOperationArguments(segment, "reset");
+    return args?.some((token) => token.toLowerCase() === "--hard") ?? false;
+  });
 }
 
 export function matchesForcedGitClean(command: string): boolean {
-  const normalized = command.toLowerCase();
-  return normalized.split(COMMAND_BOUNDARY).some((segment) => {
-    const cleanIndex = segment.search(/\bgit\b[\s\S]*?\bclean\b/);
-    if (cleanIndex === -1) return false;
-    const args = segment.slice(cleanIndex).replace(/^\bgit\b[\s\S]*?\bclean\b/, "");
-    const hasForce = /(?:^|[\s"'`])(?:--force|-[^\s-]*f[^\s-]*)/.test(args);
-    const hasDryRun = /(?:^|[\s"'`])--dry-run(?:$|[\s"'`])/.test(args) || /(?:^|[\s"'`])-[^\s]*n[^\s]*(?:$|[\s"'`])/.test(args);
+  return command.split(COMMAND_BOUNDARY).some((segment) => {
+    const args = gitOperationArguments(segment, "clean");
+    if (!args) return false;
+    const hasForce = args.some((token) => token.toLowerCase() === "--force" || isShortOptionWith(token, "f"));
+    const hasDryRun = args.some((token) => token.toLowerCase() === "--dry-run" || isShortOptionWith(token, "n"));
     return hasForce && !hasDryRun;
   });
 }

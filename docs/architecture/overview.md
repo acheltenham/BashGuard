@@ -75,7 +75,7 @@ Agent security is several independent controls, not one thing called "sandboxing
 
 | Control | Question | Owner |
 |---|---|---|
-| Authorization | Should this action run? | BashGuard, via Pi's blocking `tool_call` hook |
+| Authorization | Should this action run? | BashGuard, via Pi's blocking `tool_call` hook; active recorder owner only, fail closed |
 | Containment | What can it affect if it runs? | Sandbox backend |
 | Network policy | Where can it communicate? | Sandbox backend |
 | Downstream authorization | What can it do when it gets there? | Not addressed today |
@@ -260,9 +260,9 @@ Automated checkpoints must be conservative and should not silently alter normal 
 
 Approvals remain inside Pi because that is where the developer is acting.
 
-Phase 3 Slice 1 implements one-time approval for agent-initiated Bash tool calls matching recursive forced deletion. The active recorder owner shows the complete BashGuard-observed command, working directory, impact, transparent check, and execution-may-differ limitations. Run once allows only that call; decline, missing UI, or confirmation failure returns Pi's blocking result. Duplicate recorder instances remain inert.
+Phase 3 Slice 1 implements one-time approval for agent-initiated Bash tool calls matching recursive forced deletion. Phase 3 Slice 2 extends the shipped registry to `git-reset-hard` and `git-clean-forced`. One Run once/Decline decision covers the whole BashGuard-observed tool call and every matched check. The active recorder owner shows the complete observed command, working directory, impact, literal Git options when present, transparent check, and execution-may-differ limitations; literal Git options are evidence, not verified repository identity. Run once allows only that call; decline, missing UI, or confirmation failure returns Pi's blocking result. Duplicate recorder instances remain inert and do not evaluate or prompt.
 
-The attached companion mirrors recorded evaluated/requested/approved/declined/blocked evidence but is not an approval surface. This control is authorization through Pi's hook, not containment. Additional rules, persistent policy, other tools, target extraction, safer alternatives, and resolved-command layers remain deferred.
+The attached companion mirrors recorded evaluated/requested/approved/declined/blocked evidence but is not an approval surface. This control is authorization through Pi's hook, not containment or recovery. Additional rules, persistent policy, other tools, target extraction, safer alternatives, and resolved-command layers remain deferred.
 
 ## Storage
 

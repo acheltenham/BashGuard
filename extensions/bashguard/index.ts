@@ -75,7 +75,8 @@ function normalizeKey(key: string): string {
 
 const NORMALIZED_SECRET_KEYS = new Set(Array.from(SECRET_KEYS, normalizeKey));
 
-function shouldRedactKey(key: string): boolean {
+function shouldRedactKey(key: string, value: unknown): boolean {
+  if (normalizeKey(key) === "authorization" && value === "run_once") return false;
   return NORMALIZED_SECRET_KEYS.has(normalizeKey(key));
 }
 
@@ -91,7 +92,7 @@ function truncate(value: string, path: string, truncated: string[]): string {
 
 function sanitize(value: unknown, key = "", depth = 0, redacted: string[] = [], truncated: string[] = [], path = "payload"): unknown {
   if (depth > 8) return "[MAX_DEPTH]";
-  if (shouldRedactKey(key)) {
+  if (shouldRedactKey(key, value)) {
     redacted.push(path);
     return REDACTED;
   }

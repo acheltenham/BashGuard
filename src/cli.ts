@@ -595,6 +595,135 @@ function getNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+type AuthorizationMatchProjection = {
+  id?: string;
+  version?: number;
+  provider?: string;
+  riskFactor?: string;
+  reason?: string;
+  potentialImpact?: string;
+  literalTargetOptions: string[];
+  literalTargetOptionStatus: "present" | "none" | "missing";
+  literalTargetOptionsIncomplete: boolean;
+};
+
+type AuthorizationMatchesProjection = {
+  source: "structured" | "scalar" | "missing";
+  matches: AuthorizationMatchProjection[];
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function uniqueBy<T>(values: T[], key: (value: T) => string): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const value of values) {
+    const rendered = key(value);
+    if (seen.has(rendered)) continue;
+    seen.add(rendered);
+    unique.push(value);
+  }
+  return unique;
+}
+
+function projectAuthorizationMatch(entry: unknown): AuthorizationMatchProjection {
+  const projection: AuthorizationMatchProjection = {
+    literalTargetOptions: [],
+    literalTargetOptionStatus: "missing",
+    literalTargetOptionsIncomplete: false,
+  };
+
+  if (!isRecord(entry)) return projection;
+
+  projection.id = getString(entry.id);
+  projection.version = getNumber(entry.version);
+  projection.provider = getString(entry.provider);
+  projection.riskFactor = getString(entry.riskFactor);
+  projection.reason = getString(entry.reason);
+  projection.potentialImpact = getString(entry.potentialImpact);
+
+  const hasLiteralEvidence = Object.prototype.hasOwnProperty.call(entry, "literalEvidence");
+  const literalEvidence = entry.literalEvidence;
+  if (Array.isArray(literalEvidence)) {
+    for (const evidence of literalEvidence) {
+      if (!isRecord(evidence) || getString(evidence.kind) !== "git_target_option") {
+        projection.literalTargetOptionsIncomplete = true;
+        continue;
+      }
+      const option = getString(evidence.option);
+      const value = getString(evidence.value);
+      if (!option || !value) {
+        projection.literalTargetOptionsIncomplete = true;
+        continue;
+      }
+      projection.literalTargetOptions.push(`${option} ${value}`);
+    }
+    projection.literalTargetOptionStatus = projection.literalTargetOptions.length > 0 ? "present" : literalEvidence.length === 0 ? "none" : "missing";
+    if (projection.literalTargetOptionStatus === "none") projection.literalTargetOptionsIncomplete = false;
+    return projection;
+  }
+
+  if (hasLiteralEvidence) projection.literalTargetOptionsIncomplete = true;
+  return projection;
+}
+
+function projectScalarAuthorizationMatch(payload: Record<string, unknown>): AuthorizationMatchesProjection | undefined {
+  const scalar = getString(payload.matchedCheck);
+  if (!scalar) return undefined;
+  return {
+    source: "scalar",
+    matches: [{
+      id: scalar,
+      literalTargetOptions: [],
+      literalTargetOptionStatus: "missing",
+      literalTargetOptionsIncomplete: false,
+    }],
+  };
+}
+
+function projectAuthorizationMatches(payload: Record<string, unknown>): AuthorizationMatchesProjection {
+  if (Object.prototype.hasOwnProperty.call(payload, "matchedChecks")) {
+    const matchedChecks = payload.matchedChecks;
+    if (!Array.isArray(matchedChecks) || matchedChecks.length === 0) {
+      return projectScalarAuthorizationMatch(payload) ?? { source: "structured", matches: [projectAuthorizationMatch(undefined)] };
+    }
+    return {
+      source: "structured",
+      matches: uniqueBy(matchedChecks.map(projectAuthorizationMatch), (match) => [
+        match.id ?? "missing",
+        match.version ?? "missing",
+        match.provider ?? "missing",
+        match.riskFactor ?? "missing",
+        match.reason ?? "missing",
+        match.potentialImpact ?? "missing",
+        match.literalTargetOptionStatus,
+        match.literalTargetOptions.join("\u0000"),
+        match.literalTargetOptionsIncomplete ? "incomplete" : "complete",
+      ].join("|")),
+    };
+  }
+
+  return projectScalarAuthorizationMatch(payload) ?? { source: "missing", matches: [] };
+}
+
+function formatNestedField(label: string, value: unknown): string {
+  return `  ${label.padEnd(18)} ${value === undefined || value === null || value === "" ? "missing" : String(value)}`;
+}
+
+function formatAuthorizationMatchIds(matches: AuthorizationMatchProjection[]): string {
+  return Array.from(new Set(matches.map((match) => match.id ?? "missing"))).join(", ") || "missing";
+}
+
+function formatAuthorizationChecksSuffix(projection: AuthorizationMatchesProjection): string {
+  return projection.source === "structured" ? ` · checks: ${formatAuthorizationMatchIds(projection.matches)}` : "";
+}
+
+function formatAuthorizationChecksClause(projection: AuthorizationMatchesProjection): string | undefined {
+  return projection.source === "structured" ? `checks: ${formatAuthorizationMatchIds(projection.matches)}` : undefined;
+}
+
 function formatRiskWithExplanation(risk: string): string {
   return `${risk} — ${explainRisk(risk)}`;
 }
@@ -609,6 +738,7 @@ function formatRiskNotice(command: string): string | undefined {
 
 export function renderEvent(event: BashGuardEvent): string | undefined {
   const payload = event.payload ?? {};
+  const authorizationMatches = projectAuthorizationMatches(payload);
 
   switch (event.type) {
     case "session.started":
@@ -660,24 +790,29 @@ export function renderEvent(event: BashGuardEvent): string | undefined {
     }
     case "command.evaluated": {
       const command = getString(payload.observedCommand);
-      return command ? `Approval required · BashGuard-observed command · ${command}` : "Approval required for BashGuard-observed command";
+      const checks = formatAuthorizationChecksSuffix(authorizationMatches);
+      return command ? `Approval required · BashGuard-observed command · ${command}${checks}` : `Approval required for BashGuard-observed command${checks}`;
     }
     case "command.approval_requested": {
       const command = getString(payload.observedCommand);
-      return command ? `Approval requested · ${command}` : "Approval requested";
+      const checks = formatAuthorizationChecksSuffix(authorizationMatches);
+      return command ? `Approval requested · ${command}${checks}` : `Approval requested${checks}`;
     }
     case "command.approved": {
       const command = getString(payload.observedCommand);
-      return command ? `Approved once · ${command}` : "Approved once";
+      const checks = formatAuthorizationChecksSuffix(authorizationMatches);
+      return command ? `Approved once · ${command}${checks}` : `Approved once${checks}`;
     }
     case "command.declined": {
       const command = getString(payload.observedCommand);
-      return command ? `Approval declined · ${command}` : "Approval declined";
+      const checks = formatAuthorizationChecksSuffix(authorizationMatches);
+      return command ? `Approval declined · ${command}${checks}` : `Approval declined${checks}`;
     }
     case "command.blocked": {
       const command = getString(payload.observedCommand);
       const reason = getString(payload.reason);
-      return ["Blocked by BashGuard authorization", command, reason].filter(Boolean).join(" · ");
+      const checks = formatAuthorizationChecksClause(authorizationMatches);
+      return ["Blocked by BashGuard authorization", command, reason, checks].filter(Boolean).join(" · ");
     }
     case "capture.gap": {
       const reason = getString(payload.reason);
@@ -1120,6 +1255,8 @@ export function formatEventInspection(event: BashGuardEvent): string {
     ? payload.changedFileDetails.map((detail) => formatGitChangedFileDetail(detail, undefined, false)).filter((detail): detail is string => detail !== undefined)
     : [];
   const changedPathCount = getNumber(payload.changedFileCount) ?? getStringArray(payload.changedFiles).length;
+  const authorizationMatches = projectAuthorizationMatches(payload);
+  const authorizationMatchSummary = formatAuthorizationMatchIds(authorizationMatches.matches);
 
   const lines = [
     "Event detail",
@@ -1138,7 +1275,9 @@ export function formatEventInspection(event: BashGuardEvent): string {
     formatField("Tool call", normalized.toolCallId ?? getString(payload.toolCallId)),
     formatField("Command", command),
     formatField("Working directory", getString(payload.workingDirectory)),
-    formatField("Matched check", getString(payload.matchedCheck)),
+    authorizationMatches.source === "structured"
+      ? formatField("Matched checks", authorizationMatchSummary)
+      : formatField("Matched check", getString(payload.matchedCheck)),
     formatField("Potential impact", getString(payload.potentialImpact)),
     formatField("Reason", getString(payload.reason)),
     formatField("Evidence source", getString(payload.evidence)),
@@ -1160,6 +1299,28 @@ export function formatEventInspection(event: BashGuardEvent): string {
     formatField("Git state", isGitSnapshot ? gitSnapshotStatus(normalized) : undefined),
     formatField("Changed paths", isGitSnapshot ? changedPathCount : undefined),
   ].filter((line): line is string => line !== undefined);
+
+  if (authorizationMatches.source === "structured") {
+    lines.push("", "Matched checks");
+    for (const [index, match] of authorizationMatches.matches.entries()) {
+      lines.push(`  Check ${index + 1}`);
+      lines.push(formatNestedField("Rule ID", match.id));
+      lines.push(formatNestedField("Version", match.version));
+      lines.push(formatNestedField("Provider", match.provider));
+      lines.push(formatNestedField("Risk", match.riskFactor));
+      lines.push(formatNestedField("Impact", match.potentialImpact));
+      if (match.literalTargetOptionStatus === "none") {
+        lines.push("    Literal target option: none observed");
+      } else {
+        for (const option of match.literalTargetOptions) {
+          lines.push(`    Literal target option: ${option}`);
+        }
+        if (match.literalTargetOptionStatus === "missing" || match.literalTargetOptionsIncomplete) {
+          lines.push("    Literal target option: missing");
+        }
+      }
+    }
+  }
 
   if (gitChangedFileDetails.length > 0) {
     lines.push("", "Git changed files", ...gitChangedFileDetails.map((detail) => `- ${detail}`));
@@ -1435,6 +1596,19 @@ function addInspectCommand(commands: string[], sequence: number | undefined, lab
   if (!commands.includes(command)) commands.push(command);
 }
 
+function formatAuthorizationDecisionEvent(event: BashGuardEvent): string {
+  const command = commandFor(event) ?? "unknown command";
+  const projection = projectAuthorizationMatches(event.payload ?? {});
+  const checks = formatAuthorizationChecksClause(projection);
+  const inspect = projection.source === "structured" ? ` · Inspect: --event ${event.sequence}` : "";
+
+  if (event.type === "command.approval_requested") return `event ${event.sequence} · approval requested · BashGuard-observed \`${command}\`${checks ? ` · ${checks}` : ""}${inspect}`;
+  if (event.type === "command.approved") return `event ${event.sequence} · approved once · BashGuard-observed \`${command}\`${checks ? ` · ${checks}` : ""}${inspect}`;
+  const reason = getString(event.payload?.reason);
+  if (event.type === "command.declined") return `event ${event.sequence} · declined · \`${command}\`${reason ? ` · ${reason}` : ""}${checks ? ` · ${checks}` : ""}${inspect}`;
+  return `event ${event.sequence} · blocked · \`${command}\`${reason ? ` · ${reason}` : ""}${checks ? ` · ${checks}` : ""}${inspect} · Pi was instructed to block this tool call`;
+}
+
 export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const normalizedEvents = events.map(normalizeEvent);
   const timestamps = normalizedEvents
@@ -1449,14 +1623,7 @@ export function buildDebrief(events: BashGuardEvent[]): DebriefSummary {
   const blockedEvents = normalizedEvents.filter((event) => event.type === "command.blocked");
   const authorizationActivity = [...approvalRequestEvents, ...approvedEvents, ...declinedEvents, ...blockedEvents]
     .sort((left, right) => normalizedEvents.indexOf(left) - normalizedEvents.indexOf(right))
-    .map((event) => {
-      const command = commandFor(event) ?? "unknown command";
-      if (event.type === "command.approval_requested") return `event ${event.sequence} · approval requested · BashGuard-observed \`${command}\``;
-      if (event.type === "command.approved") return `event ${event.sequence} · approved once · BashGuard-observed \`${command}\``;
-      const reason = getString(event.payload?.reason);
-      if (event.type === "command.declined") return `event ${event.sequence} · declined · \`${command}\`${reason ? ` · ${reason}` : ""}`;
-      return `event ${event.sequence} · blocked · \`${command}\`${reason ? ` · ${reason}` : ""} · Pi was instructed to block this tool call`;
-    });
+    .map((event) => formatAuthorizationDecisionEvent(event));
   const commandByToolCallId = new Map(
     shellRequests
       .map((event) => {

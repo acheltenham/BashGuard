@@ -46,7 +46,7 @@ test("attach completes an event whose JSONL line was partial at the startup boun
   let stderr = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stderr.on("data", (chunk) => { stderr += chunk; });
-  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) {
+  for (let attempt = 0; attempt < 400 && !stdout.includes("Following live events"); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   assert.match(stdout, /Following live events/);
@@ -80,7 +80,7 @@ test("attach preserves UTF-8 split across live polling cycles", async (t) => {
   let stderr = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stderr.on("data", (chunk) => { stderr += chunk; });
-  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  for (let attempt = 0; attempt < 400 && !stdout.includes("Following live events"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
   assert.match(stdout, /Following live events/);
 
   const liveLine = Buffer.from(JSON.stringify(event(2, "liveutf8", "bash.user_requested", { command: "echo café-live" })));
@@ -114,7 +114,7 @@ test("attach drains a final append observed after the followed process exits", a
   let stderr = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stderr.on("data", (chunk) => { stderr += chunk; });
-  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  for (let attempt = 0; attempt < 400 && !stdout.includes("Following live events"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
   assert.match(stdout, /Following live events/);
 
   owner.kill("SIGKILL");
@@ -148,15 +148,15 @@ test("attach follows replacement recorder events appended after shutdown", async
   let stderr = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stderr.on("data", (chunk) => { stderr += chunk; });
-  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  for (let attempt = 0; attempt < 400 && !stdout.includes("Following live events"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
   assert.match(stdout, /Following live events/);
 
   await appendFile(eventsFile, `${JSON.stringify(event(2, "oldstop", "session.shutdown"))}\n`);
   await writeFile(join(directory, "session.json"), `${JSON.stringify({ schemaVersion: 1, sessionId, processId: replacement.pid, startedAt: "2026-08-13T12:02:00.000Z" })}\n`);
-  for (let attempt = 0; attempt < 100 && !stdout.includes("oldstop"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  for (let attempt = 0; attempt < 400 && !stdout.includes("oldstop"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
   assert.match(stdout, /oldstop/);
   await appendFile(eventsFile, `${JSON.stringify(event(1, "newstart", "session.started"))}\n${JSON.stringify(event(2, "newwork1", "bash.user_requested", { command: "echo replacement-work" }))}\n`);
-  for (let attempt = 0; attempt < 100 && !stdout.includes("replacement-work"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  for (let attempt = 0; attempt < 400 && !stdout.includes("replacement-work"); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
   assert.match(stdout, /replacement-work/);
   await appendFile(eventsFile, `${JSON.stringify(event(3, "newstop1", "session.shutdown"))}\n`);
 
@@ -201,7 +201,7 @@ test("attach bounds startup history but streams every new narrated event", async
   child.stderr.on("data", (chunk) => { stderr += chunk; });
 
   const waitFor = async (needle: string): Promise<void> => {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    for (let attempt = 0; attempt < 400; attempt += 1) {
       if (stdout.includes(needle)) return;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }

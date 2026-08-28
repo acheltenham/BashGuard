@@ -83,7 +83,7 @@ Confirm:
 - in a real TTY, `inspect 1 --browse` exercises wide split, narrow replacement, navigation, search/activity controls, explicit reload, resize, help, quit, and `Ctrl+C`; terminal modes restore before the exact selected-event command appears;
 - redirected or unsupported explicit browse exits nonzero with plain alternatives and no browser ANSI, while plain inspect/filter/JSONL output is unchanged;
 - `debrief 1` renders evidence completeness and next inspect commands when applicable;
-- in a disposable temporary project, a recursive forced-deletion Bash request shows the full BashGuard-observed command, cwd, matched check, impact, Run once/Decline semantics, and execution-may-differ limitation;
+- in a disposable temporary project, a recursive forced-deletion Bash request shows the full BashGuard-observed command, cwd, matched check, impact, Run once/Decline semantics, and execution-may-differ limitation; follow the dedicated destructive Git validation record for the real no-UI block, combined decline, reset Run once success, safe Git pass, dogfood matcher false negative fix, `run_once` redaction fix, and the incomplete post-fix interactive forced-clean Run once caused by environmental PTY/model stalls;
 - Run once records evaluated/requested/approved then permits only that call; Decline records evaluated/requested/declined/blocked and leaves the disposable target intact;
 - print/non-UI mode blocks with `approval_unavailable`, does not fabricate approval-request/completion evidence, and leaves the target intact;
 - safe Bash, non-Bash tools, and the other current risk patterns do not prompt or block; duplicate recorder lock losers remain inert;

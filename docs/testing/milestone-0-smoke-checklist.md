@@ -82,7 +82,7 @@ Optional controlled risk-notice check:
 Run: echo "risk smoke" && git status
 ```
 
-Avoid destructive commands in a real project. Recursive forced deletion is now approval-gated for agent-initiated Pi Bash tool calls; the other current risk patterns remain observation-only. Test approval only in a fresh disposable temporary project, following [the validation procedure](recursive-delete-approval-validation.md).
+Avoid destructive commands in a real project. Recursive forced deletion and the shipped destructive Git checks are now approval-gated for agent-initiated Pi Bash tool calls; the other current risk patterns remain observation-only. Test approval only in a fresh disposable temporary project, following [the validation procedure](recursive-delete-approval-validation.md). The separate destructive Git validation record documents the real no-UI block, combined decline, reset Run once success, safe Git pass, dogfood matcher false negative fix, `run_once` redaction fix, and the incomplete post-fix interactive forced-clean Run once caused by environmental PTY/model stalls.
 
 ## 5. Inspect from another terminal
 

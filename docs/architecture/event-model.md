@@ -178,7 +178,7 @@ Large output may be stored separately and referenced to keep the event stream us
 
 ## Decision Payload
 
-Phase 3 Slice 1 records:
+Phase 3 Slice 1 records legacy scalar authorization evidence, and Slice 2 extends it with structured multi-match evidence:
 
 ```text
 toolCallId
@@ -187,7 +187,8 @@ observedCommand
 workingDirectory
 outcome: approval | allow | block
 reason
-matchedCheck: recursive-forced-deletion
+matchedCheck: recursive-forced-deletion  # legacy scalar field
+matchedChecks: [<matched-check-id>, ...]  # structured array when one or more checks match
 riskFactors
 potentialImpact
 overrideAvailable: true
@@ -198,9 +199,9 @@ evidence: bashguard_tool_call_input
 limitations
 ```
 
-Append order is `tool.requested`, `command.evaluated`, optional `command.approval_requested`, then the final approved or declined/blocked evidence. A declined call records both the human response and Pi block instruction. Blocked calls do not fabricate `tool.completed`.
+Append order is `tool.requested`, `command.evaluated`, optional `command.approval_requested`, then the final approved or declined/blocked evidence. A single decision covers the whole BashGuard-observed tool call and every matched check. A declined call records both the human response and Pi block instruction. Blocked calls do not fabricate `tool.completed`.
 
-Future decision payloads may add affected resources and safer alternatives after target extraction exists. Every interruption must remain explainable from recorded payloads.
+Readers must accept both the legacy scalar `matchedCheck` field and the structured `matchedChecks` array. Future decision payloads may add affected resources and safer alternatives after target extraction exists. Every interruption must remain explainable from recorded payloads.
 
 ## File Correlation
 

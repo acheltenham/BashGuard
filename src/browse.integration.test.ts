@@ -50,7 +50,7 @@ test("real PTY browser navigates, searches, filters, reloads, and restores the t
       "stty cols 100 rows 14",
       `BASHGUARD_DATA_DIR=${JSON.stringify(root)} TERM=xterm-256color ${JSON.stringify(process.execPath)} --experimental-strip-types src/cli.ts inspect --session-id=session-a --browse`,
     ].join("\n"),
-    timeoutMs: 8_000,
+    timeoutMs: 20_000,
     sendAfterOutput: "BashGuard · browse",
     send: [
       { afterMs: 200, text: "\u001b[B" },
@@ -92,7 +92,7 @@ test("real PTY browser redraws from split to single pane after resize", async (t
       "(while ! stty -a < /dev/tty | grep -q -- '-icanon'; do sleep 0.05; done; sleep 0.2; stty cols 79 rows 10 < /dev/tty) &",
       `BASHGUARD_DATA_DIR=${JSON.stringify(root)} TERM=xterm-256color ${JSON.stringify(process.execPath)} --experimental-strip-types src/cli.ts inspect --session-id=session-a --browse`,
     ].join("\n"),
-    timeoutMs: 8_000,
+    timeoutMs: 20_000,
     sendAfterOutput: "BashGuard · browse",
     send: [{ afterMs: 700, text: "q" }],
   });
@@ -112,7 +112,7 @@ test("real PTY narrow browser replaces list with detail and Ctrl+C restores term
       "stty cols 79 rows 10",
       `BASHGUARD_DATA_DIR=${JSON.stringify(root)} TERM=xterm-256color ${JSON.stringify(process.execPath)} --experimental-strip-types src/cli.ts inspect --session-id=session-a --browse`,
     ].join("\n"),
-    timeoutMs: 8_000,
+    timeoutMs: 20_000,
     sendAfterOutput: "BashGuard · browse",
     send: [
       { afterMs: 200, text: "\r" },

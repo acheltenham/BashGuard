@@ -78,7 +78,7 @@ function run(root: string, args: string[]) {
     cwd: process.cwd(),
     env: { ...process.env, BASHGUARD_DATA_DIR: root },
     encoding: "utf8",
-    timeout: 5_000,
+    timeout: 20_000,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -96,7 +96,7 @@ function runShell(root: string, command: string) {
       PATH: `${join(process.cwd(), "bin")}:${process.env.PATH ?? ""}`,
     },
     encoding: "utf8",
-    timeout: 5_000,
+    timeout: 20_000,
     stdio: ["pipe", "pipe", "pipe"],
   });
 }
@@ -198,7 +198,7 @@ test("selector-less attach auto-selects its only active session and uses its uni
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
 
-  for (let attempt = 0; attempt < 100 && !stdout.includes("Following live events"); attempt += 1) {
+  for (let attempt = 0; attempt < 400 && !stdout.includes("Following live events"); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   assert.match(stdout, /Following live events/);

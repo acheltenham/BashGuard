@@ -45,6 +45,7 @@ test("literal git target extraction preserves textual order", () => {
 test("pure git destructive matchers are conservative and table-driven", () => {
   for (const [command, expected] of [
     ["git reset --hard", true],
+    ["git --no-pager reset --hard", true],
     ["git -C ../repo reset HEAD~1 --hard", true],
     ["git --work-tree=/tmp/w reset --hard", true],
     ["npm test && git reset --hard", true],
@@ -58,6 +59,7 @@ test("pure git destructive matchers are conservative and table-driven", () => {
     ["git clean -f", true],
     ["git clean -fd", true],
     ["git clean -xdf", true],
+    ["git --no-pager clean -fd", true],
     ["git -C ../repo clean --force -d", true],
     ["git clean -n", false],
     ["git clean --dry-run", false],

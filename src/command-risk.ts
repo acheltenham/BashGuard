@@ -7,10 +7,6 @@ export type LiteralGitTargetOption = {
 };
 
 const COMMAND_BOUNDARY = /[\n;&|]+/;
-const GIT_TARGET_OPTION_FRAGMENT = String.raw`(?:-C|--git-dir|--work-tree)(?:=[^\s;&|]+|\s+[^\s;&|]+)`;
-const GIT_PREFIX_FRAGMENT = String.raw`\bgit(?:\s+${GIT_TARGET_OPTION_FRAGMENT})*`;
-const SHELL_TOKEN_BOUNDARY = "(?:^|[\\s\"'`])";
-const SHELL_TOKEN_END = "(?:$|[\\s\"'`])";
 
 export function extractLiteralGitTargetOptions(command: string): LiteralGitTargetOption[] {
   const options: LiteralGitTargetOption[] = [];
@@ -18,9 +14,7 @@ export function extractLiteralGitTargetOptions(command: string): LiteralGitTarge
 
   for (const match of command.matchAll(pattern)) {
     const value = match[2] ?? match[3];
-    if (value) {
-      options.push({ option: match[1] as LiteralGitTargetOption["option"], value });
-    }
+    if (value) options.push({ option: match[1] as LiteralGitTargetOption["option"], value });
   }
 
   return options;
@@ -28,54 +22,40 @@ export function extractLiteralGitTargetOptions(command: string): LiteralGitTarge
 
 export function matchesRecursiveForcedDeletion(command: string): boolean {
   const normalized = command.toLowerCase();
-  return normalized.split(COMMAND_BOUNDARY).some((segment) =>
-    /\brm\s+[^\n;|&]*-(?:[^\s]*r[^\s]*f|[^\s]*f[^\s]*r)\b/.test(segment),
-  );
+  return normalized.split(COMMAND_BOUNDARY).some((segment) => /\brm\s+[^\n;|&]*-(?:[^\s]*r[^\s]*f|[^\s]*f[^\s]*r)\b/.test(segment));
 }
 
 // Temporary conservative text matcher: this intentionally also matches echoed text
 // such as echo 'git reset --hard'. Issue #90 tracks shell-aware parsing.
 export function matchesGitResetHard(command: string): boolean {
   const normalized = command.toLowerCase();
-  const pattern = new RegExp(
-    `${GIT_PREFIX_FRAGMENT}\\s+reset\\b[\\s\\S]*?${SHELL_TOKEN_BOUNDARY}--hard${SHELL_TOKEN_END}`,
-    "i",
-  );
-
-  return normalized.split(COMMAND_BOUNDARY).some((segment) => pattern.test(segment));
+  return normalized.split(COMMAND_BOUNDARY).some((segment) => /\bgit\b[\s\S]*?\breset\b[\s\S]*?--hard\b/.test(segment));
 }
 
 export function matchesForcedGitClean(command: string): boolean {
   const normalized = command.toLowerCase();
-  const dryRunPattern = /(?:--dry-run\b|-[^\s]*n[^\s-]*)/i;
-  const pattern = new RegExp(
-    `${GIT_PREFIX_FRAGMENT}\\s+clean\\b[\\s\\S]*?${SHELL_TOKEN_BOUNDARY}(?:--force|-[^\\s-]*f[^\\s-]*)${SHELL_TOKEN_END}`,
-    "i",
-  );
-
-  return normalized.split(COMMAND_BOUNDARY).some((segment) => pattern.test(segment) && !dryRunPattern.test(segment));
+  return normalized.split(COMMAND_BOUNDARY).some((segment) => {
+    const cleanIndex = segment.search(/\bgit\b[\s\S]*?\bclean\b/);
+    if (cleanIndex === -1) return false;
+    const args = segment.slice(cleanIndex).replace(/^\bgit\b[\s\S]*?\bclean\b/, "");
+    const hasForce = /(?:^|[\s"'`])(?:--force|-[^\s-]*f[^\s-]*)/.test(args);
+    const hasDryRun = /(?:^|[\s"'`])--dry-run(?:$|[\s"'`])/.test(args) || /(?:^|[\s"'`])-[^\s]*n[^\s]*(?:$|[\s"'`])/.test(args);
+    return hasForce && !hasDryRun;
+  });
 }
 
 export function classifyCommandRisk(command: string): string[] {
   const normalized = command.toLowerCase();
   const risks: string[] = [];
 
-  if (matchesRecursiveForcedDeletion(normalized)) {
-    risks.push(DESTRUCTIVE_FILESYSTEM_REMOVAL);
-  }
-  if (
-    matchesGitResetHard(normalized) ||
-    matchesForcedGitClean(normalized) ||
-    /\bgit\s+(push\s+[^\n;|&]*--force|rebase\b)/.test(normalized)
-  ) {
+  if (matchesRecursiveForcedDeletion(normalized)) risks.push(DESTRUCTIVE_FILESYSTEM_REMOVAL);
+  if (matchesGitResetHard(normalized) || matchesForcedGitClean(normalized) || /\bgit\s+(push\s+[^\n;|&]*--force|rebase\b)/.test(normalized)) {
     risks.push("history or working-tree rewrite");
   }
   if (/\b(curl|wget)\b[^\n]*\|\s*(sh|bash|zsh|fish|sudo\s+(sh|bash))\b/.test(normalized)) {
     risks.push("network download piped to shell");
   }
-  if (/\b(token|api[_-]?key|password|passwd|secret)=\S+/i.test(command)) {
-    risks.push("secret-looking value in command text");
-  }
+  if (/\b(token|api[_-]?key|password|passwd|secret)=\S+/i.test(command)) risks.push("secret-looking value in command text");
 
   return risks;
 }

@@ -31,6 +31,80 @@ function event(sequence: number, type: string, extra: Record<string, unknown> = 
   };
 }
 
+function literalTargetOption(repo: string): Record<string, unknown> {
+  return { kind: "git_target_option", option: "-C", value: repo };
+}
+
+function structuredGitMatches(repo = "/tmp/repo"): Array<Record<string, unknown>> {
+  return [
+    {
+      id: "git-reset-hard",
+      version: 1,
+      provider: "bashguard_builtin",
+      riskFactor: "history or working-tree rewrite",
+      reason: "git reset --hard can rewrite repository state.",
+      potentialImpact: "may discard tracked working-tree and index changes.",
+      literalEvidence: [literalTargetOption(repo), literalTargetOption(repo)],
+    },
+    {
+      id: "git-clean-forced",
+      version: 1,
+      provider: "bashguard_builtin",
+      riskFactor: "history or working-tree rewrite",
+      reason: "forced git clean can rewrite repository state.",
+      potentialImpact: "may permanently delete untracked files and, when requested, directories.",
+      literalEvidence: [literalTargetOption(repo), literalTargetOption(repo)],
+    },
+  ];
+}
+
+function structuredGitDecisionPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    observedCommand: "git -C /tmp/repo reset --hard && git -C /tmp/repo clean -fd",
+    workingDirectory: "/tmp/repo",
+    matchedCheck: "git-reset-hard",
+    matchedChecks: structuredGitMatches(),
+    riskFactors: ["history or working-tree rewrite"],
+    reason: "git reset --hard can rewrite repository state.\n- forced git clean can rewrite repository state.",
+    potentialImpact: "may discard tracked working-tree and index changes.\n- may permanently delete untracked files and, when requested, directories.",
+    decisionSource: "bashguard_authorization",
+    evidence: "bashguard_tool_call_input",
+    limitations: [
+      "Later extension handlers may mutate this tool call after BashGuard observes it.",
+      "Replacement tools may add internal wrappers that BashGuard does not observe here.",
+      "Shell runtime expansion and child-process behavior may differ from this command text.",
+    ],
+    toolCallId: "call-git-both",
+    toolName: "bash",
+    ...overrides,
+  };
+}
+
+function malformedStructuredGitDecisionPayload(): Record<string, unknown> {
+  return {
+    observedCommand: "git -C /tmp/repo reset --hard && git -C /tmp/repo clean -fd",
+    workingDirectory: "/tmp/repo",
+    matchedChecks: [
+      null,
+      {
+        id: "git-reset-hard",
+        version: "1",
+        provider: 123,
+        riskFactor: "history or working-tree rewrite",
+        reason: null,
+        potentialImpact: "may discard tracked working-tree and index changes.",
+        literalEvidence: [{ kind: "git_target_option", option: "-C" }],
+      },
+      "forged",
+    ],
+    decisionSource: "bashguard_authorization",
+    evidence: "bashguard_tool_call_input",
+    limitations: ["Later extension handlers may mutate this tool call after BashGuard observes it."],
+    toolCallId: "call-git-malformed",
+    toolName: "bash",
+  };
+}
+
 test("parseJsonlEvents skips malformed complete lines and incomplete final lines", () => {
   const parsed = parseJsonlEvents(`${JSON.stringify(event(2, "agent.ended"))}\nnot-json\n{`);
 
@@ -981,6 +1055,193 @@ test("authorization decisions render grounded timeline, inspection, filtering, a
   assert.match(output, /Approval requests\s+1/);
   assert.match(output, /Blocked commands\s+1/);
   assert.match(output, /Authorization decisions\n- event 3 · approval requested[\s\S]*- event 4 · declined[\s\S]*- event 5 · blocked/);
+});
+
+test("structured authorization decisions render matched checks without duplicate claims", () => {
+  const requested = event(2, "command.approval_requested", {
+    toolName: "bash",
+    toolCallId: "call-git-both",
+    payload: structuredGitDecisionPayload(),
+  });
+  const approved = event(3, "command.approved", {
+    toolName: "bash",
+    toolCallId: "call-git-both",
+    payload: {
+      ...structuredGitDecisionPayload({ authorization: "run_once", outcome: "allow" }),
+    },
+  });
+
+  assert.match(renderEvent(requested) ?? "", /checks: git-reset-hard, git-clean-forced/);
+  assert.match(formatTimelineEvent(requested) ?? "", /checks: git-reset-hard, git-clean-forced/);
+  assert.equal((renderEvent(requested)?.match(/git-reset-hard/g) ?? []).length, 1);
+  assert.equal((renderEvent(requested)?.match(/git-clean-forced/g) ?? []).length, 1);
+  assert.match(renderEvent(approved) ?? "", /Approved once ·/);
+  assert.match(renderEvent(approved) ?? "", /checks: git-reset-hard, git-clean-forced/);
+  assert.doesNotMatch(renderEvent(approved) ?? "", /every runtime layer/);
+  assert.match(formatFilteredEvents("1", [requested, approved], 2, "text"), /git-reset-hard/);
+  assert.match(formatFilteredEvents("1", [requested, approved], 2, "text"), /git-clean-forced/);
+});
+
+test("structured authorization inspection renders rule metadata and malformed matchedChecks as missing evidence", () => {
+  const inspected = event(4, "command.blocked", {
+    toolName: "bash",
+    toolCallId: "call-git-both",
+    payload: {
+      ...structuredGitDecisionPayload({
+        outcome: "block",
+        cause: "declined",
+        reason: "BashGuard blocked this destructive Git operation because approval was declined.",
+      }),
+    },
+  });
+  const malformed = event(5, "command.blocked", {
+    toolName: "bash",
+    toolCallId: "call-git-malformed",
+    payload: {
+      ...malformedStructuredGitDecisionPayload(),
+      outcome: "block",
+      cause: "declined",
+      reason: "BashGuard blocked this destructive Git operation because approval was declined.",
+    },
+  });
+
+  const inspection = formatEventInspection(inspected);
+  assert.match(inspection, /Matched checks\s+git-reset-hard, git-clean-forced/);
+  assert.match(inspection, /Rule ID\s+git-reset-hard/);
+  assert.match(inspection, /Version\s+1/);
+  assert.match(inspection, /Provider\s+bashguard_builtin/);
+  assert.match(inspection, /Risk\s+history or working-tree rewrite/);
+  assert.match(inspection, /Impact\s+may discard tracked working-tree and index changes\./);
+  assert.match(inspection, /Literal target option:\s+-C \/tmp\/repo/);
+  assert.equal((inspection.match(/Literal target option:\s+-C \/tmp\/repo/g) ?? []).length, 4);
+
+  const malformedInspection = formatEventInspection(malformed);
+  assert.match(malformedInspection, /Matched checks/);
+  assert.match(malformedInspection, /Rule ID\s+git-reset-hard/);
+  assert.match(malformedInspection, /Version\s+missing/);
+  assert.match(malformedInspection, /Provider\s+missing/);
+  assert.match(malformedInspection, /Risk\s+history or working-tree rewrite/);
+  assert.match(malformedInspection, /Literal target option:\s+missing/);
+  assert.doesNotThrow(() => formatEventInspection(malformed));
+});
+
+test("structured Git decisions stay visible in risk and tool filters and blocked calls never look like missing completion", () => {
+  const request = event(6, "tool.requested", {
+    toolName: "bash",
+    toolCallId: "call-git-both",
+    payload: {
+      toolCallId: "call-git-both",
+      input: { command: structuredGitDecisionPayload().observedCommand },
+    },
+  });
+  const blocked = event(7, "command.blocked", {
+    toolName: "bash",
+    toolCallId: "call-git-both",
+    payload: {
+      ...structuredGitDecisionPayload({
+        outcome: "block",
+        cause: "declined",
+        reason: "BashGuard blocked this destructive Git operation because approval was declined.",
+      }),
+    },
+  });
+  const filteredRisk = filterEvidenceEvents([request, blocked], { activities: ["risk"] });
+  const filteredTool = filterEvidenceEvents([request, blocked], { activities: ["tool"] });
+
+  assert.deepEqual(filteredRisk.matches.map((item) => item.sequence), [6, 7]);
+  assert.deepEqual(filteredTool.matches.map((item) => item.sequence), [6, 7]);
+
+  const summary = buildDebrief([request, blocked]);
+  assert.equal(summary.blockedCommands, 1);
+  assert.match(summary.worthReviewing.join("\n"), /blocked before execution by recorded authorization decision/);
+  assert.doesNotMatch(summary.worthReviewing.join("\n"), /missing command completion evidence/);
+  assert.match(formatDebrief(summary), /Blocked commands\s+1/);
+});
+
+test("structured Git decisions count decision events once and list exact inspect links", () => {
+  const request = event(8, "tool.requested", {
+    toolName: "bash",
+    toolCallId: "call-git-both",
+    payload: {
+      toolCallId: "call-git-both",
+      input: { command: structuredGitDecisionPayload().observedCommand },
+    },
+  });
+  const approvalRequested = event(9, "command.approval_requested", {
+    toolName: "bash",
+    toolCallId: "call-git-both",
+    payload: structuredGitDecisionPayload(),
+  });
+  const approved = event(10, "command.approved", {
+    toolName: "bash",
+    toolCallId: "call-git-both",
+    payload: {
+      ...structuredGitDecisionPayload({ authorization: "run_once", outcome: "allow" }),
+    },
+  });
+
+  const summary = buildDebrief([request, approvalRequested, approved]);
+  assert.equal(summary.approvalRequests, 1);
+  assert.equal(summary.approvedCommands, 1);
+  assert.equal(summary.authorizationActivity.length, 2);
+  assert.ok(summary.authorizationActivity.every((item) => item.includes("checks: git-reset-hard, git-clean-forced")));
+  assert.ok(summary.authorizationActivity.every((item) => item.includes("Inspect: --event ")));
+  assert.deepEqual(summary.nextInspectCommands, [
+    "bashguard inspect <session> --event 8  # risky shell command",
+    "bashguard inspect <session> --event 9  # approval request",
+    "bashguard inspect <session> --event 10  # approved authorization decision",
+  ]);
+});
+
+test("structured Git decisions keep approved requests pending completion and close declined requests", () => {
+  const request = event(11, "tool.requested", {
+    toolName: "bash",
+    toolCallId: "call-git-binary",
+    payload: {
+      toolCallId: "call-git-binary",
+      input: { command: "git -C /tmp/repo reset --hard" },
+    },
+  });
+  const approvedStatus = buildAttachStatus([
+    request,
+    event(12, "command.approved", {
+      toolName: "bash",
+      toolCallId: "call-git-binary",
+      payload: {
+        ...structuredGitDecisionPayload({
+          toolCallId: "call-git-binary",
+          observedCommand: "git -C /tmp/repo reset --hard",
+          matchedChecks: structuredGitMatches(),
+          authorization: "run_once",
+          outcome: "allow",
+        }),
+      },
+    }),
+  ], true);
+  assert.equal(approvedStatus.activityLabel, "Current activity");
+  assert.match(approvedStatus.activity, /^Running · git -C \/tmp\/repo reset --hard · Non-blocking risk notice: history or working-tree rewrite/);
+  assert.equal(approvedStatus.evidence, "request recorded; completion not recorded yet");
+
+  const blockedStatus = buildAttachStatus([
+    request,
+    event(13, "command.blocked", {
+      toolName: "bash",
+      toolCallId: "call-git-binary",
+      payload: {
+        ...structuredGitDecisionPayload({
+          toolCallId: "call-git-binary",
+          observedCommand: "git -C /tmp/repo reset --hard",
+          matchedChecks: structuredGitMatches(),
+          outcome: "block",
+          cause: "declined",
+          reason: "BashGuard blocked this destructive Git operation because approval was declined.",
+        }),
+      },
+    }),
+  ], true);
+  assert.equal(blockedStatus.activityLabel, "Last activity");
+  assert.match(blockedStatus.activity, /^Blocked by BashGuard authorization · git -C \/tmp\/repo reset --hard · BashGuard blocked this destructive Git operation because approval was declined\./);
+  assert.match(blockedStatus.activity, /checks: git-reset-hard, git-clean-forced/);
 });
 
 test("approved authorization is counted without claiming every runtime layer was approved", () => {

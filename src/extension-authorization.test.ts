@@ -82,10 +82,12 @@ const dangerousCall = {
 
 test("active recorder owner allows safe calls without approval evidence", async (t) => {
   const f = await fixture(t);
-  const result = await f.handlers.get("tool_call")?.({ ...dangerousCall, input: { command: "npm test" } }, f.ctx);
+  const result = await f.handlers.get("tool_call")?.({ ...dangerousCall, input: { command: "npm test", authorization: "Bearer secret" } }, f.ctx);
   assert.equal(result, undefined);
   assert.deepEqual(f.confirmations, []);
-  assert.deepEqual((await f.events()).filter((event) => event.toolCallId === "call-danger").map((event) => event.type), ["tool.requested"]);
+  const events = (await f.events()).filter((event) => event.toolCallId === "call-danger");
+  assert.deepEqual(events.map((event) => event.type), ["tool.requested"]);
+  assert.equal((events[0]?.payload.input as Record<string, unknown>).authorization, "[REDACTED]");
 });
 
 test("active owner Run once permits git reset --hard and records decision evidence after tool.requested", async (t) => {
@@ -107,6 +109,7 @@ test("active owner Run once permits git reset --hard and records decision eviden
   assert.ok(approved);
   assert.equal(approved?.payload.outcome, "allow");
   assert.equal(approved?.payload.decisionSource, "bashguard_authorization");
+  assert.equal(approved?.payload.authorization, "run_once");
   assert.equal(approved?.payload.matchedCheck, "git-reset-hard");
 });
 

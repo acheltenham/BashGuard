@@ -47,12 +47,13 @@ export function matchesGitResetHard(command: string): boolean {
 
 export function matchesForcedGitClean(command: string): boolean {
   const normalized = command.toLowerCase();
+  const dryRunPattern = /(?:--dry-run\b|-[^\s]*n[^\s-]*)/i;
   const pattern = new RegExp(
     `${GIT_PREFIX_FRAGMENT}\\s+clean\\b[\\s\\S]*?${SHELL_TOKEN_BOUNDARY}(?:--force|-[^\\s-]*f[^\\s-]*)${SHELL_TOKEN_END}`,
     "i",
   );
 
-  return normalized.split(COMMAND_BOUNDARY).some((segment) => pattern.test(segment));
+  return normalized.split(COMMAND_BOUNDARY).some((segment) => pattern.test(segment) && !dryRunPattern.test(segment));
 }
 
 export function classifyCommandRisk(command: string): string[] {

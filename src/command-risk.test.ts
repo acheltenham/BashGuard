@@ -61,6 +61,9 @@ test("pure git destructive matchers are conservative and table-driven", () => {
     ["git -C ../repo clean --force -d", true],
     ["git clean -n", false],
     ["git clean --dry-run", false],
+    ["git clean -nf", false],
+    ["git clean --dry-run -f", false],
+    ["git clean -f --dry-run", false],
   ] as const) {
     assert.equal(matchesForcedGitClean(command), expected, command);
   }

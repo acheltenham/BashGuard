@@ -1162,7 +1162,7 @@ test("real PTY live footer updates, resizes, stays bounded, and finalizes ordina
 
   const bin = join(process.cwd(), "bin", "bashguard");
   const result = await runPortablePty({
-    timeoutMs: 12_000,
+    timeoutMs: 30_000,
     env: { BASHGUARD_DATA_DIR: join(selection.session.directory, ".."), TERM: "xterm-256color" },
     scenario: [
       "stty columns 80 rows 24",

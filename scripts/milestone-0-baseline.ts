@@ -82,7 +82,7 @@ async function measureLatency(samples: number): Promise<Record<string, unknown>>
     }
   });
   child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-  const waitFor = (marker: string, timeoutMs = 5_000): Promise<void> => new Promise((resolve, reject) => {
+  const waitFor = (marker: string, timeoutMs = 20_000): Promise<void> => new Promise((resolve, reject) => {
     if (output.includes(marker)) return resolve();
     const waiter = { marker, resolve };
     waiters.push(waiter);

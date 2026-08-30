@@ -40,13 +40,14 @@ test("spans and expectations remain immutable and structurally explicit", () => 
     redirections: [],
     unresolved: [],
     protectedChecks: [protectedCheck("git-reset-hard", "not-matched", "observed", "echo hello")],
+    literalGitTargetOptions: [{ option: "-C", value: "./repo-a" }],
     diagnostics: [],
     runtimeUnknowns: ["runtime argv remains unknown"],
   });
   const corpusFixture = fixture({
     id: "sa-999-immutable-fixture",
     title: "Immutable fixture",
-    family: "inert-text",
+    family: "heredoc-inert-data",
     command: "echo hello",
     expected: analysis,
   });
@@ -56,6 +57,9 @@ test("spans and expectations remain immutable and structurally explicit", () => 
   assert.equal(Object.isFrozen(corpusFixture), true);
   assert.equal(Object.isFrozen(corpusFixture.expected), true);
   assert.equal(Object.isFrozen(corpusFixture.expected.segments[0]!), true);
+  const literalGitTarget = corpusFixture.expected.literalGitTargetOptions?.[0];
+  assert.ok(literalGitTarget);
+  assert.equal(Object.isFrozen(literalGitTarget), true);
   assert.throws(() => {
     (corpusFixture.expected.segments as CommandSegment[]).push(segment("x", "word", "x", span(0, 1))); // eslint-disable-line @typescript-eslint/no-explicit-any
   });

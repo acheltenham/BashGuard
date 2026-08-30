@@ -31,7 +31,10 @@
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/**/*.test.ts scripts/**/*.test.ts",
     "sessions": "node --experimental-strip-types src/cli.ts sessions",
-    "spike:command-resolution": "node --experimental-strip-types scripts/command-resolution-spike/run.ts"
+    "spike:command-resolution": "node --experimental-strip-types scripts/command-resolution-spike/run.ts",
+    "research:shell-analysis:corpus": "node --experimental-strip-types --test scripts/shell-analysis-spike/model.test.ts scripts/shell-analysis-spike/corpus.test.ts",
+    "research:shell-analysis:baseline": "node --experimental-strip-types --test scripts/shell-analysis-spike/adapters/current-matcher.test.ts scripts/shell-analysis-spike/evaluate.test.ts",
+    "research:shell-analysis:report": "node --experimental-strip-types scripts/shell-analysis-spike/report.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.84.0",

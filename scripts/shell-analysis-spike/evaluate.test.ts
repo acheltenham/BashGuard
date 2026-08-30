@@ -7,6 +7,7 @@ import test from "node:test";
 import { shellAnalysisCorpus } from "./corpus.ts";
 import { evaluateCorpus, sanitizeEvaluationProjection, type AnalysisAdapter } from "./evaluate.ts";
 import { analyzeWithCurrentMatcher } from "./adapters/current-matcher.ts";
+import { expectation, fixture, protectedCheck, segment, span } from "./model.ts";
 
 const corpus = shellAnalysisCorpus();
 
@@ -157,6 +158,56 @@ test("evaluation projections sanitize host-specific paths and timing noise", () 
   assert.doesNotMatch(text, /\b12 ms\b/);
   assert.match(text, /<tmp-path>/);
   assert.match(text, /<duration-ms>/);
+});
+
+test("check comparison accepts explicit not-matched, rejects unexpected matched, enforces missing matches, and preserves unknown", async () => {
+  const makeFixture = (expectedChecks: readonly ReturnType<typeof protectedCheck>[]) =>
+    fixture({
+      id: "sa-evaluate-checks",
+      title: "check comparison fixture",
+      family: "protected-check",
+      command: "echo safe",
+      expected: expectation({
+        status: "structured",
+        evidenceLevel: "observed",
+        subset: "supported",
+        segments: [segment("command", "command", "echo safe", span(0, 9))],
+        wrappers: [],
+        redirections: [],
+        unresolved: [],
+        protectedChecks: expectedChecks,
+        diagnostics: [],
+        runtimeUnknowns: ["runtime identity depends on shell execution"],
+      }),
+    });
+
+  const adapterFor = (actualChecks: readonly ReturnType<typeof protectedCheck>[]): AnalysisAdapter => ({
+    id: "checks-adapter",
+    label: "Checks adapter",
+    capabilities: { structural: false, checks: true, literalGitTargets: false },
+    analyze: () => ({
+      adapterId: "checks-adapter",
+      adapterLabel: "Checks adapter",
+      command: "echo safe",
+      status: "structured",
+      textualEvidence: ["checks observed"],
+      protectedChecks: actualChecks,
+      literalGitTargetOptions: [],
+      limitations: [],
+    }),
+  });
+
+  const notMatchedResult = await evaluateCorpus(adapterFor([protectedCheck("recursive-forced-deletion", "not-matched", "observed", "rm -rf not present")]), [makeFixture([protectedCheck("recursive-forced-deletion", "not-matched", "observed", "rm -rf not present")])], { timeoutMs: 250 });
+  assert.equal(notMatchedResult.fixtures[0]?.comparison.checks, "matched");
+
+  const unexpectedMatchedResult = await evaluateCorpus(adapterFor([protectedCheck("recursive-forced-deletion", "matched", "observed", "rm -rf present")]), [makeFixture([])], { timeoutMs: 250 });
+  assert.equal(unexpectedMatchedResult.fixtures[0]?.comparison.checks, "mismatched");
+
+  const missingMatchResult = await evaluateCorpus(adapterFor([]), [makeFixture([protectedCheck("git-clean-forced", "matched", "observed", "git clean -fd")])], { timeoutMs: 250 });
+  assert.equal(missingMatchResult.fixtures[0]?.comparison.checks, "mismatched");
+
+  const unknownResult = await evaluateCorpus(adapterFor([protectedCheck("git-reset-hard", "unknown", "observed", "git reset --hard maybe")]), [makeFixture([protectedCheck("git-reset-hard", "unknown", "observed", "git reset --hard maybe")])], { timeoutMs: 250 });
+  assert.equal(unknownResult.fixtures[0]?.comparison.checks, "matched");
 });
 
 test("production sources do not resolve imports into scripts/shell-analysis-spike", async () => {

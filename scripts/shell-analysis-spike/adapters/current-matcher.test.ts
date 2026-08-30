@@ -35,6 +35,9 @@ test("current matcher adapter emits only textual evidence and known limitations"
   assert.ok(analysis.textualEvidence.every((line) => !line.includes("segment")));
   assert.ok(analysis.limitations.some((line) => line.includes("text-only matcher")));
   assert.ok(analysis.literalGitTargetOptions.length > 0);
+  assert.equal(analysis.capabilities.structural, false);
+  assert.equal(analysis.capabilities.checks, true);
+  assert.equal(analysis.capabilities.literalGitTargets, true);
 });
 
 test("current matcher adapter can analyze the whole corpus without structural synthesis", () => {

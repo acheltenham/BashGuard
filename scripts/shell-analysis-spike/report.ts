@@ -1,20 +1,18 @@
 import { fileURLToPath } from "node:url";
 
-import {
-  type CorpusEvaluation,
-  sanitizeEvaluationProjection,
-  evaluateCorpus,
-} from "./evaluate.ts";
+import { type CorpusEvaluation, evaluateCorpus, sanitizeEvaluationProjection } from "./evaluate.ts";
 import { shellAnalysisCorpus } from "./corpus.ts";
 import { analyzeWithCurrentMatcher } from "./adapters/current-matcher.ts";
 
 export interface ReportProjection {
   readonly adapterId: string;
   readonly adapterLabel: string;
+  readonly capabilities: CorpusEvaluation["capabilities"];
   readonly summary: CorpusEvaluation["summary"];
   readonly fixtures: readonly {
     readonly fixtureId: string;
     readonly outcome: string;
+    readonly comparison: CorpusEvaluation["fixtures"][number]["comparison"];
     readonly documented: {
       readonly status: string;
       readonly evidenceLevel: string;
@@ -32,14 +30,21 @@ export interface ReportProjection {
   }[];
 }
 
+function sortFixtures<T extends { readonly fixtureId: string }>(fixtures: readonly T[]): readonly T[] {
+  return [...fixtures].sort((left, right) => left.fixtureId.localeCompare(right.fixtureId));
+}
+
 export function projectReport(evaluation: CorpusEvaluation): ReportProjection {
+  const sortedFixtures = sortFixtures(evaluation.fixtures);
   return sanitizeEvaluationProjection({
     adapterId: evaluation.adapterId,
     adapterLabel: evaluation.adapterLabel,
+    capabilities: evaluation.capabilities,
     summary: evaluation.summary,
-    fixtures: evaluation.fixtures.map((fixture) => ({
+    fixtures: sortedFixtures.map((fixture) => ({
       fixtureId: fixture.fixtureId,
       outcome: fixture.outcome,
+      comparison: fixture.comparison,
       documented: {
         status: fixture.documented.status,
         evidenceLevel: fixture.documented.evidenceLevel,
@@ -62,22 +67,25 @@ export function projectReport(evaluation: CorpusEvaluation): ReportProjection {
 
 export function formatMarkdownReport(evaluation: CorpusEvaluation): string {
   const report = projectReport(evaluation);
+  const structuralCapability = report.capabilities.structural ? "yes" : "n/a";
+  const checkCapability = report.capabilities.checks ? "yes" : "n/a";
+  const literalCapability = report.capabilities.literalGitTargets ? "yes" : "n/a";
   const lines = [
     `# Shell analysis baseline report`,
     "",
     `Adapter: **${report.adapterLabel}** (${report.adapterId})`,
+    `Capabilities: structural ${structuralCapability}, checks ${checkCapability}, literal targets ${literalCapability}`,
     `Summary: pass ${report.summary.pass}, mismatch ${report.summary.mismatch}, error ${report.summary.error}, timeout ${report.summary.timeout}`,
     "",
-    "| Fixture | Documented | Demonstrated | Outcome |",
-    "|---|---|---|---|",
+    "| Fixture | Documented | Structural | Checks | Literal targets | Outcome |",
+    "|---|---|---|---|---|---|",
   ];
   for (const fixture of report.fixtures) {
     const documented = `${fixture.documented.status} · ${fixture.documented.evidenceLevel} · ${fixture.documented.subset}`;
-    const demonstrated = fixture.demonstrated
-      ? `${fixture.demonstrated.status} · ${fixture.demonstrated.protectedChecks.map((check) => check.checkId).join(", ") || "<none>"}`
-      : "<none>";
-    lines.push(`| ${fixture.fixtureId} | ${documented} | ${demonstrated} | ${fixture.outcome} |`);
-    if (fixture.notes.length > 0) lines.push(`|  | notes: ${fixture.notes.join("; ")} |  |  |`);
+    lines.push(
+      `| ${fixture.fixtureId} | ${documented} | ${fixture.comparison.structural} | ${fixture.comparison.checks} | ${fixture.comparison.literalGitTargets} | ${fixture.outcome} |`,
+    );
+    if (fixture.notes.length > 0) lines.push(`|  | notes: ${fixture.notes.join("; ")} |  |  |  |  |`);
   }
   return lines.join("\n");
 }
@@ -108,6 +116,11 @@ async function main(): Promise<void> {
     {
       id: "current-matcher",
       label: "Current matcher baseline",
+      capabilities: {
+        structural: false,
+        checks: true,
+        literalGitTargets: true,
+      },
       analyze: (fixture) => analyzeWithCurrentMatcher(fixture.command),
     },
     shellAnalysisCorpus(),

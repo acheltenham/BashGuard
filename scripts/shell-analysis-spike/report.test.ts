@@ -13,6 +13,11 @@ test("report projections are deterministic and distinguish documented from demon
     {
       id: "current-matcher",
       label: "Current matcher baseline",
+      capabilities: {
+        structural: false,
+        checks: true,
+        literalGitTargets: true,
+      },
       analyze: (fixture) => analyzeWithCurrentMatcher(fixture.command),
     },
     corpus,
@@ -21,25 +26,43 @@ test("report projections are deterministic and distinguish documented from demon
 
   const markdown = formatMarkdownReport(evaluation);
   const json = formatJsonReport(evaluation);
-  assert.match(markdown, /Documented/);
-  assert.match(markdown, /Demonstrated/);
+  assert.match(markdown, /Structural/);
+  assert.match(markdown, /not-applicable/);
   assert.match(json, /"adapterId": "current-matcher"/);
   assert.equal(markdown.includes("/private/tmp"), false);
   assert.equal(json.includes("/private/tmp"), false);
   assert.ok(projectReport(evaluation).fixtures.length > 0);
 });
 
-test("report formatting stays stable for fixture ordering", async () => {
-  const evaluation = await evaluateCorpus(
+test("report formatting stays stable for reversed fixture ordering", async () => {
+  const evaluationA = await evaluateCorpus(
     {
       id: "current-matcher",
       label: "Current matcher baseline",
+      capabilities: {
+        structural: false,
+        checks: true,
+        literalGitTargets: true,
+      },
       analyze: (fixture) => analyzeWithCurrentMatcher(fixture.command),
     },
-    corpus.slice(0, 2),
+    corpus,
     { timeoutMs: 250 },
   );
-  const markdownA = formatMarkdownReport(evaluation);
-  const markdownB = formatMarkdownReport(evaluation);
-  assert.equal(markdownA, markdownB);
+  const evaluationB = await evaluateCorpus(
+    {
+      id: "current-matcher",
+      label: "Current matcher baseline",
+      capabilities: {
+        structural: false,
+        checks: true,
+        literalGitTargets: true,
+      },
+      analyze: (fixture) => analyzeWithCurrentMatcher(fixture.command),
+    },
+    [...corpus].reverse(),
+    { timeoutMs: 250 },
+  );
+  assert.equal(formatMarkdownReport(evaluationA), formatMarkdownReport(evaluationB));
+  assert.equal(formatJsonReport(evaluationA), formatJsonReport(evaluationB));
 });

@@ -111,6 +111,11 @@ export interface ProtectedCheckObservation {
   readonly text: string;
 }
 
+export interface LiteralGitTargetOption {
+  readonly option: "-C" | "--git-dir" | "--work-tree";
+  readonly value: string;
+}
+
 export interface CommandAnalysisExpectation {
   readonly status: AnalysisStatus;
   readonly evidenceLevel: EvidenceLevel;
@@ -120,6 +125,7 @@ export interface CommandAnalysisExpectation {
   readonly redirections: readonly RedirectionObservation[];
   readonly unresolved: readonly UnresolvedConstruct[];
   readonly protectedChecks: readonly ProtectedCheckObservation[];
+  readonly literalGitTargetOptions?: readonly LiteralGitTargetOption[];
   readonly diagnostics: readonly Diagnostic[];
   readonly runtimeUnknowns: readonly string[];
 }
@@ -128,16 +134,26 @@ export interface CorpusFixture {
   readonly id: string;
   readonly title: string;
   readonly family:
-    | "inert-text"
-    | "quotes-and-escapes"
-    | "operators-and-newlines"
-    | "groups-and-subshells"
-    | "assignments-and-wrappers"
-    | "redirects-and-heredocs"
-    | "git-target-collision"
-    | "dynamic-sink"
-    | "malformed-syntax"
-    | "long-command"
+    | "background-and-or"
+    | "pipe-both"
+    | "comments-printf"
+    | "heredoc-inert-data"
+    | "escaped-quoted-paths"
+    | "git-sequential-targeting"
+    | "git-missing-conflicting-options"
+    | "path-operation-collision"
+    | "option-character-collision"
+    | "alias-function"
+    | "source-dot"
+    | "bash-sh-c"
+    | "python-node-c"
+    | "xargs-variants"
+    | "find-exec"
+    | "process-substitution"
+    | "parameter-expansion"
+    | "eval"
+    | "malformed-recovery"
+    | "long-bounded"
     | "command-resolution-shape"
     | "protected-check";
   readonly command: string;
@@ -231,6 +247,7 @@ export function expectation(expectation: CommandAnalysisExpectation): CommandAna
     redirections: [...expectation.redirections],
     unresolved: [...expectation.unresolved],
     protectedChecks: [...expectation.protectedChecks],
+    literalGitTargetOptions: [...(expectation.literalGitTargetOptions ?? [])],
     diagnostics: [...expectation.diagnostics],
     runtimeUnknowns: [...expectation.runtimeUnknowns],
   });

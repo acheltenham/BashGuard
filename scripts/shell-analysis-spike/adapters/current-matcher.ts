@@ -20,6 +20,11 @@ export interface CurrentMatcherAnalysis {
   readonly protectedChecks: readonly ProtectedCheckObservation[];
   readonly literalGitTargetOptions: readonly { option: "-C" | "--git-dir" | "--work-tree"; value: string }[];
   readonly limitations: readonly string[];
+  readonly capabilities: {
+    readonly structural: false;
+    readonly checks: true;
+    readonly literalGitTargets: true;
+  };
 }
 
 function appendCheck(
@@ -61,6 +66,11 @@ export function analyzeWithCurrentMatcher(command: string): CurrentMatcherAnalys
       "quoted or inert text can still be matched by textual patterns",
       "no runtime argv, cwd, alias, or expansion verification",
     ],
+    capabilities: {
+      structural: false,
+      checks: true,
+      literalGitTargets: true,
+    },
   };
 }
 

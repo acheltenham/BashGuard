@@ -1,10 +1,14 @@
 import { performance } from "node:perf_hooks";
 
-import {
-  type CommandAnalysisExpectation,
-  type CorpusFixture,
-  type ProtectedCheckOutcome,
-} from "./model.ts";
+import { type CommandAnalysisExpectation, type CorpusFixture, type ProtectedCheckOutcome } from "./model.ts";
+
+export interface AdapterCapabilities {
+  readonly structural: boolean;
+  readonly checks: boolean;
+  readonly literalGitTargets: boolean;
+}
+
+export type ComparisonState = "matched" | "mismatched" | "not-applicable";
 
 export interface AdapterAnalysis {
   readonly adapterId: string;
@@ -15,11 +19,13 @@ export interface AdapterAnalysis {
   readonly protectedChecks: readonly { checkId: string; outcome: ProtectedCheckOutcome; evidenceLevel: string; text: string }[];
   readonly literalGitTargetOptions: readonly { option: "-C" | "--git-dir" | "--work-tree"; value: string }[];
   readonly limitations: readonly string[];
+  readonly structuralFacts?: readonly string[];
 }
 
 export interface AnalysisAdapter {
   readonly id: string;
   readonly label: string;
+  readonly capabilities: AdapterCapabilities;
   analyze(fixture: CorpusFixture, signal: AbortSignal): AdapterAnalysis | Promise<AdapterAnalysis>;
 }
 
@@ -28,6 +34,11 @@ export interface FixtureEvaluation {
   readonly outcome: "pass" | "mismatch" | "error" | "timeout";
   readonly documented: CommandAnalysisExpectation;
   readonly demonstrated?: AdapterAnalysis;
+  readonly comparison: {
+    readonly structural: ComparisonState;
+    readonly checks: ComparisonState;
+    readonly literalGitTargets: ComparisonState;
+  };
   readonly notes: readonly string[];
   readonly durationMs: number;
 }
@@ -35,6 +46,7 @@ export interface FixtureEvaluation {
 export interface CorpusEvaluation {
   readonly adapterId: string;
   readonly adapterLabel: string;
+  readonly capabilities: AdapterCapabilities;
   readonly fixtures: readonly FixtureEvaluation[];
   readonly summary: {
     readonly pass: number;
@@ -69,18 +81,41 @@ function normalizeValue<T>(value: T): T {
   return out as T;
 }
 
-function compareChecks(expected: CommandAnalysisExpectation, actual: AdapterAnalysis): string[] {
-  const expectedChecks = expected.protectedChecks.filter((check) => check.outcome === "matched").map((check) => check.checkId).sort();
-  const actualChecks = actual.protectedChecks.map((check) => check.checkId).sort();
-  const notes: string[] = [];
-  if (expectedChecks.join(",") !== actualChecks.join(",")) {
-    notes.push(`expected checks ${expectedChecks.join(",") || "<none>"} but saw ${actualChecks.join(",") || "<none>"}`);
-  }
-  const expectedStatus = expected.status === "failed" ? "failed" : expected.segments.length > 0 ? "structured" : "degraded";
-  if (expectedStatus !== actual.status && !(expectedChecks.length === 0 && actual.status === "degraded")) {
-    notes.push(`expected status ${expectedStatus} but saw ${actual.status}`);
-  }
-  return notes;
+function sortedJson(value: readonly { readonly option: string; readonly value: string }[]): string {
+  return JSON.stringify(
+    [...value]
+      .map((entry) => ({ option: entry.option, value: entry.value }))
+      .sort((left, right) => `${left.option}=${left.value}`.localeCompare(`${right.option}=${right.value}`)),
+  );
+}
+
+function compareStructuralFacts(expected: CommandAnalysisExpectation, actual: AdapterAnalysis, capabilities: AdapterCapabilities): ComparisonState {
+  if (!capabilities.structural) return "not-applicable";
+  const expectedFacts = expected.segments.map((segment) => segment.id).sort();
+  const actualFacts = [...(actual.structuralFacts ?? [])].sort();
+  return expectedFacts.join("|") === actualFacts.join("|") ? "matched" : "mismatched";
+}
+
+function compareChecks(expected: CommandAnalysisExpectation, actual: AdapterAnalysis, capabilities: AdapterCapabilities): ComparisonState {
+  if (!capabilities.checks) return "not-applicable";
+  const expectedMatched = expected.protectedChecks.filter((check) => check.outcome === "matched").map((check) => check.checkId).sort();
+  const expectedNotMatched = expected.protectedChecks.filter((check) => check.outcome === "not-matched").map((check) => check.checkId).sort();
+  const expectedUnknown = expected.protectedChecks.filter((check) => check.outcome === "unknown").map((check) => check.checkId).sort();
+  const actualMatched = actual.protectedChecks.filter((check) => check.outcome === "matched").map((check) => check.checkId).sort();
+  const actualNotMatched = actual.protectedChecks.filter((check) => check.outcome === "not-matched").map((check) => check.checkId).sort();
+  const actualUnknown = actual.protectedChecks.filter((check) => check.outcome === "unknown").map((check) => check.checkId).sort();
+
+  if (expectedMatched.join(",") !== actualMatched.join(",")) return "mismatched";
+  if (expectedNotMatched.join(",") !== actualNotMatched.join(",")) return "mismatched";
+  if (expectedUnknown.join(",") !== actualUnknown.join(",")) return "mismatched";
+  return "matched";
+}
+
+function compareLiteralGitTargets(expected: CommandAnalysisExpectation, actual: AdapterAnalysis, capabilities: AdapterCapabilities): ComparisonState {
+  if (!capabilities.literalGitTargets) return "not-applicable";
+  const expectedTargets = sortedJson(expected.literalGitTargetOptions ?? []);
+  const actualTargets = sortedJson(actual.literalGitTargetOptions);
+  return expectedTargets === actualTargets ? "matched" : "mismatched";
 }
 
 async function evaluateFixture(
@@ -92,19 +127,29 @@ async function evaluateFixture(
   const startedAt = performance.now();
   const timer = setTimeout(() => controller.abort(new Error(`evaluation timed out after ${options.timeoutMs}ms`)), options.timeoutMs);
   try {
+    // Promise.race can stop waiting on a deadline, but it cannot forcibly preempt a non-cooperating adapter.
+    // External adapters must honor the AbortSignal contract and own their process cleanup.
     const result = await Promise.race([
       toPromise(adapter.analyze(fixture, controller.signal)),
       new Promise<never>((_, reject) => {
         controller.signal.addEventListener("abort", () => reject(controller.signal.reason ?? new Error("evaluation timed out")), { once: true });
       }),
     ]);
-    const notes = compareChecks(fixture.expected, result).map((line) => normalizeText(line));
+    const comparison = {
+      structural: compareStructuralFacts(fixture.expected, result, adapter.capabilities),
+      checks: compareChecks(fixture.expected, result, adapter.capabilities),
+      literalGitTargets: compareLiteralGitTargets(fixture.expected, result, adapter.capabilities),
+    };
+    const notes = [comparison.structural, comparison.checks, comparison.literalGitTargets]
+      .filter((state) => state === "mismatched")
+      .map((line) => normalizeText(line));
     const outcome = notes.length === 0 ? "pass" : "mismatch";
     return {
       fixtureId: fixture.id,
       outcome,
       documented: fixture.expected,
       demonstrated: result,
+      comparison,
       notes,
       durationMs: Math.round(performance.now() - startedAt),
     };
@@ -115,6 +160,7 @@ async function evaluateFixture(
       fixtureId: fixture.id,
       outcome,
       documented: fixture.expected,
+      comparison: { structural: "not-applicable", checks: "not-applicable", literalGitTargets: "not-applicable" },
       notes: [normalizeText(message)],
       durationMs: Math.round(performance.now() - startedAt),
     };
@@ -140,6 +186,7 @@ export async function evaluateCorpus(
   return {
     adapterId: adapter.id,
     adapterLabel: adapter.label,
+    capabilities: adapter.capabilities,
     fixtures,
     summary,
   };

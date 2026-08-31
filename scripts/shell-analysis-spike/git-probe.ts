@@ -5,7 +5,7 @@ import path from "node:path";
 
 import type { GitTargetCandidate, GitTargetEvidenceLevel } from "./git-target.ts";
 
-export type GitProbeUnknownReason = "timeout" | "missing-git" | "nonrepo" | "inconsistent" | "malformed" | "permission";
+export type GitProbeUnknownReason = "timeout" | "missing-git" | "missing-path" | "nonrepo" | "inconsistent" | "malformed" | "permission";
 
 export interface GitProcessRun {
   readonly stage: "metadata" | "top-level";
@@ -287,7 +287,7 @@ export async function probeGitTarget(
   if (cwdCheck.status !== "ok") {
     return {
       evidenceLevel: "unknown",
-      unknownReason: cwdCheck.status === "permission" ? "permission" : "nonrepo",
+      unknownReason: cwdCheck.status === "permission" ? "permission" : "missing-path",
       target,
       canonical: { cwd: normalizeMacTmpAlias(path.resolve(target.resolvedCwd)) },
       observed: {},
@@ -301,7 +301,7 @@ export async function probeGitTarget(
   if (gitDirCheck && gitDirCheck.status !== "ok") {
     return {
       evidenceLevel: "unknown",
-      unknownReason: gitDirCheck.status === "permission" ? "permission" : "nonrepo",
+      unknownReason: gitDirCheck.status === "permission" ? "permission" : "missing-path",
       target,
       canonical: { cwd: cwdCheck.canonical },
       observed: {},
@@ -315,7 +315,7 @@ export async function probeGitTarget(
   if (workTreeCheck && workTreeCheck.status !== "ok") {
     return {
       evidenceLevel: "unknown",
-      unknownReason: workTreeCheck.status === "permission" ? "permission" : "nonrepo",
+      unknownReason: workTreeCheck.status === "permission" ? "permission" : "missing-path",
       target,
       canonical: { cwd: cwdCheck.canonical },
       observed: {},

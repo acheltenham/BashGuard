@@ -150,6 +150,10 @@ test("probe reports nonrepo, missing git, permission, malformed, inconsistent, a
     assert.equal(nonrepo.evidenceLevel, "unknown");
     assert.equal(nonrepo.unknownReason, "nonrepo");
 
+    const missingPath = await probeGitTarget(parseTarget("git status", path.join(fixtures.root, "missing-directory")), { timeoutMs: 1000 });
+    assert.equal(missingPath.evidenceLevel, "unknown");
+    assert.equal(missingPath.unknownReason, "missing-path");
+
     const missingGit = await probeGitTarget(parseTarget("git status", fixtures.repo), {
       gitBinary: path.join(fixtures.root, "missing-git-binary"),
       timeoutMs: 1000,

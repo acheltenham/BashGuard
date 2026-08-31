@@ -6,41 +6,65 @@ import { formatPackageSmokeJson, formatPackageSmokeMarkdown, projectPackageSmoke
 const report: PackageSmokeReport = {
   generatedAt: "2026-08-28T12:00:00.000Z",
   isolatedRoots: {
-    configDir: "/private/tmp/bashguard-smoke/pi-agent",
-    projectDir: "/private/tmp/bashguard-smoke/project",
+    configDir: "/Users/alice/bashguard-smoke/pi-agent",
+    projectDir: "/home/bob/bashguard-smoke/project",
     packageRoot: "/private/tmp/bashguard-smoke/package",
   },
   bashguardPackage: {
     pack: {
       tarball: "bashguard-0.4.0.tgz",
       unpackedSizeBytes: 2_048_000,
+      succeeded: true,
     },
-    extractedPackage: {
-      status: "loaded",
+    install: {
+      status: "observed",
       evidence: "observed",
-      command: "pi --mode json -e <package-root> --no-extensions --no-skills --no-context-files --no-tools --offline --print smoke",
-      exitCode: 1,
-      stdout: "{\"type\":\"session.started\"}\n",
-      stderr: "authentication unavailable",
-      notes: ["session_start observed in JSON output", "model response was blocked"],
+      command: "npm install --omit=dev",
+      exitCode: 0,
+      timedOut: false,
+      stdout: "installed package",
+      stderr: "",
+      notes: ["extracted package install succeeded"],
     },
-    installRoot: {
-      status: "blocked",
-      evidence: "blocked",
-      command: "pi install -l <package-root>",
-      exitCode: 1,
+    piProcess: {
+      status: "unproven",
+      evidence: "unproven",
+      command: "pi --mode json --offline --no-extensions --no-skills --no-context-files --no-tools -e <package-root> -p smoke",
+      exitCode: null,
+      timedOut: true,
       stdout: "",
-      stderr: "configuration isolation not proven",
-      notes: ["visible blocked evidence only"],
+      stderr: "request timed out",
+      notes: ["offline Pi session timed out; runtime auth behavior unproven"],
+    },
+    startupEvidence: {
+      status: "observed",
+      evidence: "observed",
+      command: "scan BASHGUARD_DATA_DIR for session.json/events.jsonl",
+      exitCode: null,
+      timedOut: false,
+      stdout: "session artifact observed in isolated BASHGUARD_DATA_DIR",
+      stderr: "",
+      notes: ["recorder extension startup artifact observed"],
+    },
+    registrationConfig: {
+      status: "observed",
+      evidence: "observed",
+      command: "pi install -l <package-root>",
+      exitCode: 0,
+      timedOut: false,
+      stdout: "registered package",
+      stderr: "",
+      notes: ["dedicated cwd, PI_CODING_AGENT_DIR, and BASHGUARD_DATA_DIR were set", "registration/config evidence observed in isolated config root", "no writes to sentinel snapshot observed"],
     },
     authBehavior: {
-      status: "blocked",
-      evidence: "blocked",
-      command: "pi --mode json -e <package-root>",
-      exitCode: 1,
+      status: "unproven",
+      evidence: "unproven",
+      command: "pi --mode json --offline --no-extensions --no-skills --no-context-files --no-tools -e <package-root> -p smoke",
+      exitCode: null,
+      timedOut: true,
       stdout: "",
-      stderr: "no auth behavior change could be proven in this environment",
-      notes: ["not faked as pass"],
+      stderr: "request timed out",
+      notes: ["offline Pi session timed out; runtime auth behavior unproven", "static production-import and runtime-dependency isolation are assessed separately"],
     },
   },
   candidatePackages: [
@@ -64,14 +88,14 @@ const report: PackageSmokeReport = {
   commands: [
     {
       command: "npm pack",
-      cwd: "/private/tmp/bashguard-smoke/package",
+      cwd: "/Users/alice/bashguard-smoke/package",
       exitCode: 0,
       durationMs: 55.5,
       stdout: "bashguard-0.4.0.tgz",
       stderr: "",
     },
   ],
-  notes: ["local observation only"],
+  notes: ["local observation only", "timestamp/load/durations are local observations, not guarantees"],
 };
 
 test("package smoke report projection stays sanitized and preserves blocked evidence", () => {
@@ -80,13 +104,17 @@ test("package smoke report projection stays sanitized and preserves blocked evid
   const json = formatPackageSmokeJson(projected);
 
   assert.match(markdown, /tree-sitter-native-candidate/);
-  assert.match(markdown, /blocked evidence/);
-  assert.match(markdown, /pi --mode json -e/);
-  assert.match(markdown, /configuration isolation not proven/);
-  assert.match(markdown, /no auth behavior change could be proven/);
+  assert.match(markdown, /Package install: observed · observed/);
+  assert.match(markdown, /Pi process: unproven · unproven · timed out/);
+  assert.match(markdown, /Recorder startup evidence: observed · observed/);
+  assert.match(markdown, /Registration\/config evidence: observed · observed/);
+  assert.match(markdown, /Authorization behavior: unproven · unproven · timed out/);
   assert.equal(markdown.includes("/private/tmp"), false);
   assert.equal(json.includes("/private/tmp"), false);
   assert.equal(markdown.includes("/Users/"), false);
+  assert.equal(json.includes("/Users/"), false);
+  assert.equal(markdown.includes("/home/"), false);
+  assert.equal(json.includes("/home/"), false);
 });
 
 test("package smoke report ordering is deterministic", () => {

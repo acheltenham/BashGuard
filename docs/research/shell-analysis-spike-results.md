@@ -1,12 +1,12 @@
 # Shell Analysis Spike Results
 
-Local observations only; not guarantees.
+Local observations only; snapshot timestamp, load, and durations are non-repeatable.
 
 ## Environment
 
-- Host: `darwin x64` · load `10.2 / 8.3 / 7.4` · memory `32 GiB` · host `<hash>`
-- Tool versions: `node v26.4.0`, `npm 11.17.0`, `pi 0.84.4`, `git 2.54.0`
-- `dcg`: not installed locally
+- Host: `darwin x64` · load `12.56103515625 / 7.8828125 / 7.71240234375` · memory `32 GiB` · host `<hash>`
+- Tool versions: `node v26.4.0`, `npm 11.17.0`, `pi 0.84.4`, `git git version 2.54.0`
+- `dcg`: unavailable locally
 
 ## Exact commands run
 
@@ -17,21 +17,14 @@ node --experimental-strip-types scripts/shell-analysis-spike/package-smoke.ts --
 
 ## Benchmark matrix
 
-| Candidate | Kind | Cold init | Safe p50/p95 | Error p50/p95 | external cost | Notes |
-|---|---|---|---|---|---|---|
-| Current matcher | baseline | 286 ms | 0.02 / 0.11 ms | 0.01 / 0.04 ms | n/a | `string-width` 11,733 bytes; local observation only |
-| Tree-sitter native | native | 5 ms | 0.17 / 0.69 ms | 0.18 / 0.48 ms | n/a | `tree-sitter` 4,454,536 bytes; `tree-sitter-bash` 20,282,555 bytes; install scripts yes; native compile yes |
-| Tree-sitter WASM | wasm | 23 ms | 0.16 / 0.38 ms | 0.17 / 0.42 ms | n/a | `web-tree-sitter` 4,683,395 bytes; `tree-sitter-bash` 20,282,555 bytes; install scripts no; native compile no |
-| Narrow analyzer | narrow | 1 ms | 0.05 / 0.09 ms | 0.05 / 0.13 ms | n/a | `string-width` 11,733 bytes; local observation only |
-| dcg | dcg | 5 ms | 0.00 / 0.01 ms | 0.00 / 0.02 ms | n/a | blocked: `dcg binary not found: dcg` |
-| Git probe | git-probe | 0 ms | 22.07 / 22.56 ms | 0.32 / 0.33 ms | 16 ms | fresh repo + missing-path candidate |
-
-## Benchmark command log
-
-- `git init` → `0` · `40 ms`
-- `git status --porcelain=v1` → `0` · `16 ms`
-- `git --version` → `0` · `11 ms`
-- `npm --version` → `0` · `195 ms`
+| Adapter | Kind | Init | Safe | Error | external cost | Dependency metrics | Notes |
+|---|---|---|---|---|---|---|---|
+| Current matcher baseline | baseline | 327.00 ms | safe p50 0.02 ms · safe p95 0.14 ms · n 20 | error p50 0.01 ms · error p95 0.04 ms · n 20 | n/a | string-width · 11733 bytes · install no · native no · memory 9089024 bytes | observed current matcher only; local observation only |
+| dcg process adapter (unavailable) | dcg | n/a | n/a | n/a | n/a | none | dcg binary not found: dcg |
+| Git probe | git-probe | 0.00 ms | safe p50 40.93 ms · safe p95 41.84 ms · n 5 | error p50 0.44 ms · error p95 0.50 ms · n 5 | 36.00 ms | none | fresh repository and missing-path candidate |
+| Narrow shell analyzer | narrow | 1.00 ms | safe p50 0.06 ms · safe p95 0.13 ms · n 20 | error p50 0.06 ms · error p95 0.16 ms · n 20 | n/a | string-width · 11733 bytes · install no · native no · memory 7999488 bytes | bounded tokenizer/analyzer |
+| Tree-sitter native | native | 5.00 ms | safe p50 0.20 ms · safe p95 0.62 ms · n 20 | error p50 0.21 ms · error p95 0.48 ms · n 20 | n/a | tree-sitter · 4454536 bytes · install yes · native yes · memory 3645440 bytes; tree-sitter-bash · 20282555 bytes · install yes · native yes · memory 3694592 bytes | tree-sitter native binding candidate; available |
+| Tree-sitter WASM | wasm | 28.00 ms | safe p50 0.17 ms · safe p95 0.50 ms · n 20 | error p50 0.26 ms · error p95 0.52 ms · n 20 | n/a | web-tree-sitter · 4683395 bytes · install no · native no · memory 2572288 bytes; tree-sitter-bash · 20282555 bytes · install yes · native yes · memory 3448832 bytes | web-tree-sitter parser candidate; available |
 
 ## Package smoke matrix
 
@@ -39,29 +32,35 @@ node --experimental-strip-types scripts/shell-analysis-spike/package-smoke.ts --
 
 | Candidate | Runtime deps | pack / extract / install | import-init | Notes |
 |---|---|---|---|---|
-| `bashguard-native-candidate` | `tree-sitter`, `tree-sitter-bash` | succeeded | loaded | memory delta `6,410,240` bytes |
-| `bashguard-wasm-candidate` | `web-tree-sitter`, `tree-sitter-bash` | succeeded | loaded | memory delta `3,989,504` bytes |
-| `bashguard-narrow-candidate` | `string-width`, `strip-ansi` | succeeded | loaded | memory delta `9,187,328` bytes |
+| `bashguard-narrow-candidate` | `string-width`, `strip-ansi` | succeeded | loaded | memory delta `8904704` bytes |
+| `bashguard-native-candidate` | `tree-sitter`, `tree-sitter-bash` | succeeded | loaded | memory delta `6643712` bytes |
+| `bashguard-wasm-candidate` | `web-tree-sitter`, `tree-sitter-bash` | succeeded | loaded | memory delta `3518464` bytes |
 
 ### BashGuard package
 
-- `npm pack` → `bashguard-0.4.0.tgz` (`2.15 MB` unpacked)
-- `npm install --omit=dev` on the extracted package → succeeded
-- `pi --mode json --offline --no-extensions --no-skills --no-context-files --no-tools -e <tmp-path> -p smoke` → blocked; session startup not proven
-- `pi install -l <tmp-path>` in an isolated temp project/config root → succeeded
-- auth behavior change → blocked; not proven
+- `npm pack` succeeded; unpacked size `1.5 MB`
+- `npm install --omit=dev` on the extracted package succeeded in an isolated temp root
+- offline `pi --mode json --offline --no-extensions --no-skills --no-context-files --no-tools -e <tmp-path> -p smoke` timed out; runtime auth behavior remains unproven
+- recorder startup evidence was missing in isolated `BASHGUARD_DATA_DIR`
+- isolated registration/config evidence was observed in the temporary config root
+- no writes to the sentinel snapshot were observed
 
-## Package smoke command log
+## Commands
 
-- `npm pack` → `0` · `801 ms`
-- `tar -xzf /Users/antoniocheltenham/BashGuard/.worktrees/shell-analysis-research/bashguard-0.4.0.tgz -C <tmp-path>` → `0` · `73 ms`
-- `pi --mode json --offline --no-extensions --no-skills --no-context-files --no-tools -e <tmp-path> -p smoke` → unknown · `45,018 ms`
-- `pi install -l <tmp-path>` → `0` · `534 ms`
+- `git --version` → exit `0` · `16 ms`
+- `git init` → exit `0` · `37 ms`
+- `git status --porcelain=v1` → exit `0` · `36 ms`
+- `npm --version` → exit `0` · `242 ms`
+- `npm install --omit=dev` → exit `0` · `2242 ms`
+- `npm pack` → exit `0` · `817 ms`
+- `pi --mode json --offline --no-extensions --no-skills --no-context-files --no-tools -e <tmp-path> -p smoke` → timed out · `45018 ms`
+- `tar -xzf <home-path> -C <tmp-path>` → exit `0` · `83 ms`
 
 ## Conclusions
 
 - Native Tree-sitter and WASM Tree-sitter both loaded in disposable packages on this host.
 - The narrow analyzer loaded as a pure-JS package.
-- `dcg` was unavailable locally, so only blocked evidence is recorded.
-- The BashGuard tarball still did not prove `pi -e` startup in this environment, but isolated `pi install -l` succeeded without touching real user settings.
-- No runtime parser dependency was added to the shipped package's dependency set during this spike.
+- `dcg` was unavailable locally, so the benchmark row is `n/a` rather than a near-zero claim.
+- The BashGuard tarball installed in isolation, but offline Pi startup timed out, so runtime auth behavior remains unproven.
+- Recorder startup evidence was missing in this smoke, while isolated registration/config evidence was observed.
+- All paths in the committed report are sanitized.

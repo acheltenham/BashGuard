@@ -31,6 +31,7 @@ const report: BenchmarkReport = {
       adapterId: "current-matcher",
       adapterLabel: "Current matcher baseline",
       kind: "baseline",
+      availability: "available",
       coldInitMs: 0.22,
       warmupIterations: 1,
       iterations: 5,
@@ -49,10 +50,25 @@ const report: BenchmarkReport = {
       ],
       notes: ["local observation only"],
     },
+    {
+      adapterId: "dcg-process",
+      adapterLabel: "dcg process adapter (unavailable)",
+      kind: "dcg",
+      availability: "unavailable",
+      availabilityReason: "dcg binary not found: dcg",
+      coldInitMs: 0.03,
+      warmupIterations: 1,
+      iterations: 5,
+      safe: { count: 5, p50Ms: 0.01, p95Ms: 0.02, minMs: 0.00, maxMs: 0.03 },
+      error: { count: 5, p50Ms: 0.01, p95Ms: 0.02, minMs: 0.00, maxMs: 0.03 },
+      externalCostMs: undefined,
+      dependencyMetrics: [],
+      notes: ["dcg unavailable: dcg binary not found: dcg"],
+    },
   ],
   commandLog: [
     {
-      command: "node --experimental-strip-types scripts/shell-analysis-spike/benchmark.ts --output-dir <tmp-path>",
+      command: "node --experimental-strip-types /Users/alice/scripts/shell-analysis-spike/benchmark.ts --output-dir /home/bob/tmp/report",
       exitCode: 0,
       stdout: "wrote benchmark report",
       stderr: "",
@@ -71,11 +87,16 @@ test("benchmark report projection stays sanitized and preserves p50/p95 evidence
   assert.match(markdown, /safe p50/);
   assert.match(markdown, /error p95/);
   assert.match(markdown, /external cost/);
+  assert.match(markdown, /dcg process adapter \(unavailable\) \| dcg \| n\/a \| n\/a \| n\/a \| n\/a/);
   assert.match(markdown, /string-width/);
   assert.match(json, /"fingerprint": "host-12345678"/);
+  assert.match(json, /"availability": "unavailable"/);
   assert.equal(markdown.includes("/private/tmp"), false);
   assert.equal(json.includes("/private/tmp"), false);
   assert.equal(markdown.includes("/Users/"), false);
+  assert.equal(json.includes("/Users/"), false);
+  assert.equal(markdown.includes("/home/"), false);
+  assert.equal(json.includes("/home/"), false);
 });
 
 test("benchmark projection keeps adapter ordering stable", () => {

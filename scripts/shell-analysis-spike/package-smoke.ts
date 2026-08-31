@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -17,6 +17,7 @@ export interface PackageSmokeCommandRecord {
   readonly stdout: string;
   readonly stderr: string;
   readonly durationMs: number;
+  readonly timedOut?: boolean;
   readonly notes?: readonly string[];
 }
 
@@ -25,6 +26,17 @@ export interface PackageSmokeInstallEvidence {
   readonly evidence: "observed" | "blocked" | "missing";
   readonly command: string;
   readonly exitCode: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly notes?: readonly string[];
+}
+
+export interface PackageSmokeProcessEvidence {
+  readonly status: "observed" | "blocked" | "missing" | "unproven";
+  readonly evidence: "observed" | "blocked" | "missing" | "unproven";
+  readonly command: string;
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
   readonly stdout: string;
   readonly stderr: string;
   readonly notes?: readonly string[];
@@ -44,10 +56,13 @@ export interface BashGuardPackageSmokeSection {
   readonly pack: {
     readonly tarball: string;
     readonly unpackedSizeBytes: number;
+    readonly succeeded: boolean;
   };
-  readonly extractedPackage: PackageSmokeInstallEvidence;
-  readonly installRoot: PackageSmokeInstallEvidence;
-  readonly authBehavior: PackageSmokeInstallEvidence;
+  readonly install: PackageSmokeProcessEvidence;
+  readonly piProcess: PackageSmokeProcessEvidence;
+  readonly startupEvidence: PackageSmokeProcessEvidence;
+  readonly registrationConfig: PackageSmokeProcessEvidence;
+  readonly authBehavior: PackageSmokeProcessEvidence;
 }
 
 export interface PackageSmokeReport {
@@ -82,6 +97,7 @@ interface CommandResult {
 
 function normalizeText(value: string): string {
   return value
+    .replaceAll(/\/(?:Users|home)\/[^\s"'`]+/g, "<home-path>")
     .replaceAll(/\/private\/(?:tmp|var\/folders)\/[A-Za-z0-9._/-]+/g, "<tmp-path>")
     .replaceAll(/(?:\/tmp|\/var\/tmp|\/var\/folders)\/[A-Za-z0-9._/-]+/g, "<tmp-path>")
     .replaceAll(/\b[A-Za-z]:\\[^\s"']+/g, "<drive-path>")
@@ -117,7 +133,7 @@ async function runCommand(command: string, args: readonly string[], options: { r
       notes: [],
     };
   } catch (error) {
-    const failed = error as NodeJS.ErrnoException & { readonly stdout?: string; readonly stderr?: string; readonly status?: number | null };
+    const failed = error as NodeJS.ErrnoException & { readonly stdout?: string; readonly stderr?: string; readonly status?: number | null; readonly killed?: boolean; readonly signal?: NodeJS.Signals | null };
     return {
       command: [command, ...args].join(" "),
       cwd: options.cwd ?? process.cwd(),
@@ -125,6 +141,7 @@ async function runCommand(command: string, args: readonly string[], options: { r
       stdout: normalizeText(typeof failed.stdout === "string" ? failed.stdout : ""),
       stderr: normalizeText(typeof failed.stderr === "string" ? failed.stderr : failed.message),
       durationMs: Math.round(performance.now() - startedAt),
+      timedOut: failed.killed === true || failed.signal === "SIGTERM",
       notes: [],
     };
   }
@@ -242,20 +259,29 @@ async function importInit(packageRoot: string, timeoutMs: number): Promise<Packa
   }
 }
 
-function statusFromSessionData(dataDir: string): PackageSmokeInstallEvidence {
-  return {
-    status: "loaded",
-    evidence: "observed",
-    command: "pi -e <package-root>",
-    exitCode: 0,
-    stdout: `BashGuard data dir populated at ${dataDir}`,
-    stderr: "",
-    notes: ["session files observed in isolated BashGuard data dir"],
-  };
-}
-
 async function packageFileSize(root: string): Promise<number> {
   return await sizeOf(root);
+}
+
+interface SentinelSnapshot {
+  readonly path: string;
+  readonly contents: string;
+}
+
+async function createSentinelSnapshot(root: string, label: string): Promise<SentinelSnapshot> {
+  const path = join(root, `.bashguard-sentinel-${label}.txt`);
+  const contents = `${label}:${Date.now()}:${Math.random().toString(16).slice(2)}\n`;
+  await writeFile(path, contents, "utf8");
+  return { path, contents };
+}
+
+async function sentinelUnchanged(snapshot: SentinelSnapshot): Promise<boolean> {
+  try {
+    const contents = await readFile(snapshot.path, "utf8");
+    return contents === snapshot.contents;
+  } catch {
+    return false;
+  }
 }
 
 async function resolveExtractedPackageRoot(extractDir: string): Promise<string> {
@@ -352,28 +378,30 @@ export function projectPackageSmokeReport<T extends PackageSmokeReport>(report: 
   });
 }
 
+function formatPackageSmokeEvidence(label: string, evidence: PackageSmokeProcessEvidence): string {
+  return `${label}: ${evidence.status} · ${evidence.evidence}${evidence.timedOut ? " · timed out" : ""}`;
+}
+
 export function formatPackageSmokeMarkdown(report: PackageSmokeReport): string {
   const lines = [
     "# Shell analysis package smoke",
     "",
-    `Generated: ${report.generatedAt}`,
+    `Generated: ${report.generatedAt} (local observation; timestamp/load/durations are non-repeatable)`,
     `Isolated config dir: ${report.isolatedRoots.configDir}`,
     `Isolated project dir: ${report.isolatedRoots.projectDir}`,
     `Isolated package dir: ${report.isolatedRoots.packageRoot}`,
     "",
     "## BashGuard package",
-    `Tarball: ${report.bashguardPackage.pack.tarball} · unpacked ${report.bashguardPackage.pack.unpackedSizeBytes} bytes`,
-    `pi -e evidence: ${report.bashguardPackage.extractedPackage.status} · ${report.bashguardPackage.extractedPackage.evidence}`,
-    `pi command: ${report.bashguardPackage.extractedPackage.command}`,
-    `pi install evidence: ${report.bashguardPackage.installRoot.status} · ${report.bashguardPackage.installRoot.evidence}`,
-    `auth behavior evidence: ${report.bashguardPackage.authBehavior.status} · ${report.bashguardPackage.authBehavior.evidence}`,
-    report.bashguardPackage.installRoot.status === "blocked" || report.bashguardPackage.authBehavior.status === "blocked" ? "blocked evidence preserved instead of a fake pass." : undefined,
-    report.bashguardPackage.installRoot.status === "blocked" ? "configuration isolation not proven." : undefined,
-    report.bashguardPackage.authBehavior.status === "blocked" ? "no auth behavior change could be proven." : undefined,
+    `Tarball: ${report.bashguardPackage.pack.tarball} · unpacked ${report.bashguardPackage.pack.unpackedSizeBytes} bytes · pack ${report.bashguardPackage.pack.succeeded ? "succeeded" : "failed"}`,
+    formatPackageSmokeEvidence("Package install", report.bashguardPackage.install),
+    formatPackageSmokeEvidence("Pi process", report.bashguardPackage.piProcess),
+    formatPackageSmokeEvidence("Recorder startup evidence", report.bashguardPackage.startupEvidence),
+    formatPackageSmokeEvidence("Registration/config evidence", report.bashguardPackage.registrationConfig),
+    formatPackageSmokeEvidence("Authorization behavior", report.bashguardPackage.authBehavior),
     "",
     "| Candidate | Dependencies | Size | Install script | Native compile | Import/init | Notes |",
     "|---|---|---|---|---|---|---|",
-  ].filter((line): line is string => line !== undefined);
+  ];
   for (const candidate of sortCandidates(report.candidatePackages)) {
     lines.push(
       `| ${candidate.packageName} | ${candidate.runtimeDependencies.join(", ")} | ${candidate.unpackedSizeBytes} bytes | ${candidate.hasInstallScript ? "yes" : "no"} | ${candidate.nativeCompilation ? "yes" : "no"} | ${candidate.importInit.status} · ${candidate.importInit.evidence} | ${candidate.notes.join("; ") || "-"} |`,
@@ -423,16 +451,12 @@ async function findTarball(root: string, stdout: string, stderr: string): Promis
   return stats.sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs)[0]?.entry;
 }
 
-async function hashFile(path: string): Promise<string> {
-  try {
-    const buffer = await readFile(path);
-    return buffer.toString("base64").slice(0, 32);
-  } catch {
-    return "missing";
-  }
-}
-
 async function inspectBashGuardPackage(root: string, timeoutMs: number, isolatedConfigDir: string, isolatedProjectDir: string, dataDir: string): Promise<BashGuardPackageSmokeSection & { readonly commands: PackageSmokeCommandRecord[]; readonly notes: string[] }> {
+  const projectSnapshot = await createSentinelSnapshot(isolatedProjectDir, "project");
+  const configSnapshot = await createSentinelSnapshot(isolatedConfigDir, "config");
+  const dataSnapshot = await createSentinelSnapshot(dataDir, "data");
+  const configEntriesBefore = new Set(await readdir(isolatedConfigDir));
+
   const pack = await packBashGuardBranch(root, timeoutMs);
   const commands: PackageSmokeCommandRecord[] = [pack.packed];
   const extractDir = join(isolatedProjectDir, "bashguard-extract");
@@ -455,90 +479,90 @@ async function inspectBashGuardPackage(root: string, timeoutMs: number, isolated
   });
   commands.push(piLoad);
 
-  const sessionDataObserved = (await hashFile(join(dataDir, "session.json"))) !== "missing" || (await hashFile(join(dataDir, "events.jsonl"))) !== "missing";
-  const loadedEvidence: PackageSmokeInstallEvidence = sessionDataObserved || piLoad.exitCode === 0
-    ? {
-        status: "loaded",
-        evidence: "observed",
-        command: piLoad.command,
-        exitCode: piLoad.exitCode,
-        stdout: piLoad.stdout,
-        stderr: piLoad.stderr,
-        notes: sessionDataObserved ? ["session files observed in isolated BashGuard data dir"] : ["pi exited successfully"],
-      }
-    : {
-        status: "blocked",
-        evidence: "blocked",
-        command: piLoad.command,
-        exitCode: piLoad.exitCode,
-        stdout: piLoad.stdout,
-        stderr: piLoad.stderr,
-        notes: ["pi load did not prove extension startup"],
-      };
+  const piProcess: PackageSmokeProcessEvidence = {
+    status: piLoad.timedOut ? "unproven" : piLoad.exitCode === 0 ? "observed" : "blocked",
+    evidence: piLoad.timedOut ? "unproven" : piLoad.exitCode === 0 ? "observed" : "blocked",
+    command: piLoad.command,
+    exitCode: piLoad.exitCode,
+    timedOut: Boolean(piLoad.timedOut),
+    stdout: piLoad.stdout,
+    stderr: piLoad.stderr,
+    notes: piLoad.timedOut
+      ? ["offline Pi session timed out; runtime auth behavior unproven"]
+      : piLoad.exitCode === 0
+        ? ["Pi process exited cleanly; this does not prove authorization behavior"]
+        : ["Pi process exited nonzero; runtime auth behavior remains unproven"],
+  };
 
-  const installRoot = await runCommand("pi", ["install", "-l", packageRoot], {
-    cwd: isolatedProjectDir,
-    timeoutMs,
-    env: {
-      ...process.env,
-      PI_OFFLINE: "1",
-      PI_CODING_AGENT_DIR: isolatedConfigDir,
-    },
-  });
-  commands.push(installRoot);
+  const startupArtifactObserved = (await readdir(dataDir)).some((entry) => entry === "session.json" || entry === "events.jsonl");
+  const startupEvidence: PackageSmokeProcessEvidence = {
+    status: startupArtifactObserved ? "observed" : "missing",
+    evidence: startupArtifactObserved ? "observed" : "missing",
+    command: "scan BASHGUARD_DATA_DIR for session.json/events.jsonl",
+    exitCode: null,
+    timedOut: false,
+    stdout: startupArtifactObserved ? "session artifact observed in isolated BASHGUARD_DATA_DIR" : "",
+    stderr: "",
+    notes: startupArtifactObserved ? ["recorder extension startup artifact observed"] : ["recorder extension startup artifact not observed"],
+  };
 
-  const installRootEvidence: PackageSmokeInstallEvidence = installRoot.exitCode === 0
-    ? {
-        status: "loaded",
-        evidence: "observed",
-        command: installRoot.command,
-        exitCode: installRoot.exitCode,
-        stdout: installRoot.stdout,
-        stderr: installRoot.stderr,
-        notes: ["isolated install root command succeeded"],
-      }
-    : {
-        status: "blocked",
-        evidence: "blocked",
-        command: installRoot.command,
-        exitCode: installRoot.exitCode,
-        stdout: installRoot.stdout,
-        stderr: installRoot.stderr,
-        notes: ["isolated install root proof blocked"],
-      };
+  const configEntriesAfter = await readdir(isolatedConfigDir);
+  const registrationArtifactObserved = configEntriesAfter.some((entry) => !configEntriesBefore.has(entry) && entry !== basename(configSnapshot.path));
+  const registrationConfig: PackageSmokeProcessEvidence = {
+    status: registrationArtifactObserved ? "observed" : "unproven",
+    evidence: registrationArtifactObserved ? "observed" : "unproven",
+    command: "pi install -l <package-root>",
+    exitCode: install.exitCode,
+    timedOut: Boolean(install.timedOut),
+    stdout: install.stdout,
+    stderr: install.stderr,
+    notes: [
+      "dedicated cwd, PI_CODING_AGENT_DIR, and BASHGUARD_DATA_DIR were set",
+      registrationArtifactObserved ? "registration/config evidence observed in isolated config root" : "registration/config evidence not proven",
+      (await sentinelUnchanged(projectSnapshot)) && (await sentinelUnchanged(configSnapshot)) && (await sentinelUnchanged(dataSnapshot)) ? "no writes to sentinel snapshot observed" : "sentinel snapshot write observed or unverified",
+    ],
+  };
 
-  const authBehavior: PackageSmokeInstallEvidence = installRoot.exitCode === 0 && loadedEvidence.status === "loaded"
-    ? {
-        status: "loaded",
-        evidence: "observed",
-        command: installRoot.command,
-        exitCode: installRoot.exitCode,
-        stdout: installRoot.stdout,
-        stderr: installRoot.stderr,
-        notes: ["no runtime auth behavior change observed in this smoke"],
-      }
-    : {
-        status: "blocked",
-        evidence: "blocked",
-        command: installRoot.command,
-        exitCode: installRoot.exitCode,
-        stdout: installRoot.stdout,
-        stderr: installRoot.stderr,
-        notes: ["auth behavior change could not be proven"],
-      };
+  const authBehavior: PackageSmokeProcessEvidence = {
+    status: "unproven",
+    evidence: "unproven",
+    command: piLoad.command,
+    exitCode: piLoad.exitCode,
+    timedOut: Boolean(piLoad.timedOut),
+    stdout: piLoad.stdout,
+    stderr: piLoad.stderr,
+    notes: [
+      piLoad.timedOut ? "offline Pi session timed out; runtime auth behavior unproven" : "runtime auth behavior remains unproven from process exit or temp files alone",
+      "static production-import and runtime-dependency isolation are assessed separately",
+    ],
+  };
 
   return {
     pack: {
       tarball: pack.tarball,
       unpackedSizeBytes: await sizeOf(extractDir),
+      succeeded: pack.packed.exitCode === 0,
     },
-    extractedPackage: loadedEvidence,
-    installRoot: installRootEvidence,
+    install: {
+      status: install.exitCode === 0 ? "observed" : "blocked",
+      evidence: install.exitCode === 0 ? "observed" : "blocked",
+      command: install.command,
+      exitCode: install.exitCode,
+      timedOut: Boolean(install.timedOut),
+      stdout: install.stdout,
+      stderr: install.stderr,
+      notes: install.exitCode === 0 ? ["extracted package install succeeded"] : ["extracted package install blocked"],
+    },
+    piProcess,
+    startupEvidence,
+    registrationConfig,
     authBehavior,
     commands,
     notes: [
-      sessionDataObserved ? "BashGuard load observed from isolated data dir" : "BashGuard load blocked or inconclusive",
-      installRoot.exitCode === 0 ? "isolated pi install syntax was exercised" : "isolated pi install syntax was blocked",
+      "dedicated cwd, PI_CODING_AGENT_DIR, and BASHGUARD_DATA_DIR were set",
+      (await sentinelUnchanged(projectSnapshot)) && (await sentinelUnchanged(configSnapshot)) && (await sentinelUnchanged(dataSnapshot)) ? "no writes to sentinel snapshot observed" : "sentinel snapshot write observed or unverified",
+      startupArtifactObserved ? "BashGuard startup artifact observed in isolated data dir" : "BashGuard startup artifact not observed",
+      install.exitCode === 0 ? "isolated npm install syntax was exercised" : "isolated npm install syntax was blocked",
     ],
   };
 }
@@ -575,15 +599,17 @@ export async function runPackageSmoke(options: PackageSmokeOptions = {}): Promis
       },
       bashguardPackage: {
         pack: bashguardPackage.pack,
-        extractedPackage: bashguardPackage.extractedPackage,
-        installRoot: bashguardPackage.installRoot,
+        install: bashguardPackage.install,
+        piProcess: bashguardPackage.piProcess,
+        startupEvidence: bashguardPackage.startupEvidence,
+        registrationConfig: bashguardPackage.registrationConfig,
         authBehavior: bashguardPackage.authBehavior,
       },
       candidatePackages: [candidateNative, candidateWasm, candidateNarrow],
       commands: options.includeCommands ? commands : [],
       notes: [
         "Local smoke only; failures are visible and not masked.",
-        "pi install proof is best-effort and may remain blocked if the CLI cannot start cleanly in this environment.",
+        "Timestamp, load, and duration values are local observations rather than guarantees.",
         "No real user settings are touched; all roots are temporary.",
       ],
     };

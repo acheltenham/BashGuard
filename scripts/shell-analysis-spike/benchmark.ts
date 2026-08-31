@@ -39,6 +39,8 @@ export interface BenchmarkAdapterSummary {
   readonly adapterId: string;
   readonly adapterLabel: string;
   readonly kind: "baseline" | "native" | "wasm" | "narrow" | "dcg" | "git-probe";
+  readonly availability?: "available" | "unavailable";
+  readonly availabilityReason?: string;
   readonly coldInitMs: number;
   readonly warmupIterations: number;
   readonly iterations: number;
@@ -107,6 +109,7 @@ export interface BenchmarkRunner {
 
 function normalizeText(value: string): string {
   return value
+    .replaceAll(/\/(?:Users|home)\/[^\s"'`]+/g, "<home-path>")
     .replaceAll(/\/private\/(?:tmp|var\/folders)\/[A-Za-z0-9._/-]+/g, "<tmp-path>")
     .replaceAll(/(?:\/tmp|\/var\/tmp|\/var\/folders)\/[A-Za-z0-9._/-]+/g, "<tmp-path>")
     .replaceAll(/\b[A-Za-z]:\\[^\s"']+/g, "<drive-path>")
@@ -396,6 +399,21 @@ function formatQuantiles(label: string, quantile: BenchmarkQuantiles): string {
   return `${label} p50 ${quantile.p50Ms.toFixed(2)} ms · ${label} p95 ${quantile.p95Ms.toFixed(2)} ms · n ${quantile.count}`;
 }
 
+function formatAdapterQuantiles(adapter: BenchmarkAdapterSummary, label: "safe" | "error"): string {
+  if (adapter.availability === "unavailable") return "n/a";
+  return formatQuantiles(label, label === "safe" ? adapter.safe : adapter.error);
+}
+
+function formatAdapterInit(adapter: BenchmarkAdapterSummary): string {
+  if (adapter.availability === "unavailable") return "n/a";
+  return `${adapter.coldInitMs.toFixed(2)} ms`;
+}
+
+function formatExternalCost(adapter: BenchmarkAdapterSummary): string {
+  if (adapter.availability === "unavailable") return "n/a";
+  return adapter.externalCostMs === undefined ? "n/a" : `${adapter.externalCostMs.toFixed(2)} ms`;
+}
+
 function formatDependencies(metrics: readonly BenchmarkPackageMetric[]): string {
   if (metrics.length === 0) return "none";
   return metrics
@@ -407,7 +425,7 @@ export function formatBenchmarkMarkdown(report: BenchmarkReport): string {
   const lines = [
     "# Shell analysis benchmark",
     "",
-    `Generated: ${report.generatedAt}`,
+    `Generated: ${report.generatedAt} (local observation; timestamp/load/durations are non-repeatable)`,
     `Host: ${report.host.platform} ${report.host.arch} · ${report.host.release} · load ${report.host.loadAverage.join(", ")} · memory ${report.host.totalMemoryBytes} · host ${report.host.fingerprint}`,
     `Tools: node ${report.toolVersions.node} · npm ${report.toolVersions.npm}${report.toolVersions.pi ? ` · pi ${report.toolVersions.pi}` : ""}${report.toolVersions.git ? ` · git ${report.toolVersions.git}` : ""}${report.toolVersions.dcg ? ` · dcg ${report.toolVersions.dcg}` : ""}`,
     `Corpus fixtures: ${report.corpusSize}`,
@@ -420,7 +438,7 @@ export function formatBenchmarkMarkdown(report: BenchmarkReport): string {
   ];
   for (const adapter of sortSummaries(report.adapters)) {
     lines.push(
-      `| ${adapter.adapterLabel} | ${adapter.kind} | ${adapter.coldInitMs.toFixed(2)} ms | ${formatQuantiles("safe", adapter.safe)} | ${formatQuantiles("error", adapter.error)} | ${adapter.externalCostMs === undefined ? "n/a" : `${adapter.externalCostMs.toFixed(2)} ms`} | ${formatDependencies(adapter.dependencyMetrics)} | ${adapter.notes.join("; ") || "-"} |`,
+      `| ${adapter.adapterLabel} | ${adapter.kind} | ${formatAdapterInit(adapter)} | ${formatAdapterQuantiles(adapter, "safe")} | ${formatAdapterQuantiles(adapter, "error")} | ${formatExternalCost(adapter)} | ${formatDependencies(adapter.dependencyMetrics)} | ${adapter.notes.join("; ") || "-"} |`,
     );
   }
   if (report.commandLog.length > 0) {
@@ -614,7 +632,7 @@ export async function runShellAnalysisBenchmark(options: BenchmarkOptions = {}):
       { ...native, coldInitMs: nativeInitMs, notes: [...native.notes, nativeAdapter.availabilityReason ?? "available"] },
       { ...wasm, coldInitMs: wasmInitMs, notes: [...wasm.notes, wasmAdapter.availabilityReason ?? "available"] },
       { ...narrow, coldInitMs: narrow.coldInitMs },
-      { ...dcg, coldInitMs: dcgInitMs, notes: [...dcg.notes, dcgAdapter.availabilityReason ?? "available"] },
+      { ...dcg, coldInitMs: dcgInitMs, availability: dcgAdapter.availability, availabilityReason: dcgAdapter.availabilityReason, notes: [...dcg.notes, dcgAdapter.availabilityReason ?? "available"] },
       gitProbe.summary,
     ],
     commandLog: options.includeCommands ? [
@@ -623,7 +641,8 @@ export async function runShellAnalysisBenchmark(options: BenchmarkOptions = {}):
       await runCommand("git", ["--version"]),
     ] : [],
     notes: [
-      "Local observations only; timings vary by host and load.",
+      "Local observations only; snapshot timestamp, load, and durations are non-repeatable.",
+      "Deterministic schema/order/sanitization are tested separately.",
       "Cold initialization includes only the measured factory call, not top-level module import time.",
       "External costs are local subprocess observations, not guarantees.",
       nativeAdapter.availability === "available" ? "Tree-sitter native candidate initialized successfully." : `Tree-sitter native candidate blocked: ${nativeAdapter.availabilityReason ?? "unknown"}`,

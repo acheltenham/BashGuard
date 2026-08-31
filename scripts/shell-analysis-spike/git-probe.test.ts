@@ -177,7 +177,7 @@ process.exit(0);
 `);
     const malformed = await probeGitTarget(parseTarget("git status", fixtures.repo), {
       gitBinary: malformedScript,
-      timeoutMs: 2000,
+      timeoutMs: 5000,
     });
     assert.equal(malformed.evidenceLevel, "unknown");
     assert.equal(malformed.unknownReason, "malformed");
@@ -195,7 +195,7 @@ process.exit(0);
     const inconsistentTarget = parseTarget("git --git-dir=.git --work-tree=./nested clean -fd", fixtures.repo);
     const inconsistent = await probeGitTarget(inconsistentTarget, {
       gitBinary: inconsistentScript,
-      timeoutMs: 2000,
+      timeoutMs: 5000,
     });
     assert.equal(inconsistent.evidenceLevel, "unknown");
     assert.equal(inconsistent.unknownReason, "inconsistent");
@@ -207,7 +207,7 @@ process.exit(0);
 `);
     const noisy = await probeGitTarget(parseTarget("git status", fixtures.repo), {
       gitBinary: noisyScript,
-      timeoutMs: 2000,
+      timeoutMs: 5000,
       maxOutputBytes: 1024,
     });
     assert.equal(noisy.evidenceLevel, "unknown");

@@ -31,12 +31,20 @@
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/**/*.test.ts scripts/**/*.test.ts",
     "sessions": "node --experimental-strip-types src/cli.ts sessions",
-    "spike:command-resolution": "node --experimental-strip-types scripts/command-resolution-spike/run.ts"
+    "spike:command-resolution": "node --experimental-strip-types scripts/command-resolution-spike/run.ts",
+    "research:shell-analysis:corpus": "node --experimental-strip-types --test scripts/shell-analysis-spike/model.test.ts scripts/shell-analysis-spike/corpus.test.ts",
+    "research:shell-analysis:baseline": "node --experimental-strip-types --test scripts/shell-analysis-spike/adapters/current-matcher.test.ts scripts/shell-analysis-spike/evaluate.test.ts",
+    "research:shell-analysis:tree-sitter": "node --experimental-strip-types scripts/shell-analysis-spike/tree-sitter-report.ts",
+    "research:shell-analysis:dcg": "node --experimental-strip-types --test scripts/shell-analysis-spike/dcg-fixture.test.ts scripts/shell-analysis-spike/adapters/dcg-process.test.ts",
+    "research:shell-analysis:report": "node --experimental-strip-types scripts/shell-analysis-spike/report.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.84.0",
     "@types/node": "latest",
-    "typescript": "latest"
+    "tree-sitter": "^0.25.1",
+    "tree-sitter-bash": "^0.25.1",
+    "typescript": "latest",
+    "web-tree-sitter": "^0.27.0"
   },
   "dependencies": {
     "string-width": "^8.2.2"

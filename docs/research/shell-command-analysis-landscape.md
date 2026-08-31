@@ -11,13 +11,14 @@
 - Crate version: `0.9.4` (`Cargo.toml`)
 - License file: `LICENSE`
 
-### License note
+### Reported primary-source facts
 
-`LICENSE` is **MIT with an OpenAI/Anthropic rider**. That rider is part of the license text; this is not plain MIT.
+- `LICENSE` is **MIT with an OpenAI/Anthropic rider**. That rider is part of the license text; this is not plain MIT.
+- `src/cli.rs` defines `test`, `classify`, and `explain` surfaces; the protocol details below are source/test inspected facts.
 
 ### Build/run status in this environment
 
-I cloned the repo under `/tmp/destructive_command_guard` and reviewed source/tests, but I could not complete a local build here because `cargo`/`rustup` are not on the current PATH. So this note is source/test verified, not a locally executed binary benchmark.
+I cloned the repo under `/tmp/destructive_command_guard` and reviewed source/tests, but I could not complete a local build here because `cargo`/`rustup` are not on the current PATH. So this note is source/test verified, not a locally executed binary benchmark. Local runtime behavior remains unverified in this environment.
 
 Representative local skip-path timing in this environment:
 
@@ -30,10 +31,10 @@ These numbers describe the visible skip path, not `dcg` execution latency.
 
 ### Robot / classify / explain surfaces
 
-- `src/cli.rs` defines `test`, `classify`, and `explain` as separate CLI surfaces.
 - `docs/adr-002-robot-mode-api.md` documents robot mode as machine-readable JSON on stdout with standardized exit codes.
 - `tests/agent_json_format.rs` and `tests/agent_exit_codes.rs` verify the JSON fields and exit-code behavior.
 - `tests/codex_hook_protocol.rs` and `docs/codex-integration.md` verify Codex-specific hook output.
+- These are source/test-inspected reported facts, not a locally executed runtime proof in this environment.
 
 ### Output schema facts
 
@@ -52,6 +53,7 @@ These numbers describe the visible skip path, not `dcg` execution latency.
 
 - A missing binary is a runtime availability problem, not a new BashGuard policy fact.
 - BashGuard should show that as **unavailable / skipped**, not as a fabricated allow or a repository-verification claim.
+- Deterministic parser fixtures in this branch are recorded-shape tests only; they are not real `dcg` executions.
 
 ### Fail-open / fail-closed
 

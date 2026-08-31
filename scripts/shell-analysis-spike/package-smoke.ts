@@ -301,19 +301,23 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-function packageDependenciesFor(kind: "native" | "wasm" | "narrow"): Record<string, string> {
-  const nativeTreeSitter = resolve(REPO_ROOT, "node_modules", "tree-sitter");
-  const treeSitterBash = resolve(REPO_ROOT, "node_modules", "tree-sitter-bash");
-  const webTreeSitter = resolve(REPO_ROOT, "node_modules", "web-tree-sitter");
-  const stringWidth = resolve(REPO_ROOT, "node_modules", "string-width");
-  const stripAnsi = resolve(REPO_ROOT, "node_modules", "strip-ansi");
+async function readRootPackageJson(): Promise<{ readonly dependencies?: Record<string, string>; readonly devDependencies?: Record<string, string> }> {
+  return JSON.parse(await readFile(join(REPO_ROOT, "package.json"), "utf8")) as { readonly dependencies?: Record<string, string>; readonly devDependencies?: Record<string, string> };
+}
+
+async function packageVersion(name: string): Promise<string> {
+  const pkg = await readRootPackageJson();
+  return pkg.dependencies?.[name] ?? pkg.devDependencies?.[name] ?? "latest";
+}
+
+async function packageDependenciesFor(kind: "native" | "wasm" | "narrow"): Promise<Record<string, string>> {
   switch (kind) {
     case "native":
-      return { "tree-sitter": `file:${nativeTreeSitter}`, "tree-sitter-bash": `file:${treeSitterBash}` };
+      return { "tree-sitter": await packageVersion("tree-sitter"), "tree-sitter-bash": await packageVersion("tree-sitter-bash") };
     case "wasm":
-      return { "web-tree-sitter": `file:${webTreeSitter}`, "tree-sitter-bash": `file:${treeSitterBash}` };
+      return { "web-tree-sitter": await packageVersion("web-tree-sitter"), "tree-sitter-bash": await packageVersion("tree-sitter-bash") };
     case "narrow":
-      return { "string-width": `file:${stringWidth}`, "strip-ansi": `file:${stripAnsi}` };
+      return {};
   }
 }
 
@@ -324,12 +328,12 @@ function candidateInitSource(kind: "native" | "wasm" | "narrow"): string {
   if (kind === "wasm") {
     return `import * as WebTreeSitter from 'web-tree-sitter';\nexport async function init() {\n  return { kind: 'wasm', keys: Object.keys(WebTreeSitter).slice(0, 6) };\n}`;
   }
-  return `import stringWidth from 'string-width';\nimport stripAnsi from 'strip-ansi';\nexport async function init() {\n  return { kind: 'narrow', width: stringWidth(stripAnsi('abc')), output: stripAnsi('abc') };\n}`;
+  return `export async function init() {\n  const text = 'abc';\n  return { kind: 'narrow', length: text.length, upper: text.toUpperCase() };\n}`;
 }
 
 async function buildCandidate(root: string, kind: "native" | "wasm" | "narrow", timeoutMs: number): Promise<PackageSmokeCandidate> {
   const packageName = `bashguard-${kind}-candidate`;
-  const dependencies = packageDependenciesFor(kind);
+  const dependencies = await packageDependenciesFor(kind);
   const candidateRoot = join(root, packageName);
   await writeCandidatePackage(candidateRoot, packageName, dependencies, candidateInitSource(kind));
 
@@ -368,6 +372,24 @@ async function buildCandidate(root: string, kind: "native" | "wasm" | "narrow", 
 
 function sortCandidates<T extends { readonly packageName: string }>(values: readonly T[]): readonly T[] {
   return [...values].sort((left, right) => left.packageName.localeCompare(right.packageName));
+}
+
+export interface ProjectedPackageManifest {
+  readonly name: string;
+  readonly dependencies: Record<string, string>;
+  readonly dependencyIssues: readonly string[];
+}
+
+export function projectPackageManifest(manifest: { readonly name: string; readonly dependencies?: Record<string, string>; readonly devDependencies?: Record<string, string> }): ProjectedPackageManifest {
+  const dependencies = { ...(manifest.dependencies ?? {}), ...(manifest.devDependencies ?? {}) };
+  const dependencyIssues = Object.entries(dependencies)
+    .flatMap(([name, spec]) => {
+      const issues: string[] = [];
+      if (/^(?:file:|link:|workspace:)/.test(spec)) issues.push(`${name}: unsupported dependency spec ${spec}`);
+      if (/^(?:file:)?\//.test(spec) || /^[A-Za-z]:\\/.test(spec)) issues.push(`${name}: absolute path dependency spec ${spec}`);
+      return issues;
+    });
+  return { name: manifest.name, dependencies, dependencyIssues };
 }
 
 export function projectPackageSmokeReport<T extends PackageSmokeReport>(report: T): T {

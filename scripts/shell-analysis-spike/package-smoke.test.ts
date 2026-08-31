@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatPackageSmokeJson, formatPackageSmokeMarkdown, projectPackageSmokeReport, type PackageSmokeReport } from "./package-smoke.ts";
+import { formatPackageSmokeJson, formatPackageSmokeMarkdown, projectPackageManifest, projectPackageSmokeReport, type PackageSmokeReport } from "./package-smoke.ts";
 
 const report: PackageSmokeReport = {
   generatedAt: "2026-08-28T12:00:00.000Z",
@@ -115,6 +115,26 @@ test("package smoke report projection stays sanitized and preserves blocked evid
   assert.equal(json.includes("/Users/"), false);
   assert.equal(markdown.includes("/home/"), false);
   assert.equal(json.includes("/home/"), false);
+});
+
+test("package manifest projection rejects checkout-linked dependency specs", () => {
+  const projected = projectPackageManifest({
+    name: "candidate",
+    dependencies: {
+      direct: "1.2.3",
+      linked: "file:/Users/alice/project/node_modules/dep",
+      absolute: "/Users/alice/project/node_modules/dep",
+      workspace: "workspace:*",
+      link: "link:../dep",
+    },
+  });
+
+  assert.equal(projected.name, "candidate");
+  assert.equal(projected.dependencies.direct, "1.2.3");
+  assert.match(projected.dependencyIssues.join("\n"), /linked: unsupported dependency spec/);
+  assert.match(projected.dependencyIssues.join("\n"), /absolute: absolute path dependency spec/);
+  assert.match(projected.dependencyIssues.join("\n"), /workspace: unsupported dependency spec/);
+  assert.match(projected.dependencyIssues.join("\n"), /link: unsupported dependency spec/);
 });
 
 test("package smoke report ordering is deterministic", () => {

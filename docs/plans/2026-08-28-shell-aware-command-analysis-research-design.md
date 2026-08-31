@@ -1,6 +1,6 @@
 # Shell-Aware Command Analysis Research Design
 
-**Status:** Approved for Stage A research
+**Status:** Stage A complete; no production adoption yet
 
 **Tracking:** [Issue #90](https://github.com/acheltenham/BashGuard/issues/90)
 
@@ -19,7 +19,7 @@ Issue #90 has two explicit stages:
 1. **Stage A — research/design:** corpus, prototypes, packaging and performance measurements, recommendation, implementation migration plan. No production authorization change.
 2. **Stage B — implementation:** selected analyzer, stable evidence projection, Git verification, CLI/UI migration, compatibility, and real-Pi validation.
 
-The Stage A PR references but does not close #90. #90 closes only after Stage B satisfies the issue exit criteria.
+Stage A is complete and the committed results recommend no production adoption yet. The final report shows the current matcher baseline still ahead on the corpus, Tree-sitter native/WASM behind on exact matches, the narrow analyzer still incomplete, and `dcg` unavailable locally. The restart point for any later work is [`docs/plans/2026-08-28-shell-aware-command-analysis-stage-b-implementation.md`](./2026-08-28-shell-aware-command-analysis-stage-b-implementation.md). #90 remains open until Stage B satisfies the issue exit criteria.
 
 ## Goals
 

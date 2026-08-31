@@ -1,66 +1,52 @@
 # Shell Analysis Spike Results
 
-Local observations only; snapshot timestamp, load, and durations are non-repeatable.
+**Status:** Stage A complete; no production adoption yet
+**Last updated:** August 31, 2026
 
-## Environment
+Stage A compared the documented shell-analysis options against the branch's demonstrated corpus, package, latency, and startup evidence. The decision is a no-go for production adoption right now: the current matcher baseline is still the strongest proven path, Tree-sitter native/WASM do not beat it on the corpus, the narrow analyzer remains incomplete, and `dcg` was unavailable locally with a ridered license and external-process cost. Stage B remains a deferred restart point, not a shipped change.
 
-- Host: `darwin x64` · load `12.56103515625 / 7.8828125 / 7.71240234375` · memory `32 GiB` · host `<hash>`
-- Tool versions: `node v26.4.0`, `npm 11.17.0`, `pi 0.84.4`, `git git version 2.54.0`
-- `dcg`: unavailable locally
+## Documented vs demonstrated matrix
 
-## Exact commands run
+| Candidate | Documented in design | Demonstrated on this branch | Decision |
+|---|---|---|---|
+| Current matcher baseline | Safe commands should stay quiet; protected textual matches remain the fallback. | 27/30 corpus passes; 0 errors; safe p50 0.02 ms / p95 0.13 ms. | Keep as the production baseline. |
+| Tree-sitter native behind a narrow IR | Parser can represent lists, pipelines, groups, redirects, quotes, wrappers, and source spans without execution. | 16/30 exact corpus passes; 14 mismatches; native init 5 ms; grammar dependency `tree-sitter-bash` is 20,282,555 bytes; offline Pi startup timed out; the projection prototype is already 48.4 kB. | Reject for production now. |
+| Tree-sitter WASM behind a narrow IR | Same structural model, but without a native build step. | 16/30 exact corpus passes; 14 mismatches; wasm init 23 ms; the same 20,282,555-byte grammar dependency; offline Pi startup timed out. | Reject for production now. |
+| Narrow analyzer | Deliberately bounded comparator that should stay smaller than a parser. | Safe p50 0.07 ms / p95 0.13 ms; package smoke loaded; no corpus proof that it closes the structural gaps. | Reject for production now. |
+| `dcg` | External reference with robot/classify/explain surfaces and an optional Pi bridge. | Binary unavailable locally; the upstream license text includes an OpenAI/Anthropic rider; process/protocol cost is external to BashGuard. | Reference only. |
+| Bounded Git probe | No-shell `git rev-parse` after a relevant structural match. | Safe p50 27.85 ms / p95 30.48 ms; error p50 0.46 ms / p95 0.49 ms; external cost 18 ms. | Keep as a later gated step. |
 
-```bash
-node --experimental-strip-types scripts/shell-analysis-spike/benchmark.ts --include-commands --output-dir <tmp-path>
-node --experimental-strip-types scripts/shell-analysis-spike/package-smoke.ts --include-commands --output-dir <tmp-path>
-```
+The committed Tree-sitter report shows 16/30 exact status/check/target matches for both native and WASM variants. If you were tracking an earlier 13/30 note, the conclusion is unchanged: both variants are still behind the current matcher baseline's 27/30 corpus passes.
 
-## Benchmark matrix
+## Evidence highlights
 
-| Adapter | Kind | Init | Safe | Error | external cost | Dependency metrics | Notes |
-|---|---|---|---|---|---|---|---|
-| Current matcher baseline | baseline | 327.00 ms | safe p50 0.02 ms · safe p95 0.14 ms · n 20 | error p50 0.01 ms · error p95 0.04 ms · n 20 | n/a | string-width · 11733 bytes · install no · native no · memory 9089024 bytes | observed current matcher only; local observation only |
-| dcg process adapter (unavailable) | dcg | n/a | n/a | n/a | n/a | none | dcg binary not found: dcg |
-| Git probe | git-probe | 0.00 ms | safe p50 40.93 ms · safe p95 41.84 ms · n 5 | error p50 0.44 ms · error p95 0.50 ms · n 5 | 36.00 ms | none | fresh repository and missing-path candidate |
-| Narrow shell analyzer | narrow | 1.00 ms | safe p50 0.06 ms · safe p95 0.13 ms · n 20 | error p50 0.06 ms · error p95 0.16 ms · n 20 | n/a | string-width · 11733 bytes · install no · native no · memory 7999488 bytes | bounded tokenizer/analyzer |
-| Tree-sitter native | native | 5.00 ms | safe p50 0.20 ms · safe p95 0.62 ms · n 20 | error p50 0.21 ms · error p95 0.48 ms · n 20 | n/a | tree-sitter · 4454536 bytes · install yes · native yes · memory 3645440 bytes; tree-sitter-bash · 20282555 bytes · install yes · native yes · memory 3694592 bytes | tree-sitter native binding candidate; available |
-| Tree-sitter WASM | wasm | 28.00 ms | safe p50 0.17 ms · safe p95 0.50 ms · n 20 | error p50 0.26 ms · error p95 0.52 ms · n 20 | n/a | web-tree-sitter · 4683395 bytes · install no · native no · memory 2572288 bytes; tree-sitter-bash · 20282555 bytes · install yes · native yes · memory 3448832 bytes | web-tree-sitter parser candidate; available |
+- `tree-sitter-bash` contributes the 20,282,555-byte grammar cost; the package smoke only proves the branch can load candidate packages, not that the dependency is cheap enough for production.
+- Candidate package smoke succeeded for the narrow, native, and WASM prototypes, but offline Pi startup timed out, so runtime auth behavior remains unproven.
+- The isolated BashGuard tarball installed with `npm install --omit=dev`, but the Pi smoke reported missing recorder-startup evidence.
+- Current matcher latency is effectively negligible on safe fixtures, while native/WASM Tree-sitter add small but real init and analysis overhead.
+- `dcg` was not available locally, so no local runtime or install smoke could justify shipping it as a production dependency.
 
-## Package smoke matrix
+## Benchmark summary
 
-### Disposable candidate packages
-
-| Candidate | Runtime deps | pack / extract / install | import-init | Notes |
+| Adapter | Init | Safe p50 / p95 | Error p50 / p95 | Notes |
 |---|---|---|---|---|
-| `bashguard-narrow-candidate` | `string-width`, `strip-ansi` | succeeded | loaded | memory delta `8904704` bytes |
-| `bashguard-native-candidate` | `tree-sitter`, `tree-sitter-bash` | succeeded | loaded | memory delta `6643712` bytes |
-| `bashguard-wasm-candidate` | `web-tree-sitter`, `tree-sitter-bash` | succeeded | loaded | memory delta `3518464` bytes |
+| Current matcher baseline | 292 ms | 0.02 ms / 0.13 ms | 0.01 ms / 0.04 ms | Observed current matcher only. |
+| Narrow shell analyzer | 1 ms | 0.07 ms / 0.13 ms | 0.06 ms / 0.17 ms | Fast, but still intentionally incomplete. |
+| Tree-sitter native | 5 ms | 0.20 ms / 1.08 ms | 0.21 ms / 0.51 ms | Available, but not corpus-dominant. |
+| Tree-sitter WASM | 23 ms | 0.17 ms / 0.40 ms | 0.21 ms / 0.51 ms | Available, but not corpus-dominant. |
+| Git probe | 0 ms | 27.85 ms / 30.48 ms | 0.46 ms / 0.49 ms | Read-only probe only, after a structural match. |
+| `dcg` process adapter | n/a | n/a | n/a | Binary not found: `dcg`. |
 
-### BashGuard package
+## Decision
 
-- `npm pack` succeeded; unpacked size `1.5 MB`
-- `npm install --omit=dev` on the extracted package succeeded in an isolated temp root
-- offline `pi --mode json --offline --no-extensions --no-skills --no-context-files --no-tools -e <tmp-path> -p smoke` timed out; runtime auth behavior remains unproven
-- recorder startup evidence was missing in isolated `BASHGUARD_DATA_DIR`
-- isolated registration/config evidence was observed in the temporary config root
-- no writes to the sentinel snapshot were observed
+No production adoption yet.
 
-## Commands
+Keep the current matcher baseline in production.
 
-- `git --version` → exit `0` · `16 ms`
-- `git init` → exit `0` · `37 ms`
-- `git status --porcelain=v1` → exit `0` · `36 ms`
-- `npm --version` → exit `0` · `242 ms`
-- `npm install --omit=dev` → exit `0` · `2242 ms`
-- `npm pack` → exit `0` · `817 ms`
-- `pi --mode json --offline --no-extensions --no-skills --no-context-files --no-tools -e <tmp-path> -p smoke` → timed out · `45018 ms`
-- `tar -xzf <home-path> -C <tmp-path>` → exit `0` · `83 ms`
+Do not make Tree-sitter native, Tree-sitter WASM, the narrow analyzer, or `dcg` a runtime dependency on the strength of the current evidence.
 
-## Conclusions
+## Restart point
 
-- Native Tree-sitter and WASM Tree-sitter both loaded in disposable packages on this host.
-- The narrow analyzer loaded as a pure-JS package.
-- `dcg` was unavailable locally, so the benchmark row is `n/a` rather than a near-zero claim.
-- The BashGuard tarball installed in isolation, but offline Pi startup timed out, so runtime auth behavior remains unproven.
-- Recorder startup evidence was missing in this smoke, while isolated registration/config evidence was observed.
-- All paths in the committed report are sanitized.
+The Stage B restart point is [`docs/plans/2026-08-28-shell-aware-command-analysis-stage-b-implementation.md`](../plans/2026-08-28-shell-aware-command-analysis-stage-b-implementation.md).
+
+Issue #90 stays open. Issue #91 stays separate.

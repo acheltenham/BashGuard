@@ -1,7 +1,7 @@
 # BashGuard Roadmap
 
-**Status:** Draft v0.5; Phase 3 Slice 2 destructive Git approval implemented on this branch
-**Last updated:** August 22, 2026
+**Status:** Draft v0.5; Phase 3 Slice 2 destructive Git approval implemented on this branch; shell-analysis Stage A complete
+**Last updated:** August 31, 2026
 
 ## Current execution sequence
 
@@ -12,7 +12,7 @@ This section is the source of truth for near-term sequencing. The numbered produ
 3. **Complete — Resume Phase 1 with the split-pane event browser:** the approved opt-in snapshot `bashguard inspect --browse` design shipped under [issue #85](https://github.com/acheltenham/BashGuard/issues/85).
 4. **Complete — Phase 3 authorization Slice 1:** one-time approval for BashGuard-observed recursive forced-deletion Bash tool calls shipped under [issue #87](https://github.com/acheltenham/BashGuard/issues/87), with [real-Pi validation](../testing/recursive-delete-approval-validation.md).
 5. **Complete — Phase 3 authorization Slice 2:** the approved [destructive Git approval design](../plans/2026-08-22-destructive-git-approval-design.md) shipped on this branch under [issue #89](https://github.com/acheltenham/BashGuard/issues/89). The narrow checks are `git-reset-hard` and `git-clean-forced`, backed by a typed static registry that also migrates the Slice 1 rule and records all matches from one BashGuard-observed tool call.
-6. **Required follow-up research:** strengthen conservative matching and verified Git targeting under [issue #90](https://github.com/acheltenham/BashGuard/issues/90), and investigate a human-reviewed rule-provider/plugin model under [issue #91](https://github.com/acheltenham/BashGuard/issues/91). These limitations must not disappear when Slice 2 ships.
+6. **Complete — Shell-analysis Stage A:** the documented-vs-demonstrated matrix recommends no production adoption yet. Tree-sitter native/WASM did not beat the current matcher baseline, the narrow analyzer remains incomplete, `dcg` was unavailable locally, and offline Pi startup remains unproven. The restart point for any later work is [Stage B implementation](../plans/2026-08-28-shell-aware-command-analysis-stage-b-implementation.md). [Issue #90](https://github.com/acheltenham/BashGuard/issues/90) stays open and [issue #91](https://github.com/acheltenham/BashGuard/issues/91) stays separate.
 7. **Later — Backend integration:** implement the Anthropic sandbox runtime adapter and grounded session/debrief boundary evidence after reassessing the next explicit roadmap slice.
 
 When work pauses mid-slice, update the status here and the corresponding plan before starting a different slice. Completed items should remain visible until the next item has started, so the restart point is unambiguous.

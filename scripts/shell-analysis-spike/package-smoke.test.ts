@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { access, mkdtemp, mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import test from "node:test";
 
-import { formatPackageSmokeJson, formatPackageSmokeMarkdown, projectPackageManifest, projectPackageSmokeReport, type PackageSmokeReport } from "./package-smoke.ts";
+import { buildNpmPackInvocation, buildPiInstallInvocation, buildPiLoadInvocation, formatPackageSmokeJson, formatPackageSmokeMarkdown, projectPackageManifest, projectPackageSmokeReport, runPackageSmoke, type PackageSmokeReport } from "./package-smoke.ts";
 
 const report: PackageSmokeReport = {
   generatedAt: "2026-08-28T12:00:00.000Z",
@@ -54,7 +57,7 @@ const report: PackageSmokeReport = {
       timedOut: false,
       stdout: "registered package",
       stderr: "",
-      notes: ["dedicated cwd, PI_CODING_AGENT_DIR, and BASHGUARD_DATA_DIR were set", "registration/config evidence observed in isolated config root", "no writes to sentinel snapshot observed"],
+      notes: ["isolated cwd, PI_CODING_AGENT_DIR, and BASHGUARD_DATA_DIR were set for pi install", "registration/config evidence observed in isolated config root", "process success alone does not prove registration", "isolated roots were requested and sentinel files were observed; absence of all external reads is unproven"],
     },
     authBehavior: {
       status: "unproven",
@@ -95,7 +98,7 @@ const report: PackageSmokeReport = {
       stderr: "",
     },
   ],
-  notes: ["local observation only", "timestamp/load/durations are local observations, not guarantees"],
+  notes: ["local observation only", "timestamp/load/durations are local observations, not guarantees", "isolated roots were requested and sentinel files were observed; absence of all external reads is unproven"],
 };
 
 test("package smoke report projection stays sanitized and preserves blocked evidence", () => {
@@ -141,4 +144,47 @@ test("package smoke report ordering is deterministic", () => {
   const reversed = projectPackageSmokeReport({ ...report, candidatePackages: [...report.candidatePackages].reverse() });
   assert.equal(formatPackageSmokeMarkdown(projectPackageSmokeReport(report)), formatPackageSmokeMarkdown(reversed));
   assert.equal(formatPackageSmokeJson(projectPackageSmokeReport(report)), formatPackageSmokeJson(reversed));
+});
+
+test("package smoke command builders use isolated pack destinations and project-local install", () => {
+  assert.deepEqual(buildNpmPackInvocation("/tmp/repo", "/tmp/repo/pack"), {
+    command: "npm",
+    args: ["pack", "--pack-destination", "/tmp/repo/pack"],
+    cwd: "/tmp/repo",
+  });
+  assert.deepEqual(buildPiInstallInvocation("/tmp/project", "/tmp/project/package"), {
+    command: "pi",
+    args: ["install", "-l", "/tmp/project/package"],
+    cwd: "/tmp/project",
+  });
+  assert.deepEqual(buildPiLoadInvocation("/tmp/project", "/tmp/project/package"), {
+    command: "pi",
+    args: ["--mode", "json", "--offline", "--no-extensions", "--no-skills", "--no-context-files", "--no-tools", "-e", "/tmp/project/package", "-p", "smoke"],
+    cwd: "/tmp/project",
+  });
+});
+
+test("package smoke cleans up isolated roots when a command fails", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "bashguard-package-smoke-cleanup-"));
+  const created: string[] = [];
+  const commandLog: Array<{ readonly command: string; readonly args: readonly string[]; readonly cwd: string }> = [];
+  const createTemporaryRoot = async (prefix: string): Promise<string> => {
+    const root = join(parent, prefix);
+    await mkdir(root, { recursive: true });
+    created.push(root);
+    return root;
+  };
+  await assert.rejects(
+    runPackageSmoke({
+      createTemporaryRoot,
+      commandRunner: async (command, args, options) => {
+        commandLog.push({ command, args, cwd: options?.cwd ?? "" });
+        throw new Error("simulated failure");
+      },
+    }),
+  /simulated failure/);
+  assert.match(commandLog[0]?.args.join(" ") ?? "", /--pack-destination/);
+  for (const root of created) {
+    await assert.rejects(access(root));
+  }
 });

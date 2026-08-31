@@ -22,7 +22,9 @@ The committed Tree-sitter report shows 16/30 exact status/check/target matches f
 
 - `tree-sitter-bash` contributes the 20,282,555-byte grammar cost; the package smoke only proves the branch can load candidate packages, not that the dependency is cheap enough for production.
 - Candidate package smoke succeeded for the narrow, native, and WASM prototypes, but offline Pi startup timed out, so runtime auth behavior remains unproven.
-- The isolated BashGuard tarball installed with `npm install --omit=dev`, but the Pi smoke reported missing recorder-startup evidence.
+- The BashGuard package smoke now packs with `npm pack --pack-destination` into a temporary isolated root, then resolves and extracts there; it also executes a dedicated `pi install -l <package-root>` with isolated cwd, `PI_CODING_AGENT_DIR`, and `BASHGUARD_DATA_DIR`.
+- The smoke observed isolated roots and sentinel files, but it does not prove that every external read was absent.
+- The isolated BashGuard tarball is now packed into a temporary root before extraction; the package install still uses `npm install --omit=dev`, the dedicated `pi install -l <package-root>` step ran with isolated cwd/config/data roots, and startup evidence remained missing.
 - Current matcher latency is effectively negligible on safe fixtures, while native/WASM Tree-sitter add small but real init and analysis overhead.
 - `dcg` was not available locally, so no local runtime or install smoke could justify shipping it as a production dependency; the deterministic parser fixture exercises a recorded shape only and is not a real `dcg` execution.
 

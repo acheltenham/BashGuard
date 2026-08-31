@@ -1,6 +1,6 @@
 # Shell Command Analysis Landscape
 
-**Access date:** 2026-08-31  
+**Access date:** 2026-08-31
 **Scope:** primary-source comparison for BashGuard Stage A; no production authorization changes.
 
 ## Pinned `dcg` upstream
@@ -72,22 +72,22 @@ These numbers describe the visible skip path, not `dcg` execution latency.
 
 ### Claude Code
 
-Primary source: `https://docs.anthropic.com/en/docs/claude-code/hooks`  
+Primary source: `https://docs.anthropic.com/en/docs/claude-code/hooks`
 Accessed: 2026-08-31
 
 Use it here as a UX/protocol reference for pre-tool interception and approval segmentation. It is not a reusable implementation dependency.
 
 ### ShellCheck
 
-Primary source: `https://github.com/koalaman/shellcheck`  
+Primary source: `https://github.com/koalaman/shellcheck`
 Accessed: 2026-08-31
 
 Use it as an analysis reference: parser/AST-style shell checking, diagnostics, and fixture discipline. It is a linter/reference, not a BashGuard runtime dependency.
 
 ### Semgrep / Tree-sitter Bash
 
-Primary sources:  
-- `https://semgrep.dev/docs/writing-rules/pattern-syntax/`  
+Primary sources:
+- `https://semgrep.dev/docs/writing-rules/pattern-syntax/`
 - `https://github.com/tree-sitter/tree-sitter-bash`
 
 Accessed: 2026-08-31
@@ -96,7 +96,7 @@ Use them as structural-analysis references: syntax-first matching and tree-based
 
 ### OpenAI Codex
 
-Primary source: `https://developers.openai.com/codex/hooks`  
+Primary source: `https://developers.openai.com/codex/hooks`
 Accessed: 2026-08-31
 
 Use it as a hook/containment separation reference. The important lesson for BashGuard is that approval hooks are not containment, and hook failure behavior must remain explicit.

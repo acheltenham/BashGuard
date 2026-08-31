@@ -82,6 +82,8 @@ export interface PackageSmokeOptions {
   outputDir?: string;
   timeoutMs?: number;
   includeCommands?: boolean;
+  createTemporaryRoot?: (prefix: string) => Promise<string>;
+  commandRunner?: CommandRunner;
 }
 
 export interface PackageSmokeRunResult {
@@ -94,6 +96,14 @@ interface CommandResult {
   readonly stderr: string;
   readonly exitCode: number | null;
 }
+
+export interface PackageSmokeInvocation {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly cwd: string;
+}
+
+type CommandRunner = (command: string, args: readonly string[], options?: { readonly cwd?: string; readonly timeoutMs?: number; readonly env?: NodeJS.ProcessEnv }) => Promise<PackageSmokeCommandRecord>;
 
 function normalizeText(value: string): string {
   return value
@@ -199,12 +209,26 @@ async function writeCandidatePackage(root: string, name: string, runtimeDependen
   await writeFile(join(root, "index.mjs"), `${initBody}\n`, "utf8");
 }
 
-async function packPackage(root: string, timeoutMs: number): Promise<{ readonly tarball: string; readonly command: PackageSmokeCommandRecord }> {
-  const command = await runCommand("npm", ["pack"], { cwd: root, timeoutMs });
-  const tarball = await findTarball(root, command.stdout, command.stderr);
+export function buildNpmPackInvocation(cwd: string, packDestination: string): PackageSmokeInvocation {
+  return { command: "npm", args: ["pack", "--pack-destination", packDestination], cwd };
+}
+
+export function buildPiInstallInvocation(cwd: string, packageRoot: string): PackageSmokeInvocation {
+  return { command: "pi", args: ["install", "-l", packageRoot], cwd };
+}
+
+export function buildPiLoadInvocation(cwd: string, packageRoot: string): PackageSmokeInvocation {
+  return { command: "pi", args: ["--mode", "json", "--offline", "--no-extensions", "--no-skills", "--no-context-files", "--no-tools", "-e", packageRoot, "-p", "smoke"], cwd };
+}
+
+async function packPackage(root: string, packDestination: string, timeoutMs: number, runner: CommandRunner = runCommand): Promise<{ readonly tarball: string; readonly command: PackageSmokeCommandRecord }> {
+  await mkdir(packDestination, { recursive: true });
+  const invocation = buildNpmPackInvocation(root, packDestination);
+  const command = await runner(invocation.command, invocation.args, { cwd: invocation.cwd, timeoutMs });
+  const tarball = await findTarball(packDestination, command.stdout, command.stderr);
   if (!tarball) {
-    const files = await readdir(root);
-    throw new Error(`npm pack did not yield a tarball for ${root}; files=${files.join(",")}; stdout=${normalizeText(command.stdout)}; stderr=${normalizeText(command.stderr)}`);
+    const files = await readdir(packDestination);
+    throw new Error(`npm pack did not yield a tarball for ${packDestination}; files=${files.join(",")}; stdout=${normalizeText(command.stdout)}; stderr=${normalizeText(command.stderr)}`);
   }
   return { tarball, command };
 }
@@ -331,15 +355,16 @@ function candidateInitSource(kind: "native" | "wasm" | "narrow"): string {
   return `export async function init() {\n  const text = 'abc';\n  return { kind: 'narrow', length: text.length, upper: text.toUpperCase() };\n}`;
 }
 
-async function buildCandidate(root: string, kind: "native" | "wasm" | "narrow", timeoutMs: number): Promise<PackageSmokeCandidate> {
+async function buildCandidate(root: string, kind: "native" | "wasm" | "narrow", timeoutMs: number, runner: CommandRunner = runCommand): Promise<PackageSmokeCandidate> {
   const packageName = `bashguard-${kind}-candidate`;
   const dependencies = await packageDependenciesFor(kind);
   const candidateRoot = join(root, packageName);
   await writeCandidatePackage(candidateRoot, packageName, dependencies, candidateInitSource(kind));
 
-  const pack = await packPackage(candidateRoot, timeoutMs);
-  const tarballPath = join(candidateRoot, pack.tarball);
-  const extractDir = join(root, `${packageName}-extract`);
+  const packDestination = join(candidateRoot, "pack");
+  const pack = await packPackage(candidateRoot, packDestination, timeoutMs, runner);
+  const tarballPath = join(packDestination, pack.tarball);
+  const extractDir = join(candidateRoot, "extract");
   const extractCommand = await extractTarball(tarballPath, extractDir, timeoutMs);
   const packageRoot = await resolveExtractedPackageRoot(extractDir);
   const installCommand = await runCommand("npm", ["install", "--omit=dev"], { cwd: packageRoot, timeoutMs });
@@ -448,11 +473,12 @@ export function formatPackageSmokeJson(report: PackageSmokeReport): string {
   return `${JSON.stringify(projectPackageSmokeReport(report), null, 2)}\n`;
 }
 
-async function packBashGuardBranch(root: string, timeoutMs: number): Promise<{ readonly tarball: string; readonly packed: PackageSmokeCommandRecord }> {
-  const packed = await runCommand("npm", ["pack"], { cwd: root, timeoutMs });
-  const tarball = await findTarball(root, packed.stdout, packed.stderr);
+async function packBashGuardBranch(root: string, timeoutMs: number, packDestination: string, runner: CommandRunner = runCommand): Promise<{ readonly tarball: string; readonly packed: PackageSmokeCommandRecord }> {
+  await mkdir(packDestination, { recursive: true });
+  const packed = await runner("npm", ["pack", "--pack-destination", packDestination], { cwd: root, timeoutMs });
+  const tarball = await findTarball(packDestination, packed.stdout, packed.stderr);
   if (!tarball) {
-    const files = await readdir(root);
+    const files = await readdir(packDestination);
     throw new Error(`npm pack did not yield a tarball; files=${files.join(",")}; stdout=${normalizeText(packed.stdout)}; stderr=${normalizeText(packed.stderr)}`);
   }
   return { tarball, packed };
@@ -473,24 +499,39 @@ async function findTarball(root: string, stdout: string, stderr: string): Promis
   return stats.sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs)[0]?.entry;
 }
 
-async function inspectBashGuardPackage(root: string, timeoutMs: number, isolatedConfigDir: string, isolatedProjectDir: string, dataDir: string): Promise<BashGuardPackageSmokeSection & { readonly commands: PackageSmokeCommandRecord[]; readonly notes: string[] }> {
+async function inspectBashGuardPackage(root: string, timeoutMs: number, isolatedConfigDir: string, isolatedProjectDir: string, dataDir: string, runner: CommandRunner = runCommand): Promise<BashGuardPackageSmokeSection & { readonly commands: PackageSmokeCommandRecord[]; readonly notes: string[] }> {
   const projectSnapshot = await createSentinelSnapshot(isolatedProjectDir, "project");
   const configSnapshot = await createSentinelSnapshot(isolatedConfigDir, "config");
   const dataSnapshot = await createSentinelSnapshot(dataDir, "data");
   const configEntriesBefore = new Set(await readdir(isolatedConfigDir));
 
-  const pack = await packBashGuardBranch(root, timeoutMs);
+  const packDestination = join(isolatedProjectDir, "pack");
+  const pack = await packBashGuardBranch(root, timeoutMs, packDestination, runner);
   const commands: PackageSmokeCommandRecord[] = [pack.packed];
   const extractDir = join(isolatedProjectDir, "bashguard-extract");
-  const tarballPath = join(root, pack.tarball);
+  const tarballPath = join(packDestination, pack.tarball);
   const extracted = await extractPackage(tarballPath, extractDir, timeoutMs);
   commands.push(extracted);
   const packageRoot = await resolveExtractedPackageRoot(extractDir);
   const install = await runCommand("npm", ["install", "--omit=dev"], { cwd: packageRoot, timeoutMs });
   commands.push(install);
 
-  const piLoad = await runCommand("pi", ["--mode", "json", "--offline", "--no-extensions", "--no-skills", "--no-context-files", "--no-tools", "-e", packageRoot, "-p", "smoke"], {
-    cwd: isolatedProjectDir,
+  const piInstallInvocation = buildPiInstallInvocation(isolatedProjectDir, packageRoot);
+  const piInstall = await runner(piInstallInvocation.command, piInstallInvocation.args, {
+    cwd: piInstallInvocation.cwd,
+    timeoutMs,
+    env: {
+      ...process.env,
+      PI_OFFLINE: "1",
+      BASHGUARD_DATA_DIR: dataDir,
+      PI_CODING_AGENT_DIR: isolatedConfigDir,
+    },
+  });
+  commands.push(piInstall);
+
+  const piLoadInvocation = buildPiLoadInvocation(isolatedProjectDir, packageRoot);
+  const piLoad = await runner(piLoadInvocation.command, piLoadInvocation.args, {
+    cwd: piLoadInvocation.cwd,
     timeoutMs,
     env: {
       ...process.env,
@@ -531,17 +572,18 @@ async function inspectBashGuardPackage(root: string, timeoutMs: number, isolated
   const configEntriesAfter = await readdir(isolatedConfigDir);
   const registrationArtifactObserved = configEntriesAfter.some((entry) => !configEntriesBefore.has(entry) && entry !== basename(configSnapshot.path));
   const registrationConfig: PackageSmokeProcessEvidence = {
-    status: registrationArtifactObserved ? "observed" : "unproven",
-    evidence: registrationArtifactObserved ? "observed" : "unproven",
-    command: "pi install -l <package-root>",
-    exitCode: install.exitCode,
-    timedOut: Boolean(install.timedOut),
-    stdout: install.stdout,
-    stderr: install.stderr,
+    status: registrationArtifactObserved && piInstall.exitCode === 0 ? "observed" : piInstall.exitCode === 0 ? "unproven" : "blocked",
+    evidence: registrationArtifactObserved && piInstall.exitCode === 0 ? "observed" : piInstall.exitCode === 0 ? "unproven" : "blocked",
+    command: piInstall.command,
+    exitCode: piInstall.exitCode,
+    timedOut: Boolean(piInstall.timedOut),
+    stdout: piInstall.stdout,
+    stderr: piInstall.stderr,
     notes: [
-      "dedicated cwd, PI_CODING_AGENT_DIR, and BASHGUARD_DATA_DIR were set",
+      "isolated cwd, PI_CODING_AGENT_DIR, and BASHGUARD_DATA_DIR were set for pi install",
       registrationArtifactObserved ? "registration/config evidence observed in isolated config root" : "registration/config evidence not proven",
-      (await sentinelUnchanged(projectSnapshot)) && (await sentinelUnchanged(configSnapshot)) && (await sentinelUnchanged(dataSnapshot)) ? "no writes to sentinel snapshot observed" : "sentinel snapshot write observed or unverified",
+      piInstall.exitCode === 0 ? "process success alone does not prove registration" : "pi install exited nonzero; registration not proven",
+      (await sentinelUnchanged(projectSnapshot)) && (await sentinelUnchanged(configSnapshot)) && (await sentinelUnchanged(dataSnapshot)) ? "isolated roots were requested and sentinel files were observed; absence of all external reads is unproven" : "sentinel snapshot write observed or unverified",
     ],
   };
 
@@ -581,8 +623,8 @@ async function inspectBashGuardPackage(root: string, timeoutMs: number, isolated
     authBehavior,
     commands,
     notes: [
-      "dedicated cwd, PI_CODING_AGENT_DIR, and BASHGUARD_DATA_DIR were set",
-      (await sentinelUnchanged(projectSnapshot)) && (await sentinelUnchanged(configSnapshot)) && (await sentinelUnchanged(dataSnapshot)) ? "no writes to sentinel snapshot observed" : "sentinel snapshot write observed or unverified",
+      "isolated cwd, PI_CODING_AGENT_DIR, and BASHGUARD_DATA_DIR were set for the package smoke",
+      (await sentinelUnchanged(projectSnapshot)) && (await sentinelUnchanged(configSnapshot)) && (await sentinelUnchanged(dataSnapshot)) ? "isolated roots were requested and sentinel files were observed; absence of all external reads is unproven" : "sentinel snapshot write observed or unverified",
       startupArtifactObserved ? "BashGuard startup artifact observed in isolated data dir" : "BashGuard startup artifact not observed",
       install.exitCode === 0 ? "isolated npm install syntax was exercised" : "isolated npm install syntax was blocked",
     ],
@@ -599,17 +641,19 @@ async function mkdirTemporaryRoot(prefix: string): Promise<string> {
 
 export async function runPackageSmoke(options: PackageSmokeOptions = {}): Promise<PackageSmokeRunResult> {
   const timeoutMs = options.timeoutMs ?? 45_000;
-  const root = await mkdirTemporaryRoot("bashguard-package-smoke");
-  const projectDir = await mkdirTemporaryRoot("bashguard-package-smoke-project");
-  const configDir = await mkdirTemporaryRoot("bashguard-package-smoke-config");
-  const dataDir = await mkdirTemporaryRoot("bashguard-package-smoke-data");
+  const commandRunner = options.commandRunner ?? runCommand;
+  const createTemporaryRoot = options.createTemporaryRoot ?? mkdirTemporaryRoot;
+  const root = await createTemporaryRoot("bashguard-package-smoke");
+  const projectDir = await createTemporaryRoot("bashguard-package-smoke-project");
+  const configDir = await createTemporaryRoot("bashguard-package-smoke-config");
+  const dataDir = await createTemporaryRoot("bashguard-package-smoke-data");
   const commands: PackageSmokeCommandRecord[] = [];
   try {
-    const candidateNative = await buildCandidate(root, "native", timeoutMs);
-    const candidateWasm = await buildCandidate(root, "wasm", timeoutMs);
-    const candidateNarrow = await buildCandidate(root, "narrow", timeoutMs);
+    const candidateNative = await buildCandidate(root, "native", timeoutMs, commandRunner);
+    const candidateWasm = await buildCandidate(root, "wasm", timeoutMs, commandRunner);
+    const candidateNarrow = await buildCandidate(root, "narrow", timeoutMs, commandRunner);
 
-    const bashguardPackage = await inspectBashGuardPackage(REPO_ROOT, timeoutMs, configDir, projectDir, dataDir);
+    const bashguardPackage = await inspectBashGuardPackage(REPO_ROOT, timeoutMs, configDir, projectDir, dataDir, commandRunner);
     commands.push(...bashguardPackage.commands);
 
     const report: PackageSmokeReport = {
@@ -633,6 +677,7 @@ export async function runPackageSmoke(options: PackageSmokeOptions = {}): Promis
         "Local smoke only; failures are visible and not masked.",
         "Timestamp, load, and duration values are local observations rather than guarantees.",
         "No real user settings are touched; all roots are temporary.",
+        "Isolated roots were requested and sentinel files were observed; absence of all external reads is unproven.",
       ],
     };
 

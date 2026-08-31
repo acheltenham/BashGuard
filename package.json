@@ -35,6 +35,7 @@
     "research:shell-analysis:corpus": "node --experimental-strip-types --test scripts/shell-analysis-spike/model.test.ts scripts/shell-analysis-spike/corpus.test.ts",
     "research:shell-analysis:baseline": "node --experimental-strip-types --test scripts/shell-analysis-spike/adapters/current-matcher.test.ts scripts/shell-analysis-spike/evaluate.test.ts",
     "research:shell-analysis:tree-sitter": "node --experimental-strip-types scripts/shell-analysis-spike/tree-sitter-report.ts",
+    "research:shell-analysis:dcg": "node --experimental-strip-types --test scripts/shell-analysis-spike/dcg-fixture.test.ts scripts/shell-analysis-spike/adapters/dcg-process.test.ts",
     "research:shell-analysis:report": "node --experimental-strip-types scripts/shell-analysis-spike/report.ts"
   },
   "devDependencies": {

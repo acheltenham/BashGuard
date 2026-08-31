@@ -69,7 +69,7 @@ const pipelineShape = `printf 'pipeline-data\\n' | node ./runtime-fixture.mjs pi
 const prefixShape = `env BASHGUARD_SPIKE_PREFIX=prefix-value node ./runtime-fixture.mjs prefix-token prefix-label`;
 const directoryChangeShape = `cd ./nested && node ../runtime-fixture.mjs directory-token directory-label`;
 const harmlessRmShape = `rm -rf ./target && node ./runtime-fixture.mjs rm-token rm-label`;
-const protectedQuotedPositive = `echo 'git reset --hard'`;
+const protectedQuotedInert = `echo 'git reset --hard'`;
 const protectedReset = `git -C ./repo-a reset --hard HEAD~1`;
 const protectedClean = `git --git-dir=.git --work-tree=./repo-path clean -fd`;
 const protectedCleanDryRun = `git --git-dir=.git --work-tree=./repo-path clean -fdn`;
@@ -143,10 +143,10 @@ const corpus = validateShellAnalysisCorpus([
       ],
       wrappers: [],
       redirections: [],
-      unresolved: [unresolved("quoted-git-reset", "quoted-text", "'git reset --hard'", spanOf(commentPrintf, "'git reset --hard'"), "quoted text is inert data, not a command boundary")],
-      protectedChecks: [protectedCheck("git-reset-hard", "matched", "observed", "git reset --hard")],
+      unresolved: [],
+      protectedChecks: [protectedCheck("git-reset-hard", "not-matched", "observed", "git reset --hard")],
       diagnostics: [],
-      runtimeUnknowns: ["quoted and commented text is inert to the shell even when it looks risky"],
+      runtimeUnknowns: ["the current textual matcher still sees the inert quoted text and may conservatively require approval"],
     }),
   }),
   fixture({
@@ -165,7 +165,7 @@ const corpus = validateShellAnalysisCorpus([
       ],
       wrappers: [],
       redirections: [redirection("heredoc-redirection", "<<", "<<'EOF'", spanOf(heredocInertData, "<<'EOF'"), "EOF", spanOf(heredocInertData, "EOF"), spanOf(heredocInertData, "git clean -fdn"))],
-      unresolved: [unresolved("heredoc-body", "unknown", "git clean -fdn", spanOf(heredocInertData, "git clean -fdn"), "heredoc body is payload data, not executable command text")],
+      unresolved: [],
       protectedChecks: [protectedCheck("git-clean-forced", "not-matched", "observed", "git clean -fdn")],
       diagnostics: [],
       runtimeUnknowns: ["heredoc body is inert shell data"],
@@ -696,25 +696,25 @@ const corpus = validateShellAnalysisCorpus([
     }),
   }),
   fixture({
-    id: "sa-026-protected-quoted-positive",
-    title: "Quoted dangerous text still matches the current textual baseline",
+    id: "sa-026-protected-quoted-inert",
+    title: "Quoted dangerous text is inert to shell execution",
     family: "protected-check",
-    command: protectedQuotedPositive,
+    command: protectedQuotedInert,
     expected: expectation({
       status: "structured",
       evidenceLevel: "observed",
       subset: "supported",
       segments: [
-        commandSegment(protectedQuotedPositive),
-        tokenSegment(protectedQuotedPositive, "echo", "word", "echo"),
-        tokenSegment(protectedQuotedPositive, "quoted-rm", "quoted", "'git reset --hard'"),
+        commandSegment(protectedQuotedInert),
+        tokenSegment(protectedQuotedInert, "echo", "word", "echo"),
+        tokenSegment(protectedQuotedInert, "quoted-rm", "quoted", "'git reset --hard'"),
       ],
       wrappers: [],
       redirections: [],
-      unresolved: [unresolved("quoted-rm", "quoted-text", "'git reset --hard'", spanOf(protectedQuotedPositive, "'git reset --hard'"), "quoted text is inert to the shell but still visible to a text matcher")],
-      protectedChecks: [protectedCheck("git-reset-hard", "matched", "observed", "git reset --hard")],
+      unresolved: [],
+      protectedChecks: [protectedCheck("git-reset-hard", "not-matched", "observed", "git reset --hard")],
       diagnostics: [],
-      runtimeUnknowns: ["the quoted text is not executed, but the current matcher still sees it"],
+      runtimeUnknowns: ["the current textual matcher still sees the inert quoted text and may conservatively require approval"],
     }),
   }),
   fixture({

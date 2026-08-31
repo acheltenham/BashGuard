@@ -17,6 +17,19 @@ export const SEGMENT_KINDS = [
   "dynamic-sink",
   "unknown",
 ] as const;
+export const SEGMENT_ROLES = [
+  "executable",
+  "literal",
+  "operator",
+  "wrapper",
+  "assignment",
+  "redirect",
+  "group",
+  "subshell",
+  "inert",
+  "dynamic",
+  "unknown",
+] as const;
 export const SEGMENT_RELATIONS = [
   "contains",
   "precedes",
@@ -36,6 +49,7 @@ export const CORPUS_ID_PATTERN = /^sa-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export type AnalysisStatus = (typeof ANALYSIS_STATUSES)[number];
 export type EvidenceLevel = (typeof EVIDENCE_LEVELS)[number];
 export type SegmentKind = (typeof SEGMENT_KINDS)[number];
+export type SegmentRole = (typeof SEGMENT_ROLES)[number];
 export type SegmentRelation = (typeof SEGMENT_RELATIONS)[number];
 export type CorpusSubset = (typeof CORPUS_SUBSETS)[number];
 export type ProtectedCheckOutcome = (typeof PROTECTED_CHECK_OUTCOMES)[number];
@@ -54,6 +68,7 @@ export interface SegmentRelationLink {
 export interface CommandSegment {
   readonly id: string;
   readonly kind: SegmentKind;
+  readonly role: SegmentRole;
   readonly text: string;
   readonly span: SourceSpan;
   readonly relations: readonly SegmentRelationLink[];
@@ -181,14 +196,46 @@ export function relation(relation: SegmentRelation, targetId: string): SegmentRe
   return deepFreeze({ relation, targetId });
 }
 
+function inferRole(kind: SegmentKind): SegmentRole {
+  switch (kind) {
+    case "command":
+      return "executable";
+    case "word":
+    case "escaped":
+      return "literal";
+    case "operator":
+      return "operator";
+    case "assignment":
+      return "assignment";
+    case "wrapper":
+      return "wrapper";
+    case "redirect":
+      return "redirect";
+    case "group":
+      return "group";
+    case "subshell":
+      return "subshell";
+    case "quoted":
+    case "heredoc":
+    case "comment":
+      return "inert";
+    case "substitution":
+    case "dynamic-sink":
+      return "dynamic";
+    default:
+      return "unknown";
+  }
+}
+
 export function segment(
   id: string,
   kind: SegmentKind,
   text: string,
   spanValue: SourceSpan,
   relations: readonly SegmentRelationLink[] = [],
+  role: SegmentRole = inferRole(kind),
 ): CommandSegment {
-  return deepFreeze({ id, kind, text, span: spanValue, relations: [...relations] });
+  return deepFreeze({ id, kind, role, text, span: spanValue, relations: [...relations] });
 }
 
 export function wrapper(

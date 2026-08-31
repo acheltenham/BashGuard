@@ -98,16 +98,16 @@ function compareStructuralFacts(expected: CommandAnalysisExpectation, actual: Ad
 
 function compareChecks(expected: CommandAnalysisExpectation, actual: AdapterAnalysis, capabilities: AdapterCapabilities): ComparisonState {
   if (!capabilities.checks) return "not-applicable";
-  const expectedMatched = expected.protectedChecks.filter((check) => check.outcome === "matched").map((check) => check.checkId).sort();
-  const expectedNotMatched = expected.protectedChecks.filter((check) => check.outcome === "not-matched").map((check) => check.checkId).sort();
-  const expectedUnknown = expected.protectedChecks.filter((check) => check.outcome === "unknown").map((check) => check.checkId).sort();
-  const actualMatched = actual.protectedChecks.filter((check) => check.outcome === "matched").map((check) => check.checkId).sort();
-  const actualNotMatched = actual.protectedChecks.filter((check) => check.outcome === "not-matched").map((check) => check.checkId).sort();
-  const actualUnknown = actual.protectedChecks.filter((check) => check.outcome === "unknown").map((check) => check.checkId).sort();
+  const actualById = new Map(actual.protectedChecks.map((check) => [check.checkId, check.outcome]));
+  const documentedIds = new Set<string>(expected.protectedChecks.map((check) => check.checkId));
 
-  if (expectedMatched.join(",") !== actualMatched.join(",")) return "mismatched";
-  if (expectedNotMatched.join(",") !== actualNotMatched.join(",")) return "mismatched";
-  if (expectedUnknown.join(",") !== actualUnknown.join(",")) return "mismatched";
+  for (const check of expected.protectedChecks) {
+    const actualOutcome = actualById.get(check.checkId);
+    if (check.outcome === "matched" && actualOutcome !== "matched") return "mismatched";
+    if (check.outcome === "not-matched" && actualOutcome === "matched") return "mismatched";
+    if (check.outcome === "unknown" && actualOutcome !== "unknown") return "mismatched";
+  }
+  if (actual.protectedChecks.some((check) => check.outcome === "matched" && !documentedIds.has(check.checkId))) return "mismatched";
   return "matched";
 }
 

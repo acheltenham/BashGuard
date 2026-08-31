@@ -60,6 +60,15 @@ test("every fixture declares structural facts, protected checks, literal git tar
   }
 });
 
+test("quoted and heredoc command-like payloads are documented as inert no-matches", () => {
+  for (const fixtureId of ["sa-003-comments-printf", "sa-004-heredoc-inert-data", "sa-026-protected-quoted-inert"]) {
+    const fixture = corpus.find((entry) => entry.id === fixtureId);
+    assert.ok(fixture, fixtureId);
+    assert.equal(fixture.expected.protectedChecks.length, 1, fixtureId);
+    assert.equal(fixture.expected.protectedChecks[0]?.outcome, "not-matched", fixtureId);
+  }
+});
+
 test("corpus avoids private host paths and destructive real targets", () => {
   const text = JSON.stringify(corpus);
   assert.doesNotMatch(text, /\/Users\//);

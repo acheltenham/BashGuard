@@ -64,6 +64,8 @@ test("generic evaluator records pass, mismatch, error, and timeout outcomes", as
   assert.ok(evaluation.summary.pass > 0);
   assert.ok(evaluation.summary.mismatch >= 0);
   assert.equal(evaluation.fixtures.length, corpus.length);
+  const inertQuoted = evaluation.fixtures.find((fixture) => fixture.fixtureId === "sa-026-protected-quoted-inert");
+  assert.equal(inertQuoted?.comparison.checks, "mismatched");
 
   const errorAdapter: AnalysisAdapter = {
     id: "error-adapter",

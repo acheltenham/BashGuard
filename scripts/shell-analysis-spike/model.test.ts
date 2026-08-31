@@ -10,6 +10,7 @@ import {
   PROTECTED_CHECK_OUTCOMES,
   SEGMENT_KINDS,
   SEGMENT_RELATIONS,
+  SEGMENT_ROLES,
   fixture,
   expectation,
   protectedCheck,
@@ -25,6 +26,7 @@ test("analysis model exposes the required immutable enum sets", () => {
   assert.deepEqual(PROTECTED_CHECK_OUTCOMES, ["matched", "not-matched", "unknown"]);
   assert.deepEqual(DIAGNOSTIC_SEVERITIES, ["info", "warning", "error"]);
   assert.ok(SEGMENT_KINDS.includes("wrapper"));
+  assert.ok(SEGMENT_ROLES.includes("inert"));
   assert.ok(SEGMENT_RELATIONS.includes("wraps"));
   assert.ok(CORPUS_ID_PATTERN.test("sa-001-example-fixture"));
 });
@@ -54,6 +56,8 @@ test("spans and expectations remain immutable and structurally explicit", () => 
 
   assert.equal(corpusFixture.expected.segments[0]?.span.start, 0);
   assert.equal(corpusFixture.expected.segments[0]?.span.end, 11);
+  assert.equal(corpusFixture.expected.segments[0]?.role, "executable");
+  assert.equal(segment("word", "word", "hello", commandSpan).role, "literal");
   assert.equal(Object.isFrozen(corpusFixture), true);
   assert.equal(Object.isFrozen(corpusFixture.expected), true);
   assert.equal(Object.isFrozen(corpusFixture.expected.segments[0]!), true);

@@ -12,7 +12,7 @@ Use this checklist before tagging a BashGuard release.
 Current target:
 
 ```text
-v0.4.0
+v0.5.0
 ```
 
 ## 2. Run automated verification
@@ -159,8 +159,8 @@ After release-readiness changes are merged to `main` and verification passes:
 ```bash
 git checkout main
 git pull --ff-only
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 ## 7. Verify tagged install
@@ -168,8 +168,8 @@ git push origin v0.4.0
 After pushing the tag:
 
 ```bash
-pi -e git:github.com/acheltenham/BashGuard@v0.4.0
-pi install git:github.com/acheltenham/BashGuard@v0.4.0
+pi -e git:github.com/acheltenham/BashGuard@v0.5.0
+pi install git:github.com/acheltenham/BashGuard@v0.5.0
 ```
 
 Then run:

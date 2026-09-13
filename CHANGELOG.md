@@ -4,6 +4,8 @@ All notable project changes will be recorded here.
 
 ## Unreleased
 
+## 0.5.0 - 2026-09-13
+
 ### Changed
 
 - Completed Command Resolution Spike 2 with a reproducible real-Pi harness and an eleven-scenario OpenAI-backed evidence matrix. The spike proved that BashGuard records the mutable command visible when its `tool_call` handler runs, while earlier/later handlers, replacement-tool internals, and shell runtime can produce different command layers. No user-facing resolved-command event or guard behavior was added.
